@@ -38,6 +38,7 @@ import {
   appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowRunArgs, type AmberFlowService,
 } from './service.ts'
+import { ELEMENT_DEFAULT_MAX, ELEMENT_MAX } from './element-view.ts'
 import {
   RUN_BRIDGE_MESSAGES, RUN_TOOL_FIELDS, RUN_TOOL_PARAMETERS,
 } from './run-contract.generated.ts'
@@ -828,7 +829,10 @@ export function apply(ctx: Context, config: Config): void {
         + '`*_session` for repeated in-page steps. No clicks, typing or model calls; http(s) URLs only.',
     parameters: {
       url: { type: 'string', required: true, description: 'http(s) page to observe; the bridge rejects checkout-relative paths.' },
-      max_elements: { type: 'integer', description: 'Maximum element rows to return (default 60, max 200).' },
+      max_elements: {
+        type: 'integer',
+        description: `Maximum element rows to return (default ${ELEMENT_DEFAULT_MAX}, max ${ELEMENT_MAX}).`,
+      },
       include_text: { type: 'boolean', description: 'Include a bounded body-text excerpt.' },
       headful: { type: 'boolean', description: 'Show a browser window on the engine host.' },
       probes: {
@@ -1435,7 +1439,7 @@ function renderSessionResult(value: Record<string, unknown>): string {
         // 元素序随水合/动画变化，收窄用 selector，全量用 snapshot）。
         + (more > 0
           ? `\n… +${more} more (${String(total)} total${omitted === undefined ? '' : `, ${String(omitted)} omitted`})`
-            + '\nnext: selector="<css>" 收窄 · max=<n≤200> 放宽 · snapshot → pool-<n>.json（全量元素）'
+            + `\nnext: selector="<css>" 收窄 · max=<n≤${ELEMENT_MAX}> 放宽 · snapshot → pool-<n>.json（全量元素）`
           : '')
     }
     case 'act':

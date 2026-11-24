@@ -4,6 +4,38 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-24 剩余项批（键漂移加固 + 会话契约阶段 2 + 规则词面归一）
+
+> 用户「推送后继续完成剩余项」：三批并行落地（task-31 / task-45 / task-30 第 1 项）。
+> 硬约束不变（不改外部行为与公开契约、不引入新依赖、原测试全过）。**未提交 git。**
+
+- **task-31 needs_value 键漂移加固**：新增稳定身份 `valueTargetIdOf`（tag+name，无 name 退 tag+id，
+  两者皆空 fail-closed 不回放）、`countValueTargetId`（池内唯一才回放）、`valueAliasKeyOf`（name/id
+  与值袋键**精确相等**才命中，避免子串误绑）、唯一裁决点 `bindValueFor`（①键命中/别名 → ready；
+  ②漂移回放：上一轮 needs_value 的 targetId 与本轮控件相同 + 池内唯一 + 值袋确有记录值 → 回放并记
+  `value_target_drift:{from,to}`；③落空 needs_value，`stale` 只在身份明确不同时给出）。
+  `pilot-runtime` 用 `lastValueNeed`（导航换页即清）支撑「值已落地后下一轮换键」回放；
+  `valueSigOf`（含 label、跨轮不稳）降级为停驶现场证据签名，不再承担回放。
+  **verify:pilot 21→23 场景**（含 label 丢失后裸字符串值仍落地 + 纯函数断言）；
+  真站 Maps 复核：label 丢失（受控复现）后 `resume{hint}` 不带值仍回放落地，只执行 1 次 fill。
+- **task-45 会话契约阶段 2（cap 单源化，值=现值）**：`session-contract.ts` 增三张表
+  （handoff 三层 `SESSION_HANDOFF_CAP_TABLE`、五块证据 `SESSION_EVIDENCE_CAP_TABLE`、
+  ElementView 15 项 `SESSION_ELEMENT_VIEW_LIMITS`）；生成器 `--check` 覆盖两份生成物并做三组交叉校验
+  （含用 `projectHandoff` 实测超限行为反算引擎列）；桥 `element-view.ts`/`session.ts`/`index.ts`
+  数值字面量改读生成常量。**逐字节等价证据**：10 工具 schema（45,282B）、session 请求线（24,553B）、
+  rich 超限压测（119,320B）pre/post sha 全等；负向注入 4/4 判红。
+  注：`ambiguity.frame_origin` 引擎 120 / 桥 60 保持现状（两列钉死，对齐需单批声明）；
+  `HINTS_PER_ELEMENT=6` 保留为兼容 cap（引擎实际最多 4）。
+- **task-30(1) 规则词面归一（机制修复，非词表）**：新增 `src/engine/rule-vocab.ts` 为切词唯一出处
+  （`ASCII2/ASCII4/CJK1/CJK2/words` 从 rules 抽到一处），`affordanceRule` 增「逐词点名」补集判定
+  `namedPhraseOverrides`：多词 label 每个词都被 goal 原词表点名、且都被通用词集剔除 ⇒ 字面点名成立，
+  推翻「部分命中」的撞词候选。**不加任何新词、不改 STOP/ROLE/FILLER 三表、引擎层零站点/业务词**
+  （grep 与 lane 口径断言双重守护）；四道 fail-closed 边界（无撞词不介入/完全点名不重排/纯 CJK 不认/
+  多命中 decline）。新 lane `verify:rule-vocab`（20 行断言 + 3 组口径断言：正向 4、明确内容词反例 3、
+  无关场景反例 2、纯通用按钮反例 4、无新词面 3、契约 4），`verify:lanes` 17→18。
+  金标 A/B：characterization 12/12、parity、run-parity 16/16 **均无重录**。
+  **未做**：actOnce `state_delta`/`control_changes`（保留为后续独立批）。
+
 ## [Unreleased] — 2026-11-24 批次 P1：桥决策端点原值透传（行为变更）
 
 > 承接同日 EP parity lane 登记的 18 条差异白名单（2 族）；本批把桥侧的第二份归一化删掉，

@@ -145,3 +145,131 @@ export const SESSION_TIMEOUTS = {
   waitMaxMs: 120_000,
   waitDefaultMs: 15_000,
 } as const;
+
+/* ------------------------------------------------------ handoff 投影 cap（三层） */
+
+/**
+ * 交接块（`PilotHandoff`）经 producer → 引擎 → 桥三层投影后的**字段 × 上限**表。
+ *
+ * 行 = 交接块字段路径（`[]` = 逐条上限，无 `[]` = 该字段自身；`exposed` = 桥面字段名，
+ * `null` = 该字段在桥面整体丢弃）。三列 = 各层对**同一字段**的界：`producer` = pilot
+ * 生成时的界，`engine` = 会话响应投影的界，`bridge` = 桥面再投影的界；`null` = 该层不设
+ * 界（原样透传或值域天然有界）。字符类与条数类混在同一列，行注释标明单位——
+ * 它们都是「同一字段在不同面的上限」，这才是本表要冻结的事实。
+ *
+ * 逐列出处：引擎列 = `src/app/session-driver.ts` 的 `projectHandoff`/事件投影；桥列 =
+ * `BRIDGE_HANDOFF_CAPS` 生成物（消费侧在桥 `session.ts` 的 `driveHandoff`）；
+ * `why_stuck.evidence` 只存在于引擎响应（桥面整体丢弃，故 `exposed:null`）——桥不是超集。
+ *
+ * 改一个值 = 改本表 + `tools/session-contract-gen.ts --write`；生成器会拿引擎投影的
+ * 实测行为交叉校验引擎列（见 `tools/session-contract-gen.ts` 的 `checkHandoffCaps`）。
+ */
+export const SESSION_HANDOFF_CAP_TABLE = [
+  // 停因闭集字段：值域有界（`PILOT_STOP_CODES` / 步号），三层都不裁剪。
+  { field: "step_id", exposed: "step_id", producer: null, engine: null, bridge: null, note: "步号（整数，值域有界）" },
+  { field: "stop_code", exposed: "stop_code", producer: null, engine: null, bridge: null, note: "停因闭集（`PILOT_STOP_CODES`，不裁剪）" },
+  // 字符界：goal_digest 200 → 200 → 300。
+  { field: "goal_digest", exposed: "goal_digest", bridgeKey: "goalDigestMaxChars", producer: 200, engine: 200, bridge: 300, note: "总目标摘要（字符）" },
+  { field: "why_stuck.summary", exposed: "summary", bridgeKey: "summaryMaxChars", producer: null, engine: 400, bridge: 300, note: "卡住原因摘要（字符；producer 由值域拼装）" },
+  // 交接证据块：900 是**整块 JSON** 的界（超限退化为键名清单 ≤8）。
+  { field: "why_stuck.evidence", exposed: null, producer: null, engine: 900, bridge: null, note: "现场证据块（整块 JSON 字符；桥面丢弃）" },
+  { field: "why_stuck.evidence.keys", exposed: null, producer: null, engine: 8, bridge: null, note: "证据超限时的键名清单条数（桥面丢弃）" },
+  // 解锁建议：条数 3（producer 闭集生成）→ 3 → 3；每条字符 null → 400 → 200。
+  { field: "what_would_unblock", exposed: "what_would_unblock", bridgeKey: "unblockMaxItems", producer: 3, engine: 3, bridge: 3, note: "解锁建议条数（3 = 闭集生成上限）" },
+  { field: "what_would_unblock[]", exposed: "what_would_unblock", bridgeKey: "unblockItemMaxChars", producer: null, engine: 400, bridge: 200, note: "单条解锁建议（字符）" },
+  // 现场证据引用：四件套各自独立；桥面原样透传（不裁剪）。
+  { field: "evidence_refs[]", exposed: "evidence_refs", producer: null, engine: 400, bridge: null, note: "单条落盘路径（字符；桥面不裁剪）" },
+  { field: "url", exposed: "url", bridgeKey: "urlMaxChars", producer: null, engine: 200, bridge: 300, note: "停驶页 URL（字符）" },
+  { field: "final_signal", exposed: "final_signal", bridgeKey: "finalSignalMaxChars", producer: 200, engine: 400, bridge: 200, note: "结束态声明摘要（字符；`null` 原样透传）" },
+  { field: "weak_picks", exposed: "weak_picks", bridgeKey: "weakPicksMax", producer: 6, engine: 6, bridge: 6, note: "低置信票条数" },
+  { field: "weak_picks[].target", exposed: "weak_picks", bridgeKey: "weakPickTargetMaxChars", producer: 40, engine: 120, bridge: 120, note: "票面目标文本（字符）" },
+  { field: "weak_picks[].picked_by", exposed: "weak_picks", bridgeKey: "weakPickPickedByMaxChars", producer: null, engine: null, bridge: 20, note: "票来源（闭集 `rule|model`，桥面只做有界化）" },
+] as const;
+
+/**
+ * 会话响应**证据块**的白名单与 cap（桥面 `session.ts` 的五个投影：滚动 / 范围 / 歧义
+ * 诊断 / 落空判别 / 宽扫）。每块的 `fields` 是白名单（引擎给了才出现，桥不补键），
+ * 数值项是各块字段的上限。
+ *
+ * `frame_origin` 的引擎界（120）与本批的桥界（60）**有意不同**：桥对候选帧 origin 只做
+ * 短标识，对齐引擎界属可见变化，需单独成批。
+ */
+export const SESSION_EVIDENCE_CAP_TABLE = {
+  scroll: {
+    bridgeKey: "scroll",
+    fields: ["moved", "delta", "scroll"],
+    note: "滚动实测读数（三件套全在才出现；像素取整非负，无字符界）",
+  },
+  range: {
+    bridgeKey: "range",
+    fields: ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "probe"],
+    strategies: ["fill", "keyboard", "pointer"],
+    probes: ["value_unreadable", "home_ignored", "lattice_unreachable"],
+    note: "范围控件实测（strategy/probe 是引擎闭集；数值字段无字符界）",
+  },
+  ambiguity: {
+    bridgeKey: "ambiguity",
+    fields: ["ambiguous", "matched_others", "hint_kind", "hint_tier", "hint_suspicious"],
+    matchedOthersMax: 3,
+    labelMaxChars: 40,
+    /** 候选 `frame_origin`：引擎上界 120，桥面带 60（有意更窄，对齐引擎属可见变化）。 */
+    frameOriginMaxChars: 60,
+    frameOriginEngineMaxChars: 120,
+    note: "act 当场歧义旁路（撞词候选 ≤3 行、label ≤40；frame_origin 两层界不同，见字段注释）",
+  },
+  miss: {
+    bridgeKey: "miss",
+    fields: ["target", "pool_size", "hint_shape", "hint_len", "settle_timed_out", "settle_waited_ms",
+      "rescan", "candidates", "near", "rejected"],
+    candidatesMax: 3,
+    nearMax: 3,
+    rejectedMax: 2,
+    refMaxChars: 16,
+    tagMaxChars: 16,
+    labelMaxChars: 40,
+    whyMaxChars: 40,
+    hintShapeMaxChars: 32,
+    note: "落空判别证据（候选/near/rejected 三组各自限行）",
+  },
+  wide: {
+    bridgeKey: "wide",
+    fields: ["candidates", "window", "pool_size"],
+    candidatesMax: 40,
+    tagMaxChars: 16,
+    labelMaxChars: 40,
+    hintMaxChars: 200,
+    note: "宽扫回传（带自证 hint 的行优先、组内保持引擎序）",
+  },
+} as const;
+
+/* ------------------------------------------------------ ElementView 合同常量 */
+
+/**
+ * 桥面 ElementView 行合同的全部上限（唯一出处）。生成器把这些值投影成
+ * `integrations/dsh-bridge/src/element-view.constants.generated.ts`（check in）。
+ *
+ * `note` 是生成物里的 JSDoc：写契约事实（与哪一层的口径同界），不是变更记录。
+ * 引擎侧同界由生成器逐项交叉校验（`elementMax` ↔ `observe` 硬上限、`labelMaxChars` ↔
+ * `elem-model` 的 full_label、`hintMaxChars` ↔ `ambiguity` 的 hint 界、类名/结构/行上下文
+ * ↔ 池抽取 JS 的内嵌常量）。
+ *
+ * `hintsPerElement` 是**兼容性 cap**：引擎 `suggestHints` 实际最多给 4 条，桥按 6 收集
+ * （多出的两条永不会出现）；保留 6 是为了不改变既有输出形状，引擎侧上限才是真界。
+ */
+export const SESSION_ELEMENT_VIEW_LIMITS = {
+  elementDefaultMax: { value: 60, note: "元素行数缺省（inspect/observe 两面一致；CLI inspect 缺省同为 60）" },
+  elementMax: { value: 200, note: "元素行数硬上限（引擎 observe 硬上限同界）" },
+  hintsPerElement: { value: 6, note: "每元素 hint_candidates 收集上限（兼容性 cap，引擎实际最多 4 条）" },
+  hintMaxChars: { value: 200, note: "单条 hint 字符串上限（与引擎歧义证据 hint 界同口径）" },
+  labelMaxChars: { value: 200, note: "label 上限（与引擎 full_label 口径同界）" },
+  hrefMaxChars: { value: 160, note: "href 展示投影上限（桥侧独立界）" },
+  whyNotAdmittedMaxChars: { value: 400, note: "why_not_admitted 诊断文本上限（词边界截断，寻址 token 不切中）" },
+  classNamesPerElement: { value: 8, note: "class_names 条数上限（与引擎池抽取的 8 个同界）" },
+  classNameMaxChars: { value: 40, note: "单个 class 名上限（与引擎池抽取的 40 字符同界）" },
+  identityMaxChars: { value: 60, note: "role/id/name 等短标识上限（桥侧独立界）" },
+  framePathMaxItems: { value: 4, note: "frame_path 条数上限（与 hint 的 ≤4 段帧链声明同口径）" },
+  framePathSegmentMaxChars: { value: 64, note: "单段帧 origin 上限（桥侧有界化，规范 origin 通常远小于此）" },
+  structurePathMaxChars: { value: 160, note: "structure_path 上限（结构证据不是 hint，与 hint 的界分开）" },
+  rowTextsMaxLines: { value: 6, note: "row_texts 行数上限（与引擎行上文的 ≤6 行同界）" },
+  rowTextsLineMaxChars: { value: 40, note: "row_texts 单行上限（与引擎的 ≤40 字符行过滤同界）" },
+} as const;

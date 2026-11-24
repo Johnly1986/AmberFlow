@@ -28,41 +28,65 @@
 
 /* ------------------------------------------------------------ 合同常量（唯一出处） */
 
+// 值单源在仓库 src/support/session-contract.ts 的 SESSION_ELEMENT_VIEW_LIMITS；桥包自带
+// tsconfig 不能 import 仓库 src，故从这里读确定性投影（element-view.constants.generated.ts
+// 由 tools/session-contract-gen.ts 生成，--check 判过期）。导出名保持不变：调用方只认这份。
+import {
+  classNamesPerElement,
+  classNameMaxChars,
+  elementDefaultMax,
+  elementMax,
+  framePathMaxItems,
+  framePathSegmentMaxChars,
+  hintMaxChars,
+  hintsPerElement,
+  hrefMaxChars,
+  identityMaxChars,
+  labelMaxChars,
+  rowTextsLineMaxChars,
+  rowTextsMaxLines,
+  structurePathMaxChars,
+  whyNotAdmittedMaxChars,
+} from './element-view.constants.generated.ts'
+
 /** 元素行数缺省（两面一致；`amber inspect` 的 CLI 缺省同为 60）。 */
-export const ELEMENT_DEFAULT_MAX = 60
+export const ELEMENT_DEFAULT_MAX = elementDefaultMax
 /** 元素行数硬上限（两面一致；引擎 ctx.observe 硬上限同为 200）。 */
-export const ELEMENT_MAX = 200
-/** 每元素 hint_candidates 条数上限。 */
-export const HINTS_PER_ELEMENT = 6
-/** 单条 hint 字符串上限（B 批 R2-6：160 → 200，与引擎 AMBIGUITY_HINT_MAX 同口径；
- *  `suggestHints` 的 `<label> frame:<origin链>` 候选最长可达 4 段 origin 链）。 */
-export const HINT_MAX_CHARS = 200
+export const ELEMENT_MAX = elementMax
+/**
+ * 每元素 hint_candidates 收集上限。**兼容性 cap**：引擎 `suggestHints` 实际最多给 4 条，
+ * 这里按 6 收集（多出的两条永不会出现）；保留 6 不改变既有输出形状，引擎侧上限才是真界。
+ */
+export const HINTS_PER_ELEMENT = hintsPerElement
+/** 单条 hint 字符串上限（与引擎 AMBIGUITY_HINT_MAX 同口径；`<label> frame:<origin链>`
+ *  候选最长可达 4 段 origin 链）。 */
+export const HINT_MAX_CHARS = hintMaxChars
 /** label 上限（与引擎匹配口径 full_label 的 200 字一致；超出置 label_truncated）。 */
-export const LABEL_MAX_CHARS = 200
+export const LABEL_MAX_CHARS = labelMaxChars
 /** href 展示投影上限。 */
-export const HREF_MAX_CHARS = 160
+export const HREF_MAX_CHARS = hrefMaxChars
 /**
  * why_not_admitted 诊断文本上限（词边界截断，见 `clipWhyNotAdmitted`）：断点落在空白/标点处，
  * 寻址 token（`#id` / `[data-test=…]` / `[name=…]` / `role=…`）不从中间切断——token 自身
  * 越过上限时保 token 完整、截其余叙述（唯一可超本上限的情形，字段仍 ≤ 引擎原文长度）。
  */
-export const WHY_NOT_ADMITTED_MAX_CHARS = 400
-/** class_names 条数上限（与引擎 F41 口径一致）。 */
-export const CLASS_NAMES_PER_ELEMENT = 8
-/** 单个 class 名上限（与引擎 F41 口径一致）。 */
-export const CLASS_NAME_MAX_CHARS = 40
+export const WHY_NOT_ADMITTED_MAX_CHARS = whyNotAdmittedMaxChars
+/** class_names 条数上限（与引擎池抽取口径一致）。 */
+export const CLASS_NAMES_PER_ELEMENT = classNamesPerElement
+/** 单个 class 名上限（与引擎池抽取口径一致）。 */
+export const CLASS_NAME_MAX_CHARS = classNameMaxChars
 /** role 等短标识字段上限。 */
-export const IDENTITY_MAX_CHARS = 60
-/** frame_path（帧 origin 祖先链）条数上限（B 批：与 parseHint 的 ≤4 段声明上限同口径）。 */
-export const FRAME_PATH_MAX_ITEMS = 4
-/** 单段 frame origin 上限（B 批；仅作有界化，规范 origin 通常远小于此）。 */
-export const FRAME_PATH_SEGMENT_MAX_CHARS = 64
-/** structure_path 上限（B 批独立诊断上限；与 hint 的 200 分开——它不是 hint）。 */
-export const STRUCTURE_PATH_MAX_CHARS = 160
-/** F84 批 3：row_texts 行数上限（与引擎 Elem.row_texts 的 ≤6 行同口径）。 */
-export const ROW_TEXTS_MAX_LINES = 6
-/** F84 批 3：row_texts 单行上限（与引擎的 ≤40 字符行过滤同口径）。 */
-export const ROW_TEXTS_LINE_MAX_CHARS = 40
+export const IDENTITY_MAX_CHARS = identityMaxChars
+/** frame_path（帧 origin 祖先链）条数上限（与 parseHint 的 ≤4 段声明上限同口径）。 */
+export const FRAME_PATH_MAX_ITEMS = framePathMaxItems
+/** 单段 frame origin 上限（仅作有界化，规范 origin 通常远小于此）。 */
+export const FRAME_PATH_SEGMENT_MAX_CHARS = framePathSegmentMaxChars
+/** structure_path 上限（独立诊断上限；与 hint 的 200 分开——它不是 hint）。 */
+export const STRUCTURE_PATH_MAX_CHARS = structurePathMaxChars
+/** row_texts 行数上限（与引擎 `Elem.row_texts` 的 ≤6 行同口径）。 */
+export const ROW_TEXTS_MAX_LINES = rowTextsMaxLines
+/** row_texts 单行上限（与引擎的 ≤40 字符行过滤同口径）。 */
+export const ROW_TEXTS_LINE_MAX_CHARS = rowTextsLineMaxChars
 
 /* ------------------------------------------------------------ 合同形状 */
 

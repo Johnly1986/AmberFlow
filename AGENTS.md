@@ -31,7 +31,7 @@ npm run check                          # precheck + 契约生成物一致性 + t
 npm run verify:offline                 # 非门禁等价验证（fixtures 抽取面；需 chromium，不进 check）
 npm run verify:runtime:offline         # 非门禁运行期等价 lane（fixtures + BrowserMiddleware.run；需 chromium）
 npm run verify:pilot                  # 非门禁：PILOTED_WALKTHROUGH §3.2 走查验收矩阵（停因/兜底/危险拒绝/降级；需 chromium）
-npm run verify:lanes                   # 非门禁：顺序跑本批证据面 17 条 lane（需 chromium；清单见「测试」节）
+npm run verify:lanes                   # 非门禁：顺序跑本批证据面 18 条 lane（需 chromium；清单见「测试」节）
 npm run test -- --tier smoke         # 真实站点快速可达性
 npm run test -- --tier core          # 短流程
 npm run test -- --tier deep          # 长流程
@@ -94,8 +94,9 @@ online/cases/probe/*.json
 - 编排/话术：`verify:run-execution`（四源归一化产物 vs golden；池构成/排序/容量变更后须重录基线）、`golden-manual`（六条人工路径话术基线；静态源码扫描，毫秒级）
 - 会话/动作面：`verify:act-lock`、`verify:session-range`、`verify:session-drive`、`verify:poolless-actions`、`verify:dedup-controls`、`verify:frame-budget`
 - 决策/结果面：`verify:app-stop-context`、`verify:decision-accounting`、`verify:decision-ask-parity`、`verify:decision-endpoint-parity`（端点归一化差异白名单）、`verify:run-view-parity`（agent/桥 run 视图差异白名单）
+- 规则/词面：`verify:rule-vocab`（规则词面归一单源 + 泛化/过拟合护栏：正向命中、明确内容词反例、无关场景反例、纯通用按钮反例、无新词面）
 - 失败路径/校验：`verify:record-failure`（`--record` 写失败不崩）、`verify:ctx-validate`（extract maxItems 等入参）、`verify:rehydrate-rescan`（strict-miss 重扫证据）
-- 聚合：`npm run verify:lanes` 顺序跑上述 17 条（不含较重的 `verify:runtime:offline`），任一红即停。
+- 聚合：`npm run verify:lanes` 顺序跑上述 18 条（不含较重的 `verify:runtime:offline`），任一红即停。
 
 ## 架构
 

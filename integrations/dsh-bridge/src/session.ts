@@ -31,6 +31,12 @@ import {
   type BridgeAmbiguousMode, type BridgeDriveCommand, type BridgeDriveDriver, type BridgeReadWhat,
   type BridgeScrollTarget, type BridgeTabAction, type BridgeWindowMode,
 } from './session-contract.generated.ts'
+import {
+  BRIDGE_EVIDENCE_AMBIGUITY_CAPS,
+  BRIDGE_EVIDENCE_MISS_CAPS,
+  BRIDGE_EVIDENCE_WIDE_CAPS,
+  BRIDGE_HANDOFF_CAPS,
+} from './session-contract.generated.ts'
 
 /** 缺省 idle TTL（桥管理器与引擎 CLI 缺省同值；边界见生成物 `BRIDGE_SESSION_IDLE`）。 */
 export const DEFAULT_SESSION_IDLE_MS = BRIDGE_SESSION_IDLE.defaultMs
@@ -936,13 +942,13 @@ export class SessionManager {
     if (typeof response['ambiguous'] === 'boolean') out['ambiguous'] = response['ambiguous']
     const rawOthers = response['matched_others']
     if (Array.isArray(rawOthers)) {
-      const rows = rawOthers.slice(0, 3).map((raw) => {
+      const rows = rawOthers.slice(0, BRIDGE_EVIDENCE_AMBIGUITY_CAPS.matchedOthersMax).map((raw) => {
         const o: Record<string, unknown> = isObj(raw) ? raw : {}
         return {
           ...(typeof o['ref'] === 'string' ? { ref: o['ref'] } : {}),
           ...(typeof o['tag'] === 'string' ? { tag: o['tag'] } : {}),
           ...(typeof o['class'] === 'string' ? { class: o['class'] } : {}),
-          ...(typeof o['label'] === 'string' ? { label: clip(o['label'], 40) } : {}),
+          ...(typeof o['label'] === 'string' ? { label: clip(o['label'], BRIDGE_EVIDENCE_AMBIGUITY_CAPS.labelMaxChars) } : {}),
         }
       })
       if (rows.length > 0) out['matched_others'] = rows
@@ -997,13 +1003,13 @@ export class SessionManager {
     if (!Array.isArray(rawRows)) return undefined
     const rows = rawRows.filter((r): r is Record<string, unknown> => isObj(r))
     const hasHint = (r: Record<string, unknown>): boolean => typeof r['hint'] === 'string' && r['hint'] !== ''
-    const picked = [...rows.filter(hasHint), ...rows.filter((r) => !hasHint(r))].slice(0, 40)
+    const picked = [...rows.filter(hasHint), ...rows.filter((r) => !hasHint(r))].slice(0, BRIDGE_EVIDENCE_WIDE_CAPS.candidatesMax)
     const out: Record<string, unknown> = {
       candidates: picked.map((r) => ({
         ...(typeof r['ref'] === 'string' ? { ref: r['ref'] } : {}),
-        ...(typeof r['tag'] === 'string' ? { tag: clip(r['tag'], 16) } : {}),
-        ...(typeof r['label'] === 'string' ? { label: clip(r['label'], 40) } : {}),
-        ...(hasHint(r) ? { hint: clip(String(r['hint']), 200) } : {}),
+        ...(typeof r['tag'] === 'string' ? { tag: clip(r['tag'], BRIDGE_EVIDENCE_WIDE_CAPS.tagMaxChars) } : {}),
+        ...(typeof r['label'] === 'string' ? { label: clip(r['label'], BRIDGE_EVIDENCE_WIDE_CAPS.labelMaxChars) } : {}),
+        ...(hasHint(r) ? { hint: clip(String(r['hint']), BRIDGE_EVIDENCE_WIDE_CAPS.hintMaxChars) } : {}),
       })),
     }
     if (typeof raw['window'] === 'number') out['window'] = raw['window']
@@ -1475,29 +1481,29 @@ export class SessionManager {
     const out: Record<string, unknown> = {}
     if (typeof raw['step_id'] === 'number') out['step_id'] = raw['step_id']
     if (typeof raw['stop_code'] === 'string') out['stop_code'] = raw['stop_code']
-    if (typeof raw['goal_digest'] === 'string') out['goal_digest'] = clip(raw['goal_digest'], 300)
-    if (typeof raw['url'] === 'string') out['url'] = clip(raw['url'], 300)
+    if (typeof raw['goal_digest'] === 'string') out['goal_digest'] = clip(raw['goal_digest'], BRIDGE_HANDOFF_CAPS.goalDigestMaxChars)
+    if (typeof raw['url'] === 'string') out['url'] = clip(raw['url'], BRIDGE_HANDOFF_CAPS.urlMaxChars)
     // 结束态可见性（evidence-only）：无完成信号声明 = 显式 null；无低置信票 = 键不出现。
     if (raw['final_signal'] === null) out['final_signal'] = null
-    else if (typeof raw['final_signal'] === 'string') out['final_signal'] = clip(raw['final_signal'], 200)
+    else if (typeof raw['final_signal'] === 'string') out['final_signal'] = clip(raw['final_signal'], BRIDGE_HANDOFF_CAPS.finalSignalMaxChars)
     if (Array.isArray(raw['weak_picks'])) {
-      const picks = raw['weak_picks'].filter(isObj).slice(0, 6).map((p) => {
+      const picks = raw['weak_picks'].filter(isObj).slice(0, BRIDGE_HANDOFF_CAPS.weakPicksMax).map((p) => {
         const row: Record<string, unknown> = {}
         if (typeof p['step'] === 'number') row['step'] = p['step']
-        if (typeof p['target'] === 'string') row['target'] = clip(p['target'], 120)
+        if (typeof p['target'] === 'string') row['target'] = clip(p['target'], BRIDGE_HANDOFF_CAPS.weakPickTargetMaxChars)
         if (typeof p['conf'] === 'number') row['conf'] = p['conf']
-        if (typeof p['picked_by'] === 'string') row['picked_by'] = clip(p['picked_by'], 20)
+        if (typeof p['picked_by'] === 'string') row['picked_by'] = clip(p['picked_by'], BRIDGE_HANDOFF_CAPS.weakPickPickedByMaxChars)
         return row
       })
       if (picks.length > 0) out['weak_picks'] = picks
     }
     const why = isObj(raw['why_stuck']) ? raw['why_stuck'] : undefined
-    if (why !== undefined && typeof why['summary'] === 'string') out['summary'] = clip(why['summary'], 300)
+    if (why !== undefined && typeof why['summary'] === 'string') out['summary'] = clip(why['summary'], BRIDGE_HANDOFF_CAPS.summaryMaxChars)
     if (Array.isArray(raw['what_would_unblock'])) {
       out['what_would_unblock'] = raw['what_would_unblock']
         .filter((x): x is string => typeof x === 'string')
-        .slice(0, 3)
-        .map((s) => clip(s, 200))
+        .slice(0, BRIDGE_HANDOFF_CAPS.unblockMaxItems)
+        .map((s) => clip(s, BRIDGE_HANDOFF_CAPS.unblockItemMaxChars))
     }
     if (isObj(raw['evidence_refs'])) {
       const refs: Record<string, unknown> = {}
@@ -1611,7 +1617,7 @@ export class SessionManager {
     const out: Record<string, unknown> = {}
     if (typeof raw['target'] === 'string') out['target'] = raw['target']
     if (typeof raw['pool_size'] === 'number') out['pool_size'] = raw['pool_size']
-    if (typeof raw['hint_shape'] === 'string') out['hint_shape'] = clip(raw['hint_shape'], 32)
+    if (typeof raw['hint_shape'] === 'string') out['hint_shape'] = clip(raw['hint_shape'], BRIDGE_EVIDENCE_MISS_CAPS.hintShapeMaxChars)
     if (typeof raw['hint_len'] === 'number') out['hint_len'] = raw['hint_len']
     // F72：渲染可疑信号与显式重扫事实（引擎给才有；只透传）。
     if (raw['settle_timed_out'] === true) out['settle_timed_out'] = true
@@ -1628,18 +1634,18 @@ export class SessionManager {
       return list.slice(0, cap).map((entry) => {
         const row = isObj(entry) ? entry : {}
         const projected: Record<string, unknown> = {}
-        if (typeof row['ref'] === 'string') projected['ref'] = clip(row['ref'], 16)
-        if (typeof row['tag'] === 'string') projected['tag'] = clip(row['tag'], 16)
-        if (typeof row['label'] === 'string') projected['label'] = clip(row['label'], 40)
-        if (typeof row['why'] === 'string') projected['why'] = clip(row['why'], 40)
+        if (typeof row['ref'] === 'string') projected['ref'] = clip(row['ref'], BRIDGE_EVIDENCE_MISS_CAPS.refMaxChars)
+        if (typeof row['tag'] === 'string') projected['tag'] = clip(row['tag'], BRIDGE_EVIDENCE_MISS_CAPS.tagMaxChars)
+        if (typeof row['label'] === 'string') projected['label'] = clip(row['label'], BRIDGE_EVIDENCE_MISS_CAPS.labelMaxChars)
+        if (typeof row['why'] === 'string') projected['why'] = clip(row['why'], BRIDGE_EVIDENCE_MISS_CAPS.whyMaxChars)
         return projected
       })
     }
-    const candidates = rows('candidates', 3)
+    const candidates = rows('candidates', BRIDGE_EVIDENCE_MISS_CAPS.candidatesMax)
     if (candidates !== undefined) out['candidates'] = candidates
-    const near = rows('near', 3)
+    const near = rows('near', BRIDGE_EVIDENCE_MISS_CAPS.nearMax)
     if (near !== undefined) out['near'] = near
-    const rejected = rows('rejected', 2)
+    const rejected = rows('rejected', BRIDGE_EVIDENCE_MISS_CAPS.rejectedMax)
     if (rejected !== undefined) out['rejected'] = rejected
     return Object.keys(out).length > 0 ? out : undefined
   }
@@ -1673,7 +1679,10 @@ export class SessionManager {
         if (typeof row['near'] === 'string') projected['near'] = clip(row['near'], 40)
         if (typeof row['frame'] === 'number') projected['frame'] = row['frame']
         // B 批：候选帧 origin（引擎有才出现；跨帧同名时区分是哪一帧）。
-        if (typeof row['frame_origin'] === 'string') projected['frame_origin'] = clip(row['frame_origin'], 60)
+        if (typeof row['frame_origin'] === 'string') {
+          // 桥面带窄于引擎界（120 → 60）：对齐引擎属可见变化，需单独成批（见契约表字段注释）。
+          projected['frame_origin'] = clip(row['frame_origin'], BRIDGE_EVIDENCE_AMBIGUITY_CAPS.frameOriginMaxChars)
+        }
         if (typeof row['same_label'] === 'boolean') projected['same_label'] = row['same_label']
         if (typeof row['suggested_hint'] === 'string') projected['suggested_hint'] = clip(row['suggested_hint'], 200)
         return projected

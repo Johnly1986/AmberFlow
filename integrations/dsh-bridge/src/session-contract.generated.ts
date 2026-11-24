@@ -122,3 +122,59 @@ export const BRIDGE_SESSION_TIMEOUTS = {
   waitMaxMs: 120000,
   waitDefaultMs: 15000,
 } as const;
+
+/** 交接块桥面 cap（`bridge` 列；字段×各层全表见 src/support/session-contract.ts 的 SESSION_HANDOFF_CAP_TABLE）。 */
+export const BRIDGE_HANDOFF_CAPS = {
+  goalDigestMaxChars: 300,
+  summaryMaxChars: 300,
+  unblockMaxItems: 3,
+  unblockItemMaxChars: 200,
+  urlMaxChars: 300,
+  finalSignalMaxChars: 200,
+  weakPicksMax: 6,
+  weakPickTargetMaxChars: 120,
+  weakPickPickedByMaxChars: 20,
+} as const;
+
+/** scroll 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_SCROLL_FIELDS = ["moved", "delta", "scroll"] as const;
+
+/** range 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_RANGE_FIELDS = ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "probe"] as const;
+
+/** ambiguity 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_AMBIGUITY_FIELDS = ["ambiguous", "matched_others", "hint_kind", "hint_tier", "hint_suspicious"] as const;
+
+/** ambiguity 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_AMBIGUITY_FIELDS）。 */
+export const BRIDGE_EVIDENCE_AMBIGUITY_CAPS = {
+  matchedOthersMax: 3,
+  labelMaxChars: 40,
+  frameOriginMaxChars: 60,
+  frameOriginEngineMaxChars: 120,
+} as const;
+
+/** miss 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_MISS_FIELDS = ["target", "pool_size", "hint_shape", "hint_len", "settle_timed_out", "settle_waited_ms", "rescan", "candidates", "near", "rejected"] as const;
+
+/** miss 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_MISS_FIELDS）。 */
+export const BRIDGE_EVIDENCE_MISS_CAPS = {
+  candidatesMax: 3,
+  nearMax: 3,
+  rejectedMax: 2,
+  refMaxChars: 16,
+  tagMaxChars: 16,
+  labelMaxChars: 40,
+  whyMaxChars: 40,
+  hintShapeMaxChars: 32,
+} as const;
+
+/** wide 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_WIDE_FIELDS = ["candidates", "window", "pool_size"] as const;
+
+/** wide 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_WIDE_FIELDS）。 */
+export const BRIDGE_EVIDENCE_WIDE_CAPS = {
+  candidatesMax: 40,
+  tagMaxChars: 16,
+  labelMaxChars: 40,
+  hintMaxChars: 200,
+} as const;

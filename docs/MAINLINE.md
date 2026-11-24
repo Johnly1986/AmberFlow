@@ -82,6 +82,8 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | **③ 开发/创作脚本** | `npm start` / `apps` / `learn` / `test` / `plan-cli` / `tools/*` / MV3 extension | 非产品主线 | 新旗标只进 registry；**extension 已删除（P2-2.3）**；picker-server 2.0.x 保留、2.1.0 移除（期间不新增消费者） |
 
 > **会话面闭集单源**（session 请求 op / act op / drive 的 cmd·driver / max_steps 与 idle 界）：唯一数据表 = `src/support/session-contract.ts`，桥侧唯一投影 = 生成物 `integrations/dsh-bridge/src/session-contract.generated.ts`（`tools/session-contract-gen.ts --check` 校验过期，并与引擎契约 `src/app/session-runtime-contract.ts` 逐值交叉校验；桥不手抄闭集）。
+>
+> **会话面 cap 单源**（handoff 三层投影 cap / 会话响应证据块白名单与 cap / ElementView 行上限）：同一份表 `src/support/session-contract.ts` 的 `SESSION_HANDOFF_CAP_TABLE`（字段 × producer·engine·bridge 三列）、`SESSION_EVIDENCE_CAP_TABLE`（scroll/range/ambiguity/miss/wide 五块）与 `SESSION_ELEMENT_VIEW_LIMITS`；桥侧投影 = 生成物 `session-contract.generated.ts` 的 `BRIDGE_HANDOFF_CAPS`/`BRIDGE_EVIDENCE_*` 与 `integrations/dsh-bridge/src/element-view.constants.generated.ts`（同一 `--check` 判过期，生成器按引擎实测行为与引擎常量/内嵌 JS 静态 pin 逐项交叉校验）。桥 `element-view.ts`/`session.ts` 只读生成常量，不写数值字面量。
 
 **进程内化**（handler 不再 spawn）：**延后**，不在 P0/P1 承诺。任何内进程化必须保持退出码矩阵与 JSON envelope 逐字节一致，并先解决 provider 装配的 run-scoped 注入（禁模块级全局）。
 
@@ -114,7 +116,9 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 **8 个确定性场景**（成功/停因/遮挡/precondition/upload/scroll/range/actionable-ancestor-retarget） | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
 | 编排等价 lane | `tools/verify-run-execution.ts`、`tools/golden/run-execution/**`、`fixtures/engine/run-execution/**`（§6.10） | 非门禁（需 chromium）；四源（flow/declared-flow/plan/suite）canonical JSON，rules-only 零模型、外部请求 0 | 稳定 | 内核/适配器迁移前后对比；基线在干净 HEAD 副本 `--record` 两次一致才入库 |
 
-> 非门禁证据 lane 清单：抽取面 `verify:offline`、运行期 `verify:runtime:offline`、四源编排 `verify:run-execution`、人工话术 `golden-manual`，以及会话/动作/决策面 `verify:act-lock` / `verify:session-range` / `verify:session-drive` / `verify:poolless-actions` / `verify:dedup-controls` / `verify:frame-budget` / `verify:app-stop-context` / `verify:decision-accounting` / `verify:decision-ask-parity`、`verify:decision-endpoint-parity` / `verify:run-view-parity`，失败路径/校验 `verify:record-failure` / `verify:ctx-validate` / `verify:rehydrate-rescan`；聚合 `npm run verify:lanes` 顺序跑其中 17 条（不含较重的 `verify:runtime:offline`）。脚本清单唯一出处 = `package.json`，本文不抄全表。
+> 非门禁证据 lane 清单：抽取面 `verify:offline`、运行期 `verify:runtime:offline`、四源编排 `verify:run-execution`、人工话术 `golden-manual`，以及会话/动作/决策面 `verify:act-lock` / `verify:session-range` / `verify:session-drive` / `verify:poolless-actions` / `verify:dedup-controls` / `verify:frame-budget` / `verify:app-stop-context` / `verify:decision-accounting` / `verify:decision-ask-parity`、`verify:decision-endpoint-parity` / `verify:run-view-parity`，失败路径/校验 `verify:record-failure` / `verify:ctx-validate` / `verify:rehydrate-rescan`；聚合 `npm run verify:lanes` 顺序跑其中 18 条（不含较重的 `verify:runtime:offline`）。脚本清单唯一出处 = `package.json`，本文不抄全表。
+
+> **规则词面归一单源**（`src/engine/rules.ts` 的 goal 侧与候选 label 侧）：切词模式唯一出处 = `src/engine/rule-vocab.ts`（`ASCII2`/`ASCII4`/`CJK1`/`CJK2`/`words`），两侧不得各持一套正字面量；`namedPhraseOverrides` 只把「goal 逐词点名了哪个多词 label」这一**字面事实**补回 `affordanceRule`（仅在本已有点名结果上重排、绝不把无命中变成命中），命中词仍只来自 `STOP_TOKENS`/`ROLE_TOKENS`/`FILLER_TOKENS` 三张通用词表——引擎词面不认具体站点/业务词。证据 lane = `tools/verify-rule-vocab.ts`（非门禁、零网络、合成池：正向 + 三类反例 + 归一对称性）。
 
 > 池外回退面补全（bugfix，受本节「候选/目标解析恢复链」冻结约束）：`actOnce` 的 `el === null` 分支按 op 分派（fill/select/hover 走各自 locator 原语；不支持的 op 结构化 `action_unsupported`，绝不退化成点击），A3 `_domFallbackResolve` 合成行补 `name`/`href` 投影——这是**补全既有回退面**，不新增第 5 条解析链；验证 lane = `tools/verify-poolless-actions.ts` + `fixtures/engine/poolless/`（非门禁）。
 

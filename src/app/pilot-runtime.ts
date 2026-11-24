@@ -49,7 +49,10 @@ import { errMsg, isDeadPageError, isObj } from "./session-runtime-contract.ts";
 import { modelVote } from "./pilot-vote.ts";
 import { PilotAskAdapter } from "./pilot-ask-adapter.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
-import { slotKeyFor, valueKeyOf, valueNeedOf, type ValueNeed } from "./pilot-value-need.ts";
+import {
+  bindValueFor, valueKeyOf, valueNeedOf,
+  type ValueNeed,
+} from "./pilot-value-need.ts";
 import { clipText } from "../support/text.ts";
 import {
   emitStepRequest as emitStepRequestEvidence, finalSignalFact, frameExclusionsOf, handoffEvidence,
@@ -116,8 +119,10 @@ export class PilotRuntime implements PilotCommandTarget {
   lastPool: ElemPool | null = null;
   /** 最近一次驾驶选中的 ref（resume.skip 禁选的对象）。 */
   lastPickedRef: string | null = null;
-  /** 未决值需求（needs_value 的选中目标；resume 字符串值的确定性绑定键）。 */
+  /** 未决值需求（needs_value 的选中目标；resume 字符串值的确定性绑定键 + 键漂移回放身份）。 */
   valueNeed: ValueNeed | null = null;
+  /** 已消费值的目标：同控件下轮换键时记录值仍可回放（换页/改道即清）。 */
+  private lastValueNeed: ValueNeed | null = null;
   /** resume 字符串值：hint 命中时注入**命中目标**的值袋键（值跟着 hint 目标走）。 */
   pendingValue: string | null = null;
   /** 上一次 resume 的 hint 落空（下次交接 evidence 可见；落交接后清空，不粘）。 */
@@ -396,18 +401,17 @@ export class PilotRuntime implements PilotCommandTarget {
     const op: "click" | "check" | "fill" | "select" =
       fam === "check" ? "check" : fam === "fill" ? "fill" : fam === "select" ? "select" : "click";
 
-    // 值不猜（红线②）：fill/select 的值来自预声明 slots 或 Agent resume 显式给值。
-    // 键由 `valueKeyOf` 推导（label→name→id→tag，空 label 回落 name/id；空键不参与匹配）。
+    // 值不猜（红线②）：值只来自预声明 slots 或 resume 显式 value；键/别名/漂移回放裁决单源在 `bindValueFor`。
     let bind: { value: unknown } | null = null;
     let need: ValueNeed | null = null;
+    let drift: { from: string; to: string } | null = null;   // 本步键漂移回放（只键名，无值）
     if (op === "fill" || op === "select") {
       need = valueNeedOf(el, ref);
-      const slotKey = slotKeyFor(need.key, this.slots);
-      if (slotKey === null) {
-        this.valueNeed = need;   // 交接带「哪个目标/哪个键要值」；resume 字符串值据此绑定
-        return "needs_value";
-      }
-      bind = { value: this.slots[slotKey]! };
+      const prev = this.valueNeed ?? this.lastValueNeed;
+      const gate = bindValueFor({ slots: this.slots, need, el, pool: elems, prev });
+      if (gate.kind === "needs_value") { this.valueNeed = need; return "needs_value"; }
+      drift = gate.drift;
+      bind = { value: gate.value };
     }
 
     // 执行：与 session.act 同一条链（歧义 fail 档、click/check 带遮挡探针）。
@@ -468,12 +472,14 @@ export class PilotRuntime implements PilotCommandTarget {
         ...step, elapsed_ms: elapsedMs,
         ...(out.ok === true ? {} : { code: String(out.stopCode ?? "action_failed") }),
         ...(out.resolved_via === undefined ? {} : { resolved_via: out.resolved_via }),
+        ...(drift === null ? {} : { value_target_drift: drift }),
       },
       url_before: urlBefore, url_after: urlAfter,
     });
     this.sink.respond({
       type: "drive", ok: out.ok === true, step: this.stepCount, picked_by: pickedBy,
       op, target, ref: step.ref, changed: step.changed, url: urlAfter, elapsed_ms: elapsedMs,
+      ...(drift === null ? {} : { value_target_drift: drift }),   // 只出现在 fill/select 步
       ...(out.resolved_via === undefined ? {} : { resolved_via: out.resolved_via }),
       ...(pick === null ? {} : { conf: pick.conf, shape: pick.shape, pool_size: poolSize, via: pick.via }),
     });
@@ -494,7 +500,10 @@ export class PilotRuntime implements PilotCommandTarget {
         this.forbidden.add(step.ref);
       }
       // 值已消费：值需求与待注入值一起清（下一次 needs_value 会重新记录目标）。
-      if (need !== null) { this.pendingValue = null; this.valueNeed = null; }
+      if (need !== null) {
+        this.pendingValue = null; this.valueNeed = null;
+        this.lastValueNeed = urlBefore === urlAfter ? need : null;   // 换页后同 id 不是同一控件
+      }
     }
 
     // anti-repeat：连续无变化（ok 但 changed=false，或连续失败）达阈值 = stuck_inert。
@@ -592,10 +601,11 @@ export class PilotRuntime implements PilotCommandTarget {
     this.excludedFrames = [];
     this.inertRun = 0;
     this.handoffOpen = null;
-    // 改道即换语境：值需求/待注入值/落空 hint 现场都失效（新页面的目标不是同一目标）。
+    // 改道即换语境：值需求/待注入值/落空 hint/键漂移现场都失效（新页面的目标不是同一目标）。
     this.valueNeed = null;
     this.pendingValue = null;
     this.missedHint = null;
+    this.lastValueNeed = null;
   }
 
   /** 起飞：解析决策源 → 开入口页 → 驾驶直到停因/预算/信号。 */

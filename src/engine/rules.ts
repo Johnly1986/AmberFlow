@@ -13,6 +13,7 @@
 import { firstIfSame, type Elem, type ElemPool } from "./extraction.ts";
 import { frameScopeMatches } from "./frame-scope.ts";
 import { parseHint, poolAttr } from "./hint.ts";
+import { ASCII2, ASCII4, CJK1, CJK2, namedPhraseOverrides, words } from "./rule-vocab.ts";
 
 export const STOP_TOKENS = new Set([
   "page", "open", "click", "then", "with", "this", "that", "into", "from",
@@ -38,12 +39,6 @@ export const DESTRUCTIVE_PATTERNS: readonly string[] = [
   // 否则 safe-browser 面的 confirmFn 会把普通站点流程全数拦下。
   "支付", "付款", "结算", "下单", "提交订单", "删除", "移除", "发送", "确认付款", "结算并支付",
 ];
-
-const words = (s: string, re: RegExp): string[] => s.match(re) ?? [];
-const ASCII4 = /[a-z]{4,}/g;
-const ASCII2 = /[a-z0-9]{2,}/g;
-const CJK2 = /[\u4e00-\u9fff]{2,}/g;
-const CJK1 = /[\u4e00-\u9fff]+/g;
 
 export function navRule(instruction: string, elems: ElemPool): string | null {
   const toks = new Set(words(instruction.toLowerCase(), ASCII4));
@@ -120,6 +115,15 @@ export function affordanceRule(
     ) hits.add(ref);
   }
 
+  // Word-for-word naming outranks a token collision. The general vocabulary sets strip
+  // instruction words from `toks`, so a multi-word label made ENTIRELY of those words is
+  // invisible to the content-token pass — and a single content token sitting inside a
+  // *partially* named label could then win a pick the instruction never made. rule-vocab
+  // supplies both sides from one tokenizer, so this is a wording fact, not vocabulary;
+  // and it only re-ranks an existing hit (never turns a miss into a pick), with
+  // indistinguishable candidates still resolved by firstIfSame instead of guessing.
+  const named = namedPhraseOverrides(instruction, elems, toks, hits);
+  if (named.size > 0) return named.size === 1 ? [...named][0]! : firstIfSame(named, elems);
   if (hits.size === 1) return [...hits][0]!;
   // Ambiguous hits may still resolve on container context: an instruction token
   // that is a word of EXACTLY one candidate's near line is a literal mapping.

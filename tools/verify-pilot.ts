@@ -27,7 +27,10 @@ import path from "node:path";
 import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
 import { drivingGoalText, unblockHintsFor, type PilotOptions } from "../src/app/pilot-contract.ts";
 import { weakPicksFrom } from "../src/app/pilot-evidence.ts";
-import { findPoolRefBySig, slotKeyFor, valueKeyOf, valueNeedOf, valueSigOf } from "../src/app/pilot-value-need.ts";
+import {
+  bindValueFor, countValueTargetId, findPoolRefBySig, slotKeyFor, valueAliasKeyOf,
+  valueKeyOf, valueNeedOf, valueSigOf, valueTargetIdOf,
+} from "../src/app/pilot-value-need.ts";
 import { browserSession } from "../src/engine/executor.ts";
 import type { Elem } from "../src/engine/elem-model.ts";
 
@@ -705,6 +708,118 @@ async function scenarioAttachSession(origin: string): Promise<void> {
   }
 }
 
+/**
+ * 值键漂移纯函数：稳定身份（name/id）跨轮不变 ⇒ 记录值可回放到本轮键；身份变了 ⇒ 不回放（不粘）。
+ */
+async function scenarioValueDriftPure(_origin: string): Promise<void> {
+  const s: Record<string, string> = { "Search term": "amber" };
+  const el = { tag: "input", label: "", name: "q", id: "ucc-1" } as Elem;
+  // 稳定身份：name 优先于 id（表单提交身份比文档句柄稳）；两者皆空 = 不声称同一控件。
+  assert.equal(valueTargetIdOf({ tag: "input", label: "x", name: "q", id: "a" } as Elem), "input\u0000name:q");
+  assert.equal(valueTargetIdOf({ tag: "input", label: "x", id: "a" } as Elem), "input\u0000id:a");
+  assert.equal(valueTargetIdOf({ tag: "input", label: "x" } as Elem), null,
+    "only a tag = no proveable identity (fail-closed: never replay across it)");
+  const pool = { e1: el, e2: { tag: "input", label: "", name: "q" } as Elem };
+  assert.equal(countValueTargetId(pool, "input\u0000name:q"), 2,
+    "two controls with the same name are not distinguishable; the count gates the replay");
+
+  // ① 直接命中：本轮键在值袋里（既有语义，逐字节不变）。
+  const direct = bindValueFor({
+    slots: { "Search term": "amber" }, el: { tag: "input", label: "Search term", name: "q" } as Elem,
+    pool: { e1: { tag: "input", label: "Search term", name: "q" } as Elem }, prev: null,
+    need: valueNeedOf({ tag: "input", label: "Search term", name: "q" } as Elem, "e1"),
+  });
+  assert.equal(direct.kind, "ready");
+  assert.equal(direct.value, "amber");
+  assert.equal(direct.drift, null, "a direct key hit records no drift fact");
+
+  // ② name/id 精确别名：预声明 `--slots q=…`（表单身份，不是可读标签）命中，不扩建子串语义。
+  assert.equal(valueAliasKeyOf(el, { q: "amber" }), "q", "an exact name matches a declared slot key");
+  assert.equal(valueAliasKeyOf(el, { note: "amber" }), null, "the alias face is exact-only (no substring)");
+  const alias = bindValueFor({
+    slots: {}, el, pool: { e1: el }, prev: null, need: valueNeedOf(el, "e1"),
+  });
+  assert.equal(alias.kind, "needs_value", "an empty bag has no alias to hit");
+  assert.equal(valueAliasKeyOf(el, { "ucc-1": "amber" }), "ucc-1", "the id is the second alias candidate");
+
+  // ③ 漂移回放：同一控件本轮键从 label 变 name（label 丢失）⇒ 记录值回放到本轮键。
+  const prev = valueNeedOf({ tag: "input", label: "Search term", name: "q" } as Elem, "e1");
+  const drift = bindValueFor({ slots: s, el, pool: { e1: el }, prev, need: valueNeedOf(el, "e1") });
+  assert.equal(drift.kind, "ready", "the recorded value replays onto the current key");
+  assert.equal(drift.value, "amber");
+  assert.deepEqual(drift.drift, { from: "Search term", to: "q" }, "the drift fact names both keys (never the value)");
+  assert.equal(s["q"], "amber", "the replay writes the current key (the action面 then consumes it)");
+  assert.equal(s["Search term"], "amber", "the recorded key is kept (no destructive rewrite)");
+
+  // ④ 身份明确不同 = 不回放（值不跟到另一个控件），只记 stale 事实。
+  const other = { tag: "input", label: "Note", name: "note" } as Elem;
+  const stale = bindValueFor({
+    slots: { "Search term": "amber" }, el: other, pool: { e1: other }, prev, need: valueNeedOf(other, "e1"),
+  });
+  assert.equal(stale.kind, "needs_value", "a different control never inherits the recorded value");
+  assert.deepEqual(stale.stale, { from: "Search term", to: "Note" }, "the stale fact names the keys only");
+  assert.equal("note" in s, false, "nothing leaked into the new control's key");
+
+  // ⑤ 同 name 多控件（池内不唯一）= 证明不了「哪个要值」⇒ 不回放。
+  const pool2 = { e1: el, e2: { tag: "input", label: "", name: "q", id: "ucc-2" } as Elem };
+  const ambiguous = bindValueFor({
+    slots: { "Search term": "amber" }, el, pool: pool2, prev, need: valueNeedOf(el, "e1"),
+  });
+  assert.equal(ambiguous.kind, "needs_value", "a non-unique identity is not enough evidence to replay");
+
+  // ⑥ 本轮键已有值 ⇒ 键命中档直接消费它（回放不覆盖已有值，两条值来源不打架）。
+  const existing = bindValueFor({
+    slots: { "Search term": "amber", q: "other" }, el, pool: { e1: el }, prev, need: valueNeedOf(el, "e1"),
+  });
+  assert.equal(existing.kind, "ready", "the key already present in the bag wins (no replay overwrite)");
+  assert.equal(existing.value, "other", "the declared value at the current key is used, not the recorded one");
+}
+
+/**
+ * 值键漂移（真链路）：首轮 `needs_value` 记 label 键 → 裸字符串 resume 值进值袋 → 次轮抽池该输入
+ * label 丢失（真实站点上 label 由第三方 UI 状态动态给出/撤销，规则面再也匹配不到它的词面）⇒
+ * 只点名目标、**不重发值**，记录值凭 name/id 稳定身份回放到本轮键，值落地且到达。
+ */
+async function scenarioNeedsValueKeyDrift(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/home.html`, goal: "Search term",
+    finalSignal: { css_value_equals: ["#q", "amber"] }, maxSteps: 6,
+  });
+  try {
+    assert.equal(await rt.drive(), "needs_value", "the first round needs a value");
+    const need = lastHandoffEvidence(events)["needs_value"] as Record<string, unknown>;
+    assert.equal(need["key"], "Search term", "the first handoff keys the need by the readable label");
+    assert.equal(await rt.handleLine('{"cmd":"resume","value":"amber"}'), "drive");
+    assert.equal(rt.slots["Search term"], "amber", "a bare string binds to the recorded key");
+
+    // 抽池形状变化：同一 input 的 label 消失（规则面已无法再靠词面匹配它）。
+    const page = await rt.page();
+    await page.evaluate(((sel: string) => {
+      const d = (globalThis as unknown as { document: {
+        querySelector(s: string): { removeAttribute(a: string): void } | null } }).document;
+      d.querySelector(sel)?.removeAttribute("aria-label");
+    }) as unknown, "#q");
+
+    // 次轮：词面命中不了 ⇒ 决策源不可达如实停；交接重开，记录值需求仍在。
+    // 次轮：词面已匹配不到该目标 ⇒ 不可能自动到达（停因具体码取决于决策源降级档）。
+    const secondStop = await rt.drive();
+    assert.notEqual(secondStop, "final_signal_held", "the drifted target is not reached without the recorded value");
+    assert.equal(drivesOf(events).length, 0, "nothing executed before the value replay");
+    // 只点名目标（hint 不带值）：值只能来自上一轮记录 —— 正是漂移回放要证明的那条路。
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"#q"}'), "drive");
+    assert.equal(await rt.drive(), "final_signal_held", "the recorded value replays onto the drifted key and arrives");
+    const drives = drivesOf(events);
+    assert.equal(drives.length, 1, "exactly one fill executed (the label-less round executed none)");
+    const drift = drives[0]!["value_target_drift"] as Record<string, unknown> | undefined;
+    assert.deepEqual(drift, { from: "Search term", to: "q" }, "the drive line carries the drift fact (keys only)");
+    assert.equal(await pageValue(rt, "#q"), "amber", "the value landed on the real input");
+    assert.equal(rt.slots["q"], "amber", "the replay wrote the current key into the bag");
+    assert.equal(rt.valueNeed, null, "the value was consumed (no need left open)");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
 const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["arrival(rules 零模型到达)", scenarioArrival],
   ["needs_value→resume 值+点名", scenarioNeedsValue],
@@ -712,6 +827,8 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["needs_value→hint+值跟随 hint 目标", scenarioNeedsValueHintTarget],
   ["hint 落空→下次交接 missed 证据", scenarioResumeHintMissed],
   ["值键推导纯函数（空 label/空键/签名）", scenarioValueKeyPure],
+  ["值键漂移纯函数（稳定身份/别名/回放/不粘）", scenarioValueDriftPure],
+  ["值键漂移：label 丢失后裸字符串值仍落地", scenarioNeedsValueKeyDrift],
   ["stuck_inert→resume 换目标", scenarioStuckInert],
   ["target_ambiguous→resume 收窄", scenarioAmbiguous],
   ["嵌套同目标折叠（容器vs链接）", scenarioNestedFold],

@@ -621,7 +621,8 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 ### 3.3 pilot 驾驶协议（引擎库面；CLI 入口已移除，agent 面经 `amberflow_session` 的 drive 系列 op）
 
 stdout 纯 JSONL：`started` / `drive` / `handoff` / `command_result` / `pilot_end` 每行一个
-JSON 对象；`pilot_end` 只发一条（idle/中断/异常的 `code`/`reason` 并进汇总行），摘要恒含
+JSON 对象（`drive` 行在值键漂移回放步另带 `value_target_drift:{from,to}`——只两个键名，
+不含值；无回放则键不出现）；`pilot_end` 只发一条（idle/中断/异常的 `code`/`reason` 并进汇总行），摘要恒含
 `steps`/`stop_code`/`conf_floor`/`model_asks`/`rule_picks`/`model_picks`/`handoffs`/`fallbacks`
 （laya 档另带 `cache:{hits,misses}`），恒带 `pilot:true`。`conf_floor` 是本次驾驶的**有效闸门
 刻度**（CLI > provider 自报 > 0.25），与 `weak_picks`（固定按 0.25 静态阈值筛票面）分工不同：
@@ -643,7 +644,7 @@ stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 sess
 
 | 指令 | 形状 | 语义 |
 |---|---|---|
-| `resume` | `{hint?, value?, target?, skip?}` | `value` 对象 = 多槽 k:v 并入值袋；字符串 = 单值，键序 `target` → 交接 `needs_value.key`（引擎记录的未决目标键）→ `resumed`（历史兜底；真实标签永不命中它），带 `hint` 时值跟 hint 命中目标走；`hint` 唯一命中即确定性执行（零模型），撞歧义（多候选签名互异）= `target_ambiguous` 只停不选，落空 = 下次交接 evidence 带 `resume_hint.missed`；`skip:true` 把最近一次驾驶选中的目标加入禁选后继续 |
+| `resume` | `{hint?, value?, target?, skip?}` | `value` 对象 = 多槽 k:v 并入值袋；字符串 = 单值，键序 `target` → 交接 `needs_value.key`（引擎记录的未决目标键）→ `resumed`（历史兜底；真实标签永不命中它），带 `hint` 时值跟 hint 命中目标走；**值键跨轮漂移**（同控件的抽池 label 形状变了，如首轮 `label="Search Google Maps"`、次轮只剩 `name=q`）不必照最新交接键重发：引擎按 name/id 稳定身份把已给过的值回放到本轮键（池内该身份唯一才回放；身份变了/无法证明则不粘，如实再要值）；`hint` 唯一命中即确定性执行（零模型），撞歧义（多候选签名互异）= `target_ambiguous` 只停不选，落空 = 下次交接 evidence 带 `resume_hint.missed`；`skip:true` 把最近一次驾驶选中的目标加入禁选后继续 |
 | `redirect` | `{url? \| goal?}` | 换入口或换目标；步史与禁选清段重新累计，**预算不清零**（预算重置请起新 pilot） |
 | `finish` | `{signal}` | 声明最终信号（或复用预声明的 `--final-signal`）；引擎 `checkSignal` 验证成立才记 `final_signal_held`；不成立 = `code:"signal_not_held"` 单行拒绝，交接保持打开 |
 | `abort` | `{}` | 终止，落已走轨迹（exit 3） |
