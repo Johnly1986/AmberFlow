@@ -87,13 +87,19 @@ export const LABEL_HELPERS_JS = String.raw`
   // 它是装饰，不是人可读标签。先剥掉 PUA 再折叠空白，否则 Hotels 按钮的 label 会是
   // \ue8baHotels，ctx.hints("Hotels") 匹配不到（Google Maps 实测）。
   const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
+  // 范围控件（range / role=slider）的**活值不是身份**：value 属性/当前值随每次操作变化，
+  // 拿它做 label 会让同一元素在两次观察里叫两个名字（hint 因此失配，set_range 第二轮直接
+  // target_not_found）。身份必须来自稳定面——aria-label / label 包裹 / id / name / data-test。
+  const isRangeLike = (e, tag) => tag === 'input' && String(e.getAttribute('type') || '').toLowerCase() === 'range';
   const labelOfRaw = (e, tag) => {
     const first = e.childNodes.length ? String(e.childNodes[0].textContent || '') : '';
     let label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || first || '');
     const text = (!label || tag === 'select') ? norm(e.innerText || '') : '';
-    if (!label) label = text || e.getAttribute('placeholder') || e.getAttribute('value') || '';
+    // 范围控件不读自身 value（活值），只读 placeholder（原生 range 无 placeholder，等于不读）。
+    if (!label && isRangeLike(e, tag)) label = text || e.getAttribute('placeholder') || '';
+    else if (!label) label = text || e.getAttribute('placeholder') || e.getAttribute('value') || '';
     if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-      const own = (e.value || '').trim();
+      const own = isRangeLike(e, tag) ? '' : (e.value || '').trim();
       let p = e.closest('label');
       if (!p && e.id) {
         try { p = document.querySelector('label[for="' + CSS.escape(e.id) + '"]'); } catch (err) { p = null; }
@@ -242,15 +248,20 @@ export const ROW_CLIMB_JS = String.raw`  const __dupKeyOf = (tag, label) => Stri
   // 不同（K 不同 → 同一 row-index:N 指到不同成员）。改名 __rowLabelOf 避免与 LABEL_HELPERS_JS
   // 的 labelOfRaw 冲突（四 pass 里只有 OBSERVE 内插了 LABEL_HELPERS_JS）。
   const __rowTag = (el) => String(el.tagName || el.nodeName || '').toLowerCase();
+  // 范围控件的活值不是身份（与 LABEL_HELPERS_JS 的 isRangeLike 同一口径）——两处必须同步，
+  // 否则池行 label 与 dup 分组标签会分叉。
+  const __rowIsRange = (el, tag) => tag === 'input'
+    && String(el.getAttribute('type') || '').toLowerCase() === 'range';
   const __rowLabelOf = (el) => {
     const tag = __rowTag(el);
     const norm = (t) => String(t || '').replace(/[\uE000-\uF8FF]/g, '').replace(/[ \t\n\r\f\v]+/g, ' ').trim();
     const first = el.childNodes && el.childNodes.length ? String(el.childNodes[0].textContent || '') : '';
     let label = norm(el.getAttribute('aria-label') || el.getAttribute('title') || first || '');
     const text = (!label || tag === 'select') ? norm(el.innerText || '') : '';
-    if (!label) label = text || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+    if (!label && __rowIsRange(el, tag)) label = text || el.getAttribute('placeholder') || '';
+    else if (!label) label = text || el.getAttribute('placeholder') || el.getAttribute('value') || '';
     if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-      const own = String(el.value || '').trim();
+      const own = __rowIsRange(el, tag) ? '' : String(el.value || '').trim();
       let p = el.closest ? el.closest('label') : null;
       if (!p && el.id) {
         try { p = document.querySelector('label[for="' + (globalThis.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]'); } catch (err) { p = null; }

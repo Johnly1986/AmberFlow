@@ -675,9 +675,17 @@ if (snapshotActual !== snapshotText) {
 // PlanRules.promptText() 原为 plan.ts 内联 1,433 字符；收进 src/prompts/agent-prompts.ts 后
 // 本组守住「单源 + 预算 + 逐字节冻结」：改措辞 = 改行为，必须同步更新冻结 sha256 并重审。
 
-/** plan.rules 默认上下文的冻结 sha256（收口前 `new PlanningRules().promptText()` 的基线）。 */
+/**
+ * plan.rules 默认上下文的冻结 sha256（收口前 `new PlanningRules().promptText()` 的基线）。
+ *
+ * 本次重审通过的措辞修正：第 5 种形状的英文描述由 `tag (button|link|input|textarea|select)`
+ * 改为 `one role word (button OR link OR input OR textarea OR select)`——原写法被读成
+ * 「标签 + 角色枚举词」，作者据此刻意写出 `button 搜索` 这类串（闭集里它是**裸词**，
+ * 零命中却只报 matches nothing，模型无法区分"写错"与"页面没有"）。语义未变（仍是单独一个
+ * 角色词），只是把"必须单独成词"写死。
+ */
 const PLAN_RULES_FROZEN_SHA256 =
-  "994a8dfde9b5e38024844ad436507d70976734e8e32463072e1a09bcbb1f586d";
+  "4f0a6efaa1ada99a9203d08c255360b9af679960437c38e8396da7171e68f0bd";
 
 {
   /* ① spec 形状 + 消费点存在 */
@@ -976,8 +984,8 @@ const BRIDGE_DESC_MAX_CHARS = 800;
     }
     }
   });
-  // 基线 94 条（桥面盘点值；含 `amberflow_pilot` 工具 1 条 + 其 11 个参数描述）：数量漂移只
-  // warn——桥面新增工具描述是正常演进，重审长度预算后同步本基线。
+  // 基线 94 条（桥面盘点值）：数量漂移只 warn——桥面新增工具描述是正常演进，重审长度预算后
+  // 同步本基线（`selector` 参数原本已存在，本次只扩描述、不新增条目）。
   const BRIDGE_DESC_BASELINE = 94;
   if (descriptions.length !== BRIDGE_DESC_BASELINE) {
     bridgeWarnings.push(`bridge_desc: description 数量 ${descriptions.length}/${BRIDGE_DESC_BASELINE} 与基线不同——新增/删除桥面描述需重审长度预算`);

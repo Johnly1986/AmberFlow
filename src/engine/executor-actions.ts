@@ -16,6 +16,62 @@ import { type RangeOptions, type RangeOutcome, type RangeValue, applyRange } fro
 import type { BrowserMiddleware } from "./executor.ts";
 import type { ScrollEvidence } from "./executor.ts";
 
+/** B1 探针失败的结构化结果（`classifyProbeOutcome` 的返回形状；`actionOnce` 直接消费）。 */
+interface ProbeStop {
+  code: string;
+  reason: string;
+  detail: ActionabilityDetail | null;
+  /** 超时收尾且 URL 未变：点击**可能已派发**（未知）——调用方回 `execution_state:"unknown"`。 */
+  dispatch?: "unknown";
+}
+
+/**
+ * 可动作性探针的**结果分类**（`actOnce` 的 `occlusionProbe` 分支唯一实现体）。
+ *
+ * 为什么单独成函数：探针返回串有四种命运（已点击 / 已派发但报异常 / 已知失败 / 超时），
+ * 每种背后是不同的事实归属，混在动作主流程里既读不懂也数不清。这里只做分类，不做动作。
+ *
+ * 超时对账（`action-timeout`）：URL 已变 = 点击已在途中生效 → 按已点击返回（不补点）；
+ * URL 未变 = **未知**（`dispatch:"unknown"`），绝不把"不知道"说成没执行——破坏性动作会
+ * 因此被重复执行。URL 基线由调用方给（`null` = 未测，按未知处置）。
+ */
+async function classifyProbeOutcome(
+  mw: BrowserMiddleware, page: AnyPage, loc: AnyLoc, probe: string | null, urlBefore: string | null,
+): Promise<{ how: "clicked" | null; navigated: boolean; stop: ProbeStop | null }> {
+  if (probe === "__clicked__") {
+    try {
+      await page.waitForLoadState("domcontentloaded", { timeout: 3000 });
+    } catch {
+      /* the page may never fire it; the action already happened */
+    }
+    return { how: "clicked", navigated: false, stop: null };
+  }
+  if (probe === null) {
+    // 非 timeout 异常：click 可能已派发——**不补点**；URL 变了就按已点击记。
+    if (urlBefore !== null && urlOf(page) !== urlBefore) return { how: "clicked", navigated: true, stop: null };
+    return {
+      how: null, navigated: false,
+      stop: { code: "action_failed", reason: mw._lastProbeError ?? "click failed (probe returned no result)", detail: null },
+    };
+  }
+  if (probe === "stale_ref") {
+    return { how: null, navigated: false, stop: { code: "stale_ref", reason: "stale_ref", detail: null } };
+  }
+  // 失败串是既有 skip_reason 词面：`code` 取冒号前 token，`reason` 保留原文。
+  const cut = probe.indexOf(":");
+  const code = cut > 0 ? probe.slice(0, cut) : probe;
+  const detail = code === "not-actionable-or-covered"
+    ? mw._takeActionabilityDetail()
+    : await mw._readActionabilityDetail(loc, probe);
+  if (code === "action-timeout" && mw._lastTimeoutNavigated === true) {
+    return { how: "clicked", navigated: true, stop: null };
+  }
+  return {
+    how: null, navigated: false,
+    stop: { code, reason: probe, detail, ...(code === "action-timeout" ? { dispatch: "unknown" as const } : {}) },
+  };
+}
+
 
   /**
    * A3 `mw.actOnce`：**单动作**解析 + 执行（不评估 done、不占 flow 预算、不写 trace）。
@@ -65,6 +121,12 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     actionability?: ActionabilityDetail;
     /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
     probe_navigated?: boolean;
+    /**
+     * 动作派发的**真相**（不是 ok 的同义词）：`executed` = 已派发并观察到；
+     * `unknown` = 超时收尾且 URL 未变（派发与否都可能）——调用方必须把它当未知，
+     * 绝不据此重试破坏性动作，也绝不冒充 `executed:false`。
+     */
+    execution_state?: "executed" | "unknown";
     /** E1-c/F72/AX 回退：`#id` 直查兜底 / rehydrate 重扫 / AX 回退命中时出现（additive；其余路径键集不变）。 */
     resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback" | "actionable-ancestor" | "nested-fold" | "ref-lock";
   }> {
@@ -92,7 +154,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     let scrollFact: { moved: boolean; delta: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number } | null = null;
     let scrollStop: { stopCode: string; reason: string } | null = null;
     /** B1：被遮挡/超时的结构化失败（只有 `opts.occlusionProbe` 会产生）。 */
-    let probeStop: { code: string; reason: string; detail: ActionabilityDetail | null } | null = null;
+    let probeStop: ProbeStop | null = null;
     /** B1：探针返回 null 后 URL 已变 ⇒ 点击已发生（不补点）。 */
     let probeNavigated = false;
     try {
@@ -129,36 +191,14 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
         if (opts?.occlusionProbe === true) {
           // B1：探针即点击——`occludedReason` 的快路径本身就是一次真点击，成功即"已点"，
           // 绝不再调 `_clickOnly`（无双点）。被遮挡 ~0.8s 报；未遮挡慢元素仍留 5s 重试。
-          const probe = await mw.occludedReason(page, el, 800, 5000);
-          if (probe === "__clicked__") {
-            try {
-              await page.waitForLoadState("domcontentloaded", { timeout: 3000 });
-            } catch {
-              /* the page may never fire it; the action already happened */
-            }
-            how = "clicked";
-          } else if (probe === null) {
-            // 非 timeout 异常：click 可能已派发——**不补点**；URL 变了就按已点击记。
-            if (pre !== null && urlOf(page) !== pre.url) {
-              probeNavigated = true;
-              how = "clicked";
-            } else {
-              probeStop = {
-                code: "action_failed",
-                reason: mw._lastProbeError ?? "click failed (probe returned no result)",
-                detail: null,
-              };
-            }
-          } else if (probe === "stale_ref") {
-            probeStop = { code: "stale_ref", reason: "stale_ref", detail: null };
+          // 结果分类（含超时对账）在 classifyProbeOutcome（唯一实现体）。
+          const classified = await classifyProbeOutcome(mw, page, loc,
+            await mw.occludedReason(page, el, 800, 5000), pre === null ? null : pre.url);
+          if (classified.how !== null) {
+            how = classified.how;
+            probeNavigated = classified.navigated;
           } else {
-            // 失败串是既有 skip_reason 词面：`code` 取冒号前 token，`reason` 保留原文。
-            const cut = probe.indexOf(":");
-            const code = cut > 0 ? probe.slice(0, cut) : probe;
-            const detail = code === "not-actionable-or-covered"
-              ? mw._takeActionabilityDetail()
-              : await mw._readActionabilityDetail(loc, probe);
-            probeStop = { code, reason: probe, detail };
+            probeStop = classified.stop;
           }
         } else {
           [how, arg] = await mw._clickOnly(page, el);
@@ -182,6 +222,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
       return {
         ok: false, ref, how: probeStop.code, stopCode: probeStop.code, reason: probeStop.reason,
         ...(probeStop.detail === null ? {} : { actionability: probeStop.detail }),
+        ...(probeStop.dispatch === undefined ? {} : { execution_state: probeStop.dispatch }),
       };
     }
     const ok = how !== "stale_ref" && how !== "needs_value" && how !== "action_failed"

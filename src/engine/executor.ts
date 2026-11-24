@@ -97,6 +97,7 @@ import type { ActionabilityDetail, AnyPage, BrowserHandle, DecisionRuntimeHooks,
 import { FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_OVERLAY } from "./eval-snippets.ts";
 import {
   clickActionableAncestor, declaredHitTest, describeActionFailure, hitRelation, occlusionProbe,
+  timeoutDispatchNavigated,
 } from "./executor-actionability.ts";
 
 /* ------------------------------------------------------------------ run ctx */
@@ -361,8 +362,10 @@ ${ROW_CLIMB_JS}
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
     const tag = String(e.tagName || "").toLowerCase();
+    // 范围控件不读活值（value 不是身份；与 LABEL_HELPERS_JS 的 isRangeLike 同一口径）。
+    const isRange = tag === "input" && String(e.getAttribute("type") || "").toLowerCase() === "range";
     const label = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
-      || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      || e.getAttribute("placeholder") || (isRange ? "" : e.getAttribute("value")) || "").replace(/\s+/g, " ").trim().slice(0, 200);
     e.setAttribute("data-af-probe", tok + "-" + i);
     let rowTexts = null;
     if (arg.inRow !== undefined && rowCtx !== null && __rowVisible(e)) {
@@ -623,6 +626,11 @@ export class BrowserMiddleware {
    * 与 `_lastActionabilityDetail` 同一消费纪律：只在同一次动作调用内取走（additive）。
    */
   _lastAncestorRetarget: string | null = null;
+  /**
+   * 超时对账事实：最后一次 `action-timeout` 收尾时，URL 是否已与探针前不同（= 点击已在途中
+   * 生效）。只在同一次动作调用内消费；缺省 false = URL 未变/未测（"未知"，不冒充任何一边）。
+   */
+  _lastTimeoutNavigated = false;
 
   /* -- S5 decision-state ---------------------------------------------------- */
 
@@ -1690,6 +1698,7 @@ export class BrowserMiddleware {
     // TimeoutError; letting it escape killed the whole plan (measured on the live
     // zh.wikipedia case: 0/0 subgoals). Report it and let the loop forbid the ref.
     // S4 `force`：跳过 actionability 检查（仍要求可定位）。
+    const urlBefore = urlOf(page);
     try {
       await firstLoc(loc).click({ timeout: 5000, ...(force ? { force: true } : {}) });
     } catch (e) {
@@ -1705,6 +1714,11 @@ export class BrowserMiddleware {
             /* the page may never fire it; the action already happened */
           }
           return ["clicked", null];
+        }
+        // 超时对账：URL 已变 = 点击已在途中生效（异步导航/慢提交），按已动作记并带事实；
+        // 仍报 action_failed 会让上层重放这次点击（破坏性动作）。URL 未变仍按失败报。
+        if (timeoutDispatchNavigated(urlBefore, urlOf(page))) {
+          return ["clicked", { navigated_after_timeout: true }];
         }
       }
       return ["action_failed", describeActionFailure(e)];

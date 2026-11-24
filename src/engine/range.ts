@@ -57,6 +57,23 @@ export interface RangeOutcome {
   accurate?: boolean;
   /** 本次的目标数值（percent 已按 min/max 折算；读回对账用）。 */
   target?: number;
+  /**
+   * 生效值域被**格点吸附**时的原请求值与落地值（`requested === snapped_to` 时缺省）。
+   *
+   * 为什么要有：`input[type=range] step=10` 物理上不可能持有 11（浏览器自己会把它钉到 10）。
+   * 不吸附就只能三道策略全试、最后 `slider_not_settable`——那是把**值域事实**说成
+   * **控件设不上**，还白等满超时。吸附后 `applied:true` + `accurate:false` + `snapped_to:10`：
+   * 动作成功了，但请求的精确值在值域里不存在——两件事分开说。
+   */
+  snapped_to?: number;
+  /** 该目标所在的**手柄数**（1 = 单柄；>1 = 多柄/耦合范围控件）。仅按到多柄时出现。 */
+  handles?: number;
+  /**
+   * 控件的人读档位文本（`aria-valuetext`，如 "HK$200"）——只在页面提供时出现。
+   * 为什么带上它：数值读回只能证明"数字是多少"，页面真正展示给用户的是档位文案；
+   * 二者不一致时（价格滑杆）作者要靠它判断请求值落在哪一档。
+   */
+  valuetext?: string;
 }
 
 interface SliderState {
@@ -72,6 +89,14 @@ interface SliderState {
   bbox: { x: number; y: number; width: number; height: number };
   /** 最近有尺寸祖先的 bbox（手柄 0×0 时的指针落点）。 */
   ancestorBox: { x: number; y: number; width: number; height: number } | null;
+  /**
+   * 多柄/耦合范围控件的手柄数（同一容器内 `input[type=range]` 或 `[role=slider]` 的个数）。
+   * 1 = 普通单柄。>1 时"当前值/值域"是**一对**手柄的联合事实，percent 或跨柄目标不能
+   * 按单柄的值域解释——这才是「双柄联动后区间瞬变」的真因，必须作为事实带出。
+   */
+  handles: number;
+  /** 页面提供的档位文本（`aria-valuetext`）；未提供 = null（不编造）。 */
+  valuetext: string | null;
 }
 
 const num = (v: unknown): number | null => {
@@ -99,6 +124,24 @@ async function readState(loc: any): Promise<SliderState | null> {
       }
       const attr = (n: string) => node.getAttribute(n);
       const tag = String(node.tagName || "").toLowerCase();
+      // 手柄数（多柄/耦合范围控件的判定）：最近一层**只装滑块**的祖先容器里同类控件个数。
+      //   - 排除 body/html/main（页级容器不是耦合组，否则任意两个不相干滑杆都会被算成一对）；
+      //   - 组内不得混有其他表单控件（input 非 range / select / textarea / button）——混了
+      //     就说明这是普通表单而不是一对耦合手柄，停止上溯按单柄处理（多柄事实只陈述，
+      //     不靠猜测把无关控件绑定成区间）。
+      let handles = 1;
+      let boxHost = node.parentElement;
+      for (let k = 0; k < 8 && boxHost; k++, boxHost = boxHost.parentElement) {
+        const hostTag = String(boxHost.tagName || '').toLowerCase();
+        if (hostTag === 'body' || hostTag === 'html') break;
+        try {
+          const peers = boxHost.querySelectorAll('input[type=range], [role=slider]');
+          if (peers.length < 2) continue;
+          const others = boxHost.querySelectorAll('input:not([type=range]), select, textarea, button');
+          handles = others.length > 0 ? 1 : Math.min(peers.length, 8);
+          break;
+        } catch (err) { break; /* 选择器失败：按单柄处理（不猜多柄） */ }
+      }
       return {
         tag,
         inputType: String(attr("type") || "").toLowerCase(),
@@ -107,6 +150,8 @@ async function readState(loc: any): Promise<SliderState | null> {
         ariaMin: toNum(attr("aria-valuemin") ?? attr("min")),
         ariaMax: toNum(attr("aria-valuemax") ?? attr("max")),
         ariaStep: toNum(attr("step") ?? attr("aria-valuestep")),
+        valuetext: attr("aria-valuetext"),
+        handles,
         bbox: rectOf(node),
         ancestorBox,
       };
@@ -127,6 +172,8 @@ async function readState(loc: any): Promise<SliderState | null> {
       step: Math.abs(num(r["ariaStep"]) ?? 1) || 1,
       bbox: (r["bbox"] ?? { x: 0, y: 0, width: 0, height: 0 }) as SliderState["bbox"],
       ancestorBox: (r["ancestorBox"] ?? null) as SliderState["ancestorBox"],
+      handles: Math.max(1, num(r["handles"]) ?? 1),
+      valuetext: typeof r["valuetext"] === "string" && r["valuetext"] !== "" ? r["valuetext"] : null,
     };
   } catch {
     return null;
@@ -148,22 +195,40 @@ function clamp(v: number, min: number, max: number): number {
  * task-21/1a：返回 requested（调用方原话）与 target（折算/钳制后）——**越界不再静默钳制**
  * （钳制后按钳制值报 accurate:true 是假成功，违反红线③）；越界由 applyRange 结构化拒绝
  * （value_out_of_range，零动作）。percent 语义本就是区间比例，恒在值域内，无越界概念。
+ *
+ * 格点吸附（`snapped`）：`input[type=range] step=N` 的物理值域是 min + k·step，请求值落在
+ * 两格之间时浏览器/键盘都只能给最近格点——精确值**不存在**。不吸附的代价是三策略全部
+ * 收敛失败 + 满超时白等 + `slider_not_settable`（值域事实被说成控件设不上）。吸附先于
+ * 动作发生，`snapped_to` 如实带出（`applied:true` + `accurate:false`）。
  */
 function targetRangeValue(
   state: SliderState | null, value: RangeValue,
-): { requested: number; target: number; clamped: boolean } | null {
+): { requested: number; target: number; clamped: boolean; snapped: boolean } | null {
   const min = state?.min ?? 0;
   const max = state?.max ?? 100;
+  const step = state === null || !Number.isFinite(state.step) || state.step <= 0 ? null : state.step;
+  /** 值域是离散格点时把目标钉到最近格点；非格点值域（step 缺省=1 也算格点）恒吸附。 */
+  const snapTo = (v: number): { value: number; snapped: boolean } => {
+    if (step === null) return { value: v, snapped: false };
+    const k = Math.round((v - min) / step);
+    const snapped = min + k * step;
+    const bounded = clamp(snapped, min, max);
+    return { value: bounded, snapped: bounded !== v };
+  };
   if ("value" in value) {
     const v = num((value as { value: unknown }).value);
     if (v === null) return null;
     const clampedV = clamp(v, min, max);
-    return { requested: v, target: clampedV, clamped: clampedV !== v };
+    const snappedTo = snapTo(clampedV);
+    return { requested: v, target: snappedTo.value, clamped: clampedV !== v, snapped: snappedTo.snapped };
   }
   const pct = num((value as { percent: unknown }).percent);
   if (pct === null) return null;
   const t = clamp(min + (max - min) * (pct / 100), min, max);
-  return { requested: t, target: t, clamped: false };
+  // percent 是**比例语义**，不是精确值语义：吸附后如实带出请求值（requested = 折算值），
+  // 让调用方按 accurate 判读"档位是否恰好等价"。
+  const snappedTo = snapTo(t);
+  return { requested: t, target: snappedTo.value, clamped: false, snapped: snappedTo.snapped };
 }
 
 /** 设置原生 input[type=range] 的值（fill 失败时的 DOM 补发通道）。 */
@@ -283,26 +348,47 @@ export async function applyRange(
     };
   }
   const state0 = state0Ref;
+  const handles = state0.handles;
+  // 多柄控件的事实（只在 >1 时出现）：单柄读法解释不了"区间瞬变"，必须让调用方看见。
+  const handleFacts = handles > 1 ? { handles } : {};
+  const valueFacts = state0.valuetext === null ? {} : { valuetext: state0.valuetext };
   // task-21/1a：tolerance 缺省 **max(0.5, step/2)**（步长感知——步长 50 的滑杆 0.5 容差没有
   // 判定意义）；显式声明仍优先。
   const tolerance = Math.abs(opts.tolerance ?? Math.max(0.5, state0.step / 2));
   const timeoutMs = Math.max(1, opts.timeoutMs ?? 10_000);
   const deadline = Date.now() + timeoutMs;
+  // percent 是**区间比例**：单柄上唯一可解释；多柄（双滑块价格区间等）上"区间"本身就是两个
+  // 手柄之间的量，没有唯一目标——结构化拒绝、零动作，并指名用 `{value}` 打具体手柄。
+  if ("percent" in value && handles > 1) {
+    return {
+      ok: false, applied: false, accurate: false,
+      ...handleFacts, ...valueFacts,
+      requested: num((value as { percent: unknown }).percent) ?? undefined,
+      stopCode: "config_error",
+      reason: `percent is not applicable: this control has ${handles} handles (a coupled range), so `
+        + "a single percentage has no unique target — send {value: <number>} for the specific handle "
+        + "instead (each handle keeps its own min/max and the pair's bounds move as you drag)",
+    };
+  }
   const tv = targetRangeValue(state0, value);
   if (tv === null) {
     return {
       ok: false, applied: false, accurate: false,
+      ...handleFacts, ...valueFacts,
       stopCode: "slider_not_settable",
       reason: `invalid range value ${JSON.stringify(value)}`,
     };
   }
   const requested = tv.requested;
+  // 生效目标 = 吸附后的格点值（值域里真实存在的那一档）。requested 仍留原请求用于 accurate。
   const target = tv.target;
+  const snapFacts = tv.snapped ? { snapped_to: target } : {};
   // task-21/1a：越界请求**结构化拒绝，零动作**（不 clamp、不策略、不假装）——旧行为把
   // 越界目标钳进值域后按钳制值报 accurate:true，违反红线③（完成只认证据/不假装成功）。
   if (tv.clamped) {
     return {
       ok: false, applied: false, accurate: false,
+      ...handleFacts, ...valueFacts,
       requested, clamped_from: target, target,
       stopCode: "value_out_of_range",
       reason: `requested value ${requested} is outside the slider range [${state0.min}, ${state0.max}] `
@@ -312,51 +398,49 @@ export async function applyRange(
   }
   const strategies: string[] = [];
   let state: SliderState | null = state0;
+  /** 命中**生效目标**即成功；accurate 仍按 requested 判（吸附过 = 精确值不在值域里）。 */
+  const hit = (achieved: number | null, strategy: RangeStrategy): RangeOutcome | null =>
+    achieved === null || achieved !== target
+      ? null
+      : { ok: true, achieved, strategy, applied: true, accurate: !tv.snapped && achieved === requested, target, requested, ...snapFacts, ...handleFacts, ...valueFacts };
   const initial = currentOf(state);
   // 已经在目标上：如实成功（accurate 精确语义——initial 恰为 requested 才 accurate:true；
   // 容差邻域但非精确值 → ok:true + accurate:false + achieved 如实带出）。
-  if (initial !== null && Math.abs(initial - requested) <= tolerance) {
-    return {
-      ok: true, achieved: initial, strategy: state0.isRangeInput ? "fill" : "keyboard",
-      applied: true, accurate: initial === requested, target, requested,
-    };
+  if (initial !== null && Math.abs(initial - target) <= tolerance) {
+    const done = hit(initial, state0.isRangeInput ? "fill" : "keyboard");
+    if (done !== null) return done;
   }
   let lastProbe: RangeProbe | null = null;
-  // ① 原生 range：DOM 值写入（fill 优先）。accurate 语义：精确（achieved === requested）。
+  // ① 原生 range：DOM 值写入（fill 优先）。
   if (state0.isRangeInput) {
     strategies.push("fill");
     await fillNative(loc, target);
     await sleep(10);
     state = await readState(loc);
-    const got = currentOf(state);
-    if (got !== null && got === requested) {
-      return { ok: true, achieved: got, strategy: "fill", applied: true, accurate: true, target, requested };
-    }
+    const done = hit(currentOf(state), "fill");
+    if (done !== null) return done;
   }  // ② 键盘（ARIA 手柄的主力；input range 若 fill 失败也试一次）。
-  // accurate 语义：精确（achieved === requested——格点感知下目标可精确到达才算）。
   strategies.push("keyboard");
   if (Date.now() < deadline) {
     const kb = await keyboardSet(loc, target, deadline, state0);
-    if (kb.achieved !== null && kb.achieved === requested) {
-      return { ok: true, achieved: kb.achieved, strategy: "keyboard", applied: true, accurate: true, target, requested };
-    }
+    const done = hit(kb.achieved, "keyboard");
+    if (done !== null) return done;
     lastProbe = kb.probe;
   }
-  // ③ 指针（自绘手柄；0×0 手柄用最近有尺寸祖先）。accurate 精确语义：achieved === requested
-  //（容差只用于 pointer 内部的收敛判定——非精确落点如实 ok:false + achieved 带出）。
+  // ③ 指针（自绘手柄；0×0 手柄用最近有尺寸祖先）。容差只用于 pointer 内部的收敛判定。
   strategies.push("pointer");
   if (Date.now() < deadline) {
     const { achieved, bbox } = await pointerSet(page, loc, target, deadline, tolerance);
-    if (achieved !== null && achieved === requested) {
-      return { ok: true, achieved, strategy: "pointer", applied: true, accurate: true, target, requested };
-    }
+    const done = hit(achieved, "pointer");
+    if (done !== null) return done;
     const now = currentOf(await readState(loc));
     return {
       ok: false,
       applied: false, accurate: false, target, requested,
+      ...handleFacts, ...valueFacts,
       ...(lastProbe !== null ? { probe: lastProbe } : {}),
       stopCode: "slider_not_settable",
-      reason: `target ${requested} not reached after strategies [${strategies.join(" → ")}] `
+      reason: `target ${target} not reached after strategies [${strategies.join(" → ")}] `
         + `(current=${now ?? "unknown"}, bbox=${bbox === null ? "none" : `${Math.round(bbox.width)}×${Math.round(bbox.height)}`}, `
         + `timeoutMs=${timeoutMs}${lastProbe !== null ? `, probe=${lastProbe}` : ""}) `
         + "— the page does not expose a settable slider surface (never pretend success)",
@@ -365,6 +449,7 @@ export async function applyRange(
   return {
     ok: false,
     applied: false, accurate: false, target, requested,
+    ...handleFacts, ...valueFacts,
     ...(lastProbe !== null ? { probe: lastProbe } : {}),
     stopCode: "slider_not_settable",
     reason: `timeout after ${timeoutMs}ms with strategies [${strategies.join(" → ")}] — the range control did not accept any interaction`,

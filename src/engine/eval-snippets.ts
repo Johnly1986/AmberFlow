@@ -40,10 +40,16 @@ const FN_VALS = asFunction(VALS_JS);
  */
 const CHECKS_JS = `() => {
   const out = [];
-  for (const e of document.querySelectorAll('input,select,[aria-checked],[aria-selected]')) {
+  // 展开/收起状态（aria-expanded）也是"页面变没变"的事实：菜单、抽屉、筛选面板只翻这个属性
+  // 而不改文本时，纯 innerText 快照 diff 会报 changed=false（把成功的动作说成没动）。
+  for (const e of document.querySelectorAll('input,select,[aria-checked],[aria-selected],[aria-expanded],[aria-pressed]')) {
     const tag = e.tagName.toLowerCase();
     const t = (e.getAttribute('type') || '').toLowerCase();
     const key = e.name || e.id || e.getAttribute('data-test') || tag;
+    const ae = e.getAttribute('aria-expanded');
+    if (ae !== null) out.push(key + ':ae=' + ae);
+    const ap = e.getAttribute('aria-pressed');
+    if (ap !== null) out.push(key + ':ap=' + ap);
     if (tag === 'input' && (t === 'checkbox' || t === 'radio')) {
       out.push(key + '=' + (e.checked ? '1' : '0'));
     }

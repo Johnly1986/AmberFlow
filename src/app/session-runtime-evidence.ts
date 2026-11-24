@@ -9,9 +9,11 @@ import path from "node:path";
 import { ensureDir } from "../support/amberflow-home.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 import { takeHintMatchOthers } from "../engine/rules.ts";
+import { HINT_CLOSED_SET_TEXT } from "../engine/grammar-prompt.ts";
 import { countAnyFrame, rowStatsAnyFrame, type PageLike } from "../engine/extraction.ts";
 import { sleepMs } from "../support/sleep.ts";
 import type { ActionabilityDetail, ActMissDiagnostics, AnyPage } from "../engine/executor.ts";
+import type { HintShapeProblem } from "../engine/hint.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { Ctx } from "./ctx.ts";
 import { errMsg, intIn, nonEmpty, type SessionActOp } from "./session-runtime-contract.ts";
@@ -84,6 +86,17 @@ export function displayHow(op: SessionActOp, how: unknown): unknown {
  */
 export function actionabilityResponse(detail: ActionabilityDetail | undefined): Record<string, unknown> {
   return detail === undefined ? {} : { actionability: detail };
+}
+
+/**
+ * 超时对账在会话面的回显（引擎给才有）。
+ *
+ * `action-timeout` 收尾时 URL 未变 = 派发与未派发都可能：回复里带 `execution_state:"unknown"`，
+ * 让调用方按**未知**处置（尤其破坏性动作不得据此重试）。引擎判"已派发"（URL 已变）时不走失败
+ * 分支，因此这里只会见到 `"unknown"`；键缺省 = 该路径没有这份事实（其余键集逐字节不变）。
+ */
+export function executionStateResponse(state: "executed" | "unknown" | undefined): Record<string, unknown> {
+  return state === undefined ? {} : { execution_state: state };
 }
 
 /**
@@ -323,4 +336,28 @@ export class RecentResolutions {
       reasonLine: `；该 hint 曾在 ${stepsAgo} 个动作前命中（op=${hit.op}, how=${hit.how}）——行内容可能已变（展开/刷新），建议重新 observe 后换锚`,
     };
   }
+}
+
+/**
+ * 落空时的**形状判别**回显（`diagnostics.shape_problem`，引擎给才有）。
+ *
+ * 它回答"我写错了吗"——区别于 `diagnostics.near` 回答的"页面里有没有近似词"。会话面把它
+ * 提成独立一行写在 reason 尾部（不与候选/近似混在一起），错误码仍是既有 target_not_found。
+ */
+export function shapeProblemResponse(shape: HintShapeProblem | undefined): Record<string, unknown> {
+  return shape === undefined ? {} : { shape_problem: shape };
+}
+
+/**
+ * 会话 act 落空时补**闭集提示**（引擎侧命令步已有，会话面此前没有）。
+ *
+ * 为什么补：会话 act 的 `target_not_found` 只说 `matched nothing in a pool of N`——那是
+ * "页面没有"的口吻。作者最常错的其实是**写法**（角色词后接文本、后代组合 CSS），因此落空
+ * reason 末尾追加与命令空间**同一份**闭集文本（`grammar-prompt.HINT_CLOSED_SET_TEXT`，
+ * 单一出处，不手抄），指明"这串被当成永不命中的形状"。
+ *
+ * 纪律：只追加既有 reason 的尾段，停因码/证据键集不变；成功路径与非落空停因逐字节不变。
+ */
+export function closedSetReasonSuffix(code: string | undefined): string {
+  return code === "target_not_found" ? ` — ${HINT_CLOSED_SET_TEXT}` : "";
 }

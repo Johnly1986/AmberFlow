@@ -140,7 +140,7 @@ export const BRIDGE_HANDOFF_CAPS = {
 export const BRIDGE_EVIDENCE_SCROLL_FIELDS = ["moved", "delta", "scroll"] as const;
 
 /** range 证据块白名单（引擎给了才出现）。 */
-export const BRIDGE_EVIDENCE_RANGE_FIELDS = ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "probe"] as const;
+export const BRIDGE_EVIDENCE_RANGE_FIELDS = ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "snapped_to", "handles", "valuetext", "probe"] as const;
 
 /** ambiguity 证据块白名单（引擎给了才出现）。 */
 export const BRIDGE_EVIDENCE_AMBIGUITY_FIELDS = ["ambiguous", "matched_others", "hint_kind", "hint_tier", "hint_suspicious"] as const;
@@ -154,7 +154,7 @@ export const BRIDGE_EVIDENCE_AMBIGUITY_CAPS = {
 } as const;
 
 /** miss 证据块白名单（引擎给了才出现）。 */
-export const BRIDGE_EVIDENCE_MISS_FIELDS = ["target", "pool_size", "hint_shape", "hint_len", "settle_timed_out", "settle_waited_ms", "rescan", "candidates", "near", "rejected"] as const;
+export const BRIDGE_EVIDENCE_MISS_FIELDS = ["target", "pool_size", "hint_shape", "hint_len", "settle_timed_out", "settle_waited_ms", "rescan", "candidates", "near", "rejected", "shape_problem"] as const;
 
 /** miss 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_MISS_FIELDS）。 */
 export const BRIDGE_EVIDENCE_MISS_CAPS = {

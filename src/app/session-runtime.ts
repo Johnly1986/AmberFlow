@@ -45,7 +45,7 @@ import { extractElements } from "./candidate-scan.ts";
 import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
 
-import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, displayHow, doRead, doSignal, doWaitFor, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, rowsSettled, rowsSettledDual } from "./session-runtime-evidence.ts";
+import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, closedSetReasonSuffix, displayHow, doRead, doSignal, doWaitFor, executionStateResponse, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, rowsSettled, rowsSettledDual, shapeProblemResponse } from "./session-runtime-evidence.ts";
 import { FLAP_HEAL_SETTLE_MS, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
 export * from "./session-runtime-contract.ts";
 export { runSession } from "./session-runtime-entry.ts";
@@ -597,8 +597,8 @@ export class SessionRuntime {
     //      （doAct 存量行数只减不增）。----
     if (actOp === "set_range") {
       return await doActSetRange(target, req["value"], {
-        page, startedAt: started,
-        mw: () => this.mw(), log: (l) => this.log(l),
+        page, startedAt: started, mw: () => this.mw(), log: (l) => this.log(l),
+        recordAction: (e) => this.recordAction(e), actionCount: () => this.actionCount,
       });
     }
 
@@ -662,17 +662,18 @@ export class SessionRuntime {
       const wide = wantWide ? await wideScanCandidates(page, this.hosts) : null;
       return {
         ok: false, code: String(out.stopCode ?? "action_failed"),
-        reason: String(out.reason ?? "") + recent.reasonLine,
+        reason: String(out.reason ?? "") + recent.reasonLine + closedSetReasonSuffix(out.stopCode),
         op: actOp, target, executed: false,
+        ...actionabilityResponse(out.actionability),
+        ...executionStateResponse(out.execution_state),
         ...(out.ref === undefined ? {} : { ref: out.ref }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
-        ...actionabilityResponse(out.actionability),
         ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
         ...(overlay !== null && overlay.length > 0 ? { overlay } : {}),
         ...(wide !== null ? { wide_scan: wide } : {}),
         ...amb,
         ...ambiguityResponse(out.ambiguity),
-        ...missDiagnosticsResponse(out.diagnostics),
+        ...missDiagnosticsResponse(out.diagnostics), ...shapeProblemResponse(out.diagnostics?.shape_problem),
         ...recent.diag,
       };
     }

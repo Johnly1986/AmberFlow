@@ -12,7 +12,7 @@ import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem
 import { WIDE_POOL_ELEMENTS } from "./extraction.ts";
 import { WIDE_SCAN_POOL_ELEMENTS_MAX } from "../support/tuning.ts";
 import type { CommandDecl } from "./actions.ts";
-import { parseHint } from "./hint.ts";
+import { hintShapeProblem, parseHint, type HintShapeProblem } from "./hint.ts";
 import { hintCandidates, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
 import { FILLER_TOKENS, ROLE_TOKENS, STOP_TOKENS } from "./rules.ts";
 
@@ -298,6 +298,8 @@ export interface ActMissDiagnostics {
    * `resolved_via:"rehydrate-rescan"` 成功返回。
    */
   rescan?: { waited_ms: number; pool_size: number };
+  /** 落空后的形状判别（只在可疑形态出现：tag+文本 / 角色词+文本 / 选择器语法）；不是新停因。 */
+  shape_problem?: HintShapeProblem;
   /**
    * DOM 等价探测命中的事实块（元素在 DOM 却未进池；additive——未命中/探测异常/
    * 不适用形状 = 键不出现，键集与之前一致）。单一出处 = extraction.probeHintInDom。
@@ -373,8 +375,7 @@ export function actMissDiagnostics(input: {
   op: string;
   hintOpts?: HintMatchOptions;
   rejected?: readonly ActMissRow[];
-  /** E1-a：池预算帽回显（缺省 64 = MAX_ELEMENTS；只观测不改行为）。 */
-  poolCap?: number;
+  poolCap?: number;   // E1-a：池预算帽回显（缺省 = MAX_ELEMENTS；只观测不改行为）
   /** F72-①：settle 渲染可疑信号（executor 侧已判定 timedOut 才传；缺省不出现 = 键集不变）。 */
   settleTimedOut?: { waitedMs: number };
   /** 自动重扫未命中的事实（重扫落空时传）。 */
@@ -382,6 +383,8 @@ export function actMissDiagnostics(input: {
 }): ActMissDiagnostics {
   const hint = String(input.target ?? "");
   const parsed = parseHint(hint);
+  // 闭集里裸词收一切，所以只有零命中时才判"这串是不是根本不是一种形状"。
+  const shape = hintShapeProblem(hint);
   const cand = hintCandidates(hint, input.pool, { ...(input.hintOpts ?? {}), diag: false });
   const candidates: ActMissRow[] = [];
   if (cand !== null) {
@@ -406,6 +409,7 @@ export function actMissDiagnostics(input: {
     candidates,
     near: nearCandidates(hint, input.pool, NEAR_DEFAULT_CAP),
     rejected: (input.rejected ?? []).slice(0, 3).map((r) => ({ ...r })),
+    ...(shape === null ? {} : { shape_problem: shape }),   // 落空后的形状判别（可疑形态才有）
   };
 }
 
@@ -418,6 +422,10 @@ export function actMissDiscrimination(d: ActMissDiagnostics, pool: ElemPool, op:
   const summary = poolRoleSummary(pool, cmdFamilies(op));
   const names = (rows: readonly ActMissRow[]): string =>
     rows.map((r) => `"${r.label || r.tag}"`).join("、");
+  // 形状可疑时先说形状：写法不在闭集，换词也白换（比"池里没有近似词"更根因）。
+  if (d.shape_problem !== undefined) {
+    return `这串写法不是闭集形状（${d.shape_problem.reason}）——${d.shape_problem.suggestion}`;
+  }
   if (d.candidates.length > 0) {
     return `hint 在池内仍有 ${d.candidates.length} 个同档候选（如 ${names(d.candidates)}）却无法定位`
       + `——属定位/可达性问题，非目标缺失`;

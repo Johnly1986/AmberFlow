@@ -619,11 +619,11 @@ const HINT_HEAD = String.raw`(arg) => {
             const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
             const labelOf = (e) => {
                 const first = e.childNodes.length ? String(e.childNodes[0].textContent||'').trim() : '';
+                const rng = /^range$/i.test(String(e.getAttribute('type')||'')) && /^input$/i.test(String(e.tagName||''));
                 return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
-                        (e.innerText||'').trim() || e.placeholder || e.value || '').replace(/\s+/g,' ').trim();
+                        (e.innerText||'').trim() || e.placeholder || (rng ? '' : e.value) || '').replace(/\s+/g,' ').trim();
             };
-            // A2：裸词按「大小写不敏感 + 词边界/前缀」匹配**完整**标签（不是 CSS，也不是整串全等）：
-            // aria-label="Sort by, Not selected" 必须能被 "Sort by" 命中（逗号/句点/冒号边界同样算词尾）。
+            // A2：裸词按「大小写不敏感 + 词边界/前缀」匹配**完整**标签（不是 CSS，也不是整串全等）： // aria-label="Sort by, Not selected" 必须能被 "Sort by" 命中（逗号/句点/冒号边界同样算词尾）。
             const bareHit = (lab, dt, tok) => {
                 if (!tok) return false;
                 if (dt === tok || dt.indexOf('-' + tok) >= 0) return true;

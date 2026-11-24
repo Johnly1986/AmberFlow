@@ -857,6 +857,9 @@ export class SessionManager {
         ...ambiguity,
         ...scroll,
         ...range,
+        // 超时对账（引擎给才有）：`execution_state:"unknown"` = 点击可能已派发但无法证实——
+        // 调用方不得据此重试破坏性动作。桥只透传这一个闭集值，不重算、不改 ok。
+        ...(response['execution_state'] === 'unknown' ? { execution_state: 'unknown' as const } : {}),
         ...(actionability === undefined ? {} : { actionability }),
         ...(typeof response['screenshot_file'] === 'string' ? { screenshot_file: response['screenshot_file'] } : {}),
         ...base,
@@ -920,9 +923,13 @@ export class SessionManager {
     for (const strategy of ['fill', 'keyboard', 'pointer'] as const) {
       if (response['strategy'] === strategy) out['strategy'] = strategy
     }
-    for (const key of ['achieved', 'requested', 'target_value', 'clamped_from'] as const) {
+    for (const key of ['achieved', 'requested', 'target_value', 'clamped_from', 'snapped_to', 'handles'] as const) {
       const v = response[key]
       if (typeof v === 'number' && Number.isFinite(v)) out[key] = v
+    }
+    // 档位人读文本（页面给才有；只透传，不重算）。
+    if (typeof response['valuetext'] === 'string' && response['valuetext'] !== '') {
+      out['valuetext'] = clip(response['valuetext'], 60)
     }
     for (const probe of ['value_unreadable', 'home_ignored', 'lattice_unreachable'] as const) {
       if (response['probe'] === probe) out['probe'] = probe
@@ -1600,6 +1607,9 @@ export class SessionManager {
       session_alive: true,
       ...(ambiguity === undefined ? {} : { ambiguity }),
       ...(diagnostics === undefined ? {} : { diagnostics }),
+      // 形状判别提到顶层（与 diagnostics.shape_problem 同值）：agent 读失败面时"我写错了吗"
+      // 与"页面有没有"是两件事，埋进 diagnostics 里常被跳过。键只在引擎给时出现。
+      ...(diagnostics?.['shape_problem'] === undefined ? {} : { shape_problem: diagnostics['shape_problem'] }),
       ...(wide === undefined ? {} : { wide_scan: wide }),
     }
   }
@@ -1619,6 +1629,18 @@ export class SessionManager {
     if (typeof raw['pool_size'] === 'number') out['pool_size'] = raw['pool_size']
     if (typeof raw['hint_shape'] === 'string') out['hint_shape'] = clip(raw['hint_shape'], BRIDGE_EVIDENCE_MISS_CAPS.hintShapeMaxChars)
     if (typeof raw['hint_len'] === 'number') out['hint_len'] = raw['hint_len']
+    // 形状判别（引擎给才有）：kind 闭集 + 有界 reason/suggestion（≤200）。桥只裁剪不重算。
+    const shape = raw['shape_problem']
+    if (isObj(shape)) {
+      const out_shape: Record<string, unknown> = {}
+      const kind = shape['kind']
+      for (const k of ['tag-plus-text', 'role-word-plus-text', 'selector-syntax'] as const) {
+        if (kind === k) out_shape['kind'] = k
+      }
+      if (typeof shape['reason'] === 'string' && shape['reason'] !== '') out_shape['reason'] = clip(shape['reason'], 200)
+      if (typeof shape['suggestion'] === 'string' && shape['suggestion'] !== '') out_shape['suggestion'] = clip(shape['suggestion'], 200)
+      if (typeof out_shape['kind'] === 'string') out['shape_problem'] = out_shape
+    }
     // F72：渲染可疑信号与显式重扫事实（引擎给才有；只透传）。
     if (raw['settle_timed_out'] === true) out['settle_timed_out'] = true
     if (typeof raw['settle_waited_ms'] === 'number') out['settle_waited_ms'] = raw['settle_waited_ms']

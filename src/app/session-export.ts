@@ -61,6 +61,20 @@ export interface RecordedAction {
   value_len?: number;
   /** 明文值：仅当 `--record-values` 显式 opt-in 时存在（缺省只有 hash）。 */
   value?: string;
+  /**
+   * 范围原语 `set_range` 的轨迹字段（`op:"set_range"` 行才有）：引擎实测的
+   * applied/accurate/achieved/requested/target_value/strategy 与吸附/多柄事实。
+   * 只用于生成 `ctx.setRange(...)` 的**请求值**与注释事实——响应值不重算。
+   */
+  applied?: boolean;
+  accurate?: boolean;
+  achieved?: number;
+  requested?: number;
+  target_value?: number;
+  snapped_to?: number;
+  handles?: number;
+  valuetext?: string;
+  strategy?: string;
 }
 
 export interface ExportOptions {
@@ -208,6 +222,16 @@ export function readRecord(file: string): {
       ...(typeof parsed["value_hash"] === "string" ? { value_hash: parsed["value_hash"] } : {}),
       ...(typeof parsed["value_len"] === "number" ? { value_len: parsed["value_len"] } : {}),
       ...(typeof parsed["value"] === "string" ? { value: parsed["value"] } : {}),
+      // set_range 行的事实字段（引擎给才有；用于生成 ctx.setRange 的请求值与注释事实）。
+      ...(typeof parsed["applied"] === "boolean" ? { applied: parsed["applied"] } : {}),
+      ...(typeof parsed["accurate"] === "boolean" ? { accurate: parsed["accurate"] } : {}),
+      ...(typeof parsed["achieved"] === "number" ? { achieved: parsed["achieved"] } : {}),
+      ...(typeof parsed["requested"] === "number" ? { requested: parsed["requested"] } : {}),
+      ...(typeof parsed["target_value"] === "number" ? { target_value: parsed["target_value"] } : {}),
+      ...(typeof parsed["snapped_to"] === "number" ? { snapped_to: parsed["snapped_to"] } : {}),
+      ...(typeof parsed["handles"] === "number" ? { handles: parsed["handles"] } : {}),
+      ...(typeof parsed["valuetext"] === "string" ? { valuetext: parsed["valuetext"] } : {}),
+      ...(typeof parsed["strategy"] === "string" ? { strategy: parsed["strategy"] } : {}),
     });
   });
   return { problems, entry, marks, actions };
@@ -282,11 +306,10 @@ export function buildAppSource(input: {
     const id = stepIdOf(stepNo, a.op);
     const desc = `${a.op}${a.target === undefined ? "" : ` ${a.target}`}`.slice(0, 80);
     const hints = Array.isArray(a.observe_hints) && a.observe_hints.length > 0 ? a.observe_hints : [];
-    body.push(
-      `  // ── step ${stepNo} · ${desc}${a.changed === false ? "（轨迹 changed=false：页面无变化，done 需特别核对）" : ""}`,
-    );
+    const marker = a.changed === false ? "（轨迹 changed=false：页面无变化，done 需特别核对）" : "";
+    body.push(`  // ── step ${stepNo} · ${desc}${marker}`);
     if (hints.length > 0) {
-      body.push(`  // observe_hints（--record 采自观察面，已由同一个 hintMatch 自证；可照抄进 ctx.hint/command）：`);
+      body.push(`  // observe_hints（采自观察面，同一 hintMatch 自证；可照抄进 ctx.hint/command）：`);
       for (const h of hints.slice(0, 6)) body.push(`  //   - ${js(h)}`);
     } else {
       body.push(`  // observe_hints：轨迹未采到候选（观察面未命中）——先用 amber session observe 或 inspect 核对。`);
@@ -348,6 +371,7 @@ export function buildAppSource(input: {
       );
       continue;
     }
+    if (a.op === "set_range") { body.push(...rangeStepOf(a, where)); continue; }
     if (a.op === "tab") {
       // F81：switch 生成 ctx.switchTab 原语（自身计 1 个 flow step）。轨迹只存了**落点事实**
       //（from/to），没存当时的 match 口径——导出按 URL 子串重建（确定性最高），URL 缺失退
@@ -440,6 +464,30 @@ ${body.join("\n")}${body.length > 0 ? "\n" : ""}  await ctx.done();
 `;
 
   return { source: header + meta, steps: stepNo, failed, unresolved, warnings };
+}
+
+/**
+ * `set_range` 轨迹行 → `ctx.setRange` 骨架（**只出请求值**，响应事实进注释）。
+ *
+ * 请求值取 `requested`（引擎对账用的原始请求数）——轨迹没有它就不生成动作（骨架不发明值）。
+ * 响应事实（applied/accurate/achieved/strategy/吸附/多柄/档位文本）只进注释：作者核对用，
+ * 不进代码（把它们写成动作会让骨架"重放一个观测值"，而不是重放一次请求）。
+ */
+function rangeStepOf(a: RecordedAction, where: string): string[] {
+  const facts = `applied=${a.applied === true} accurate=${a.accurate === true}`
+    + (typeof a.achieved === "number" ? ` achieved=${a.achieved}` : "")
+    + (typeof a.strategy === "string" ? ` strategy=${a.strategy}` : "")
+    + (typeof a.snapped_to === "number" ? ` snapped_to=${a.snapped_to}（请求值不在页面格点上，已吸附）` : "")
+    + (typeof a.handles === "number" ? ` handles=${a.handles}（多柄控件）` : "")
+    + (typeof a.valuetext === "string" ? ` valuetext=${js(a.valuetext)}` : "");
+  if (typeof a.requested !== "number" || !Number.isFinite(a.requested)) {
+    return [`  // ── ⚠ ${where} —— 轨迹没有请求值事实，未生成动作（按现场手写 ctx.setRange）。`, ""];
+  }
+  return [
+    `  // set_range 导出为 ctx.setRange（轨迹事实 ${facts}）：`,
+    `  await ctx.setRange(${js(a.target ?? "")}, { value: ${a.requested} });`,
+    "",
+  ];
 }
 
 /** done 候选只作为注释：从轨迹记录的落点 URL 取一个有辨识度的路径段（不验证、不归纳）。 */

@@ -487,3 +487,79 @@ test('extract settled：opt-out 无 settled 键（形状不变）+ 非法值 con
     assert.equal(bad.code, 'config_error')
   })
 })
+
+test('shape_problem：落空时的形状判别有界透传（kind 闭集 + reason/suggestion ≤200）', async () => {
+  await withHarness({
+    routes: [{
+      type: 'act', targetIncludes: 'shaped',
+      respond: {
+        ok: false, code: 'target_not_found', executed: false, url: 'http://fixture.local/page',
+        reason: 'target "button 搜索" matched nothing in a pool of 61 element(s)',
+        // 引擎实际形状：同一份同时进 diagnostics（引擎构造）与顶层（会话回显）。
+        shape_problem: { kind: 'role-word-plus-text', reason: 'r'.repeat(400), suggestion: 's'.repeat(400) },
+        diagnostics: {
+          target: 'button 搜索', pool_size: 61, hint_shape: 'bare', hint_len: 9,
+          shape_problem: { kind: 'role-word-plus-text', reason: 'r'.repeat(400), suggestion: 's'.repeat(400) },
+        },
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'act', act_op: 'click', target: 'shaped-target' })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'target_not_found')
+    // 形状判别随 diagnostics 透传（引擎把它放在 diagnostics 里；会话线另在顶层回显同一份）。
+    const sp = (r['diagnostics'] as Record<string, unknown> | undefined)?.['shape_problem'] as Record<string, unknown> | undefined
+    assert.ok(sp !== undefined, 'shape_problem must reach the bridge diagnostics block')
+    assert.equal(sp['kind'], 'role-word-plus-text', 'kind must survive the closed-set filter')
+    assert.equal(String(sp['reason']).length, 200, 'reason must be clipped to 200')
+    assert.equal(String(sp['suggestion']).length, 200, 'suggestion must be clipped to 200')
+    // diagnostics 内的同一份也要透传（引擎给才有）
+    const diag = r['diagnostics'] as Record<string, unknown>
+    assert.ok(diag !== undefined, 'diagnostics must still pass through')
+    assert.equal(diag['pool_size'], 61)
+  })
+})
+
+test('shape_problem：未知 kind 被丢弃（闭集纪律，不外扩词面）', async () => {
+  await withHarness({
+    routes: [{
+      type: 'act', targetIncludes: 'shapedbad',
+      respond: {
+        ok: false, code: 'target_not_found', executed: false, url: 'http://fixture.local/page',
+        shape_problem: { kind: 'made-up-kind', reason: 'x' },
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'act', act_op: 'click', target: 'shapedbad-target' })
+    const diag = r['diagnostics'] as Record<string, unknown> | undefined
+    assert.ok(diag === undefined || !('shape_problem' in diag), 'unknown kind must not be projected (closed set stays closed)')
+  })
+})
+
+test('execution_state：action-timeout 的 unknown 派发事实透传', async () => {
+  await withHarness({
+    routes: [{
+      type: 'act', targetIncludes: 'timing',
+      respond: {
+        ok: false, code: 'action-timeout', executed: false, url: 'http://fixture.local/page',
+        reason: 'still not actionable: it is not just slow', execution_state: 'unknown',
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'act', act_op: 'click', target: 'timing-target' })
+    assert.equal(r.code, 'action-timeout')
+    assert.equal(r['execution_state'], 'unknown', 'unknown dispatch must reach the caller (never silently "not executed")')
+  })
+})
+
+test('execution_state：其它失败不补该键（形状不变）', async () => {
+  await withHarness({
+    routes: [{
+      type: 'act', targetIncludes: 'notiming',
+      respond: { ok: false, code: 'target_not_found', executed: false, url: 'http://fixture.local/page', reason: 'no match' },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'act', act_op: 'click', target: 'notiming-target' })
+    assert.ok(!('execution_state' in r), 'no engine key = no bridge key')
+  })
+})

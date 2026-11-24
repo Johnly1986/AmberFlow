@@ -4,6 +4,48 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-24 会话诚实性批（P0/P1：超时对账 / 滑块身份 / 轨迹 / 形状判别 / observe 收窄）
+
+> 用户「按顺序实施，完成后逐项测试」：按会话实录复盘的四条 P0 + 四条 P1 逐项落地并各自验收。
+> 纪律不变：不新增 stopCode、成功路径产物不动、run 面语义只增 additive 证据。
+
+- **P0-2 超时对账（`execution_state`）**：`action-timeout` 不再一律报"没执行"。
+  `timeoutDispatchNavigated`（单源）比对动作前 URL：已变 = 点击已在途中生效 → 按 `how:"clicked"`
+  返回（`probe_navigated:true` / trace 行 `navigated_after_timeout:true`，**不补点**）；未变 =
+  `execution_state:"unknown"`（会话响应、桥透传 + 一行 `dispatch: unknown … do NOT retry a
+  destructive action`）。`_clickOnly` 与 `occlusionProbe` 共用同一判据（探针结果分类收进
+  `classifyProbeOutcome`，`actOnce` 主流程因此回落到 167 行）。
+- **P0-4 滑块身份与值域模型**：`input[type=range]` 的 label 不再读 `value`（活值不是身份；
+  `LABEL_HELPERS_JS.isRangeLike` + 池/observe/回捞/A3 四处同口径）——同一 hint 连续设值不再
+  因值变化失配。`applyRange` 增**格点吸附**（先钉到最近格点再动：`applied:true` +
+  `accurate:false` + `snapped_to`，不再三策略全试 + 满超时白等）、**多柄事实**（`handles>1` 时
+  `percent` 结构化 `config_error` 零动作，其它失败也带 `handles`；容器判定排除 body/html 且
+  混有其它表单控件即按单柄）与 `aria-valuetext` 回显。
+- **P0-3 set_range 进统一 act 事务**：`doActSetRange` 自持 `recordAction`（成功/失败都进
+  `actions.jsonl`），`RecordedAction` 增 range 事实字段，`session export` 还原
+  `await ctx.setRange(<hint>, { value: <requested> })`；`verify:session-range` 扩到七条路径
+  （含轨迹行数与 export 产物断言）。
+- **P0-1 hint 形状判别**：新增 `hintShapeProblem`（落空后才判——闭集里裸词收一切，解析期拒绝会
+  误杀真 label）：`tag-plus-text` / `role-word-plus-text` / `selector-syntax`（含 `#id` 里带
+  组合符）三类，进 `diagnostics.shape_problem` + 会话顶层 `shape_problem` + 桥一行
+  `hint shape: … / fix: …`，reason 的 `判别:` 在可疑形态下先说形状。语法描述纠正：
+  `HINT_SHAPES[4].en` 由 `tag (button|link|…)` 改为 `one role word (button OR link OR …)`
+  （原写法被读成"标签 + 角色枚举词"，正是 `button 搜索` 的来源），`plan.rules` 冻结 hash 同步重审。
+- **P1 观察面与传感器**：桥 session 工具补 `selector` 参数描述（observe 用它**替换**观察集合，
+  要区域内的控件要写 `#region button, #region a`）；`CHECKS_JS` 快照增 `aria-expanded`/
+  `aria-pressed`（只翻属性的菜单/抽屉不再被 `changed:false` 误报，实测属性翻转页从 false → true）。
+- **P1 错误面与观察面收口**：会话 act 的 `target_not_found` reason 追加**命令步同一份**
+  `HINT_CLOSED_SET_TEXT` 尾段（「容器/后代 CSS 会被当成永不命中的形状」，单一出处不手抄）；
+  桥 session 工具有 `selector` 描述扩为 read/observe/extract 三面语义（observe 是**替换**观察集合，
+  区域内的控件要写 `#region button, #region a`）；观察行渲染改 `✓/✗ + "label" + addr:` 两列
+  （✓/✗ = 可寻址性，不是好坏；从此不会把人读摘要当地址），失败面另提一行
+  `hint shape: … / fix: …` 与 `dispatch: unknown …`。
+- 测试：`verify:session-range` 扩到**八条路径**（新增形状判别端到端 + 真 label 反例），桥
+  `passthrough` 加 4 条（shape_problem 透传/未知 kind 丢弃/execution_state 透传与缺键形状不变）。
+- 文档：`docs/INTERACTIVE_SESSION.md`（超时对账 / set_range 身份与档位与轨迹 / shape_problem 字段 /
+  闭集尾段 / stopCode 表 / changed 传感器）、`docs/APP_SCRIPT_AUTHORING.md`（角色词"单独一个词"、
+  形状判别、setRange 吸附与多柄）、桥 schema 描述与 `prompt-hit` 基线（94 条不变）。
+
 ## [Unreleased] — 2026-11-24 剩余项批（键漂移加固 + 会话契约阶段 2 + 规则词面归一）
 
 > 用户「推送后继续完成剩余项」：三批并行落地（task-31 / task-45 / task-30 第 1 项）。

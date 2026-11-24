@@ -10,9 +10,23 @@
 import { FN_HIT_RELATION } from "./eval-snippets.ts";
 import { hintCandidates } from "./rules.ts";
 import { firstLoc } from "./executor-pure.ts";
-import { actionCapabilities, type Elem, type ElemPool, frameAt } from "./extraction.ts";
+import { actionCapabilities, type Elem, type ElemPool, type PageLike, frameAt, urlOf } from "./extraction.ts";
 import type { AnyLoc, AnyPage } from "./executor-types.ts";
 import type { BrowserMiddleware } from "./executor.ts";
+
+/**
+ * 超时对账（**派发可能已发生**的唯一定性办法）：动作超时后，URL 与动作前不同即
+ * "点击已派发并生效"——Playwright 的动作性检查可能因页面在点击中途换页/换节点而超时，
+ * 而副作用已经发生。判据只用 URL（无额外页面往返、不猜页面状态）；URL 未变 = **未知**
+ * （派发与未派发都可能），由调用方如实报 `execution_state:"unknown"`，不得报 `executed:false`。
+ *
+ * 为什么这条必须是引擎事实而不是调用方推断：对破坏性动作，把"未知"说成"没执行"会诱发
+ * 重复执行；说成"执行了"会掩盖真失败。两者都错，所以只有 `navigated` 是布尔事实，
+ * 其余留给调用方按停因码分支。
+ */
+export function timeoutDispatchNavigated(urlBefore: string, urlAfter: string): boolean {
+  return urlBefore !== urlAfter;
+}
 
 /** 中心点命中关系（`hitRelation` 返回形状；读不到 = unknown，不造假）。 */
 export interface HitRelation { relation: string; blocker: string | null }
@@ -121,8 +135,12 @@ export async function occlusionProbe(mw: BrowserMiddleware, page: AnyPage, el: E
   mw._lastActionabilityDetail = null;
   mw._lastProbeError = null;
   mw._lastAncestorRetarget = null;
+  mw._lastTimeoutNavigated = false;
   const loc = await mw._locatorFor(page, el);
   if (loc === null) return "stale_ref";
+  // 超时对账基线：动作前的 URL（零额外往返）。点击派发可能在超时前生效——URL 变了就是
+  // 已动作的硬证据，不能把"慢"说成"没执行"（破坏性动作会因此被重复执行）。
+  const urlBefore = urlOf(page as unknown as PageLike);
   try {
     await firstLoc(loc).click({ timeout: probeMs });   // real click; usually succeeds
     return "__clicked__";                              // caller treats as done action
@@ -155,6 +173,9 @@ export async function occlusionProbe(mw: BrowserMiddleware, page: AnyPage, el: E
       await firstLoc(loc).click({ timeout: slowMs });
       return "__clicked__";
     } catch {
+      // 长重试也超时：URL 与探针前不同 = 点击已在途中生效（含被探针那次派发推进的异步导航）。
+      // 记成事实供调用方按已动作处理；URL 未变 = 未知（不冒充 either way）。
+      mw._lastTimeoutNavigated = timeoutDispatchNavigated(urlBefore, urlOf(page as unknown as PageLike));
       return "action-timeout";   // still not actionable: it is not just slow
     }
   }

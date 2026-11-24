@@ -1182,7 +1182,13 @@ export function apply(ctx: Context, config: Config): void {
         description: 'act `scroll`: pixel delta for the container; preferred when both `to` and `by` are given. Must '
           + 'be finite and non-zero.',
       },
-      selector: { type: 'string', description: 'read: CSS selector to read.' },
+      selector: {
+        type: 'string',
+        description: 'read/observe/extract: CSS selector. read = element to read; extract = row selector; observe = the '
+          + 'observation set itself (it REPLACES the admission surface, so for controls inside a region write a '
+          + 'descendant selector such as `#region button, #region a`). Not a hint: hints are the 6-shape closed set, '
+          + 'selectors are the CSS query surface.',
+      },
       what: {
         type: 'string', enum: BRIDGE_READ_WHATS,
         description: 'read: what to read: `text` (innerText), `value` (inputValue), `count` (match count) or `attr` '
@@ -1372,6 +1378,15 @@ function renderSessionResult(value: Record<string, unknown>): string {
         return `${String(row.tag ?? '')} "${String(row.label ?? '')}"${why}`
       }).join(' | ')
     }
+    // 形状判别（引擎给才有）：把"写法不在闭集"与"页面没有"分开说——这是 agent 最容易误判的一类。
+    const shapeRaw = miss === undefined ? undefined : miss['shape_problem']
+    const shapeProblem = typeof shapeRaw === 'object' && shapeRaw !== null
+      ? shapeRaw as Record<string, unknown>
+      : undefined
+    const shapeLine = shapeProblem === undefined
+      ? ''
+      : `\nhint shape: ${String(shapeProblem.kind ?? '?')} — ${String(shapeProblem.reason ?? '')}`
+        + (typeof shapeProblem.suggestion === 'string' ? `\nfix: ${shapeProblem.suggestion}` : '')
     const missLine = miss === undefined
       ? ''
       : `\nno match: hint ${String(miss.hint_shape ?? '?')}/${String(miss.hint_len ?? '?')} pool ${String(miss.pool_size ?? '?')}`
@@ -1389,11 +1404,19 @@ function renderSessionResult(value: Record<string, unknown>): string {
     const wideLine = wide === undefined
       ? ''
       : `\nwide-scan: ${String(wide.pool_size ?? '?')} candidate(s) (${withHints} with hints, showing ${wideRows.length} — see wide_scan.candidates)`
+    // 超时对账（引擎给才有 execution_state 时的一行）：把"未知"明说成未知，避免调用方当成
+    // "没执行"而重试破坏性动作。
+    const dispatchLine = value.execution_state === 'unknown'
+      ? '\ndispatch: unknown — the action may already have been dispatched (URL unchanged); '
+        + 'do NOT retry a destructive action on this result, re-observe first'
+      : ''
     return `${tag}: ${String(value.code ?? 'error')}${value.reason === undefined ? '' : ` — ${String(value.reason)}`}`
       + (value.session_alive === true ? ' (session still alive)' : '')
       + header
       + detail
       + blocked
+      + dispatchLine
+      + shapeLine
       + missLine
       + wideLine
   }
@@ -1417,13 +1440,16 @@ function renderSessionResult(value: Record<string, unknown>): string {
           : '')
     case 'observe': {
       const el = Array.isArray(value.elements) ? value.elements : []
+      // 行首 ✓/✗ 是**可寻址性**（不是好坏）：✓ = 有自证 hint，可直接抄进 act target；
+      // ✗ = 这一行没有地址（容器/无唯一词面），抄它的 label 只会得到 target_not_found。
+      // 地址单独一列（`addr:`），从此不会把人读摘要当成地址。
       const lines = el.slice(0, OBSERVE_DISPLAY).map((raw) => {
         const e = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
         const hints = Array.isArray(e.hint_candidates) ? e.hint_candidates.filter((h): h is string => typeof h === 'string') : []
-        const notAdmitted = e.admitted === false && typeof e.why_not_admitted === 'string' && e.why_not_admitted !== ''
-        return `  ${String(e.ref ?? '')} ${String(e.tag ?? '')} ${String(e.label ?? '')}`
-          + (hints.length ? ` → ${hints.join(' | ')}` : ' (no hint)')
-          + (notAdmitted ? `  [not admitted: ${String(e.why_not_admitted).slice(0, 80)}]` : '')
+        const why = typeof e.why_not_admitted === 'string' && e.why_not_admitted !== '' ? e.why_not_admitted : undefined
+        const head = `  ${hints.length > 0 ? '✓' : '✗'} ${String(e.ref ?? '')} ${String(e.tag ?? '')} "${String(e.label ?? '')}"`
+        if (hints.length > 0) return `${head}  addr: ${hints.join(' | ')}`
+        return `${head}  — no address${why === undefined ? '' : ` [why: ${why.slice(0, 80)}]`}`
       })
       const counts = typeof value.counts === 'object' && value.counts !== null
         ? value.counts as Record<string, unknown>
@@ -1452,6 +1478,9 @@ function renderSessionResult(value: Record<string, unknown>): string {
           + (typeof value.target_value === 'number' ? ` value=${String(value.target_value)}` : '')
           + (typeof value.requested === 'number' ? ` requested=${String(value.requested)}` : '')
           + (typeof value.clamped_from === 'number' ? ` clamped_from=${String(value.clamped_from)}` : '')
+          + (typeof value.snapped_to === 'number' ? ` snapped_to=${String(value.snapped_to)}` : '')
+          + (typeof value.handles === 'number' ? ` handles=${String(value.handles)}` : '')
+          + (typeof value.valuetext === 'string' ? ` valuetext=${value.valuetext}` : '')
           + (typeof value.probe === 'string' ? ` probe=${value.probe}` : '')
           + `\nurl: ${String(value.url ?? '')}`
       }

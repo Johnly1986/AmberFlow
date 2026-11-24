@@ -11,11 +11,11 @@ export const HINT_SHAPE_TOKENS: readonly string[] = [
   "tag[attr~substr]",
   "tag~token",
   "tag[attr=value]",
-  "tag (button|link|input|textarea|select)",
+  "one role word (button OR link OR input OR textarea OR select)",
   "bare-token"
 ];
 
-export const HINT_LEARN_NOTE = "A hint is a STABLE-HANDLE CLOSED SET of 6 shapes (#id | tag[attr~substr] | tag~token | tag[attr=value] | tag (button|link|input|textarea|select) | bare-token; only test=data-test, type and aria-label attribute names take part in matching), NOT arbitrary CSS - container/descendant selectors (e.g. \"#outer input\") parse but can never match (target_not_found).";
+export const HINT_LEARN_NOTE = "A hint is a STABLE-HANDLE CLOSED SET of 6 shapes (#id | tag[attr~substr] | tag~token | tag[attr=value] | one role word (button OR link OR input OR textarea OR select) | bare-token; only test=data-test, type and aria-label attribute names take part in matching), NOT arbitrary CSS - container/descendant selectors (e.g. \"#outer input\") parse but can never match (target_not_found).";
 
 export const PLAN_PLAYBOOK_SHORT = "高效规划六步法 v2.1（走查先行）。\n① inspect 先看：`amber inspect --url <页> --json`，hint_candidates 有候选就照抄，并核对 op 能力面与词面在池。\n② 全流程走查：按真实步序走通，带出能力墙/产品事实/提槽清单/done 素材/绕行决策。\n③ 规划应用：slots + done 正向锚、否定配 exists、多动作后判、状态前进自检。\n④ `amber apps check <id> --slot k=v` 离线验分支，改掉裸 not / any 含 not(exists) 两条 lint。\n⑤ `amber run <id> --trace` 真跑，失败先看 stopCode/reason。\n⑥ 失败取证：分清引擎缺陷/产品事实/任务口径（A/B、对照、双腿），判别不了就上报。";
 

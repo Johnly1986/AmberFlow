@@ -256,8 +256,11 @@ export async function runActionExecute(mw: BrowserMiddleware, a: {
     let actionability: ActionabilityDetail | null = null;
     /** 本条动作（含重试）最后一次 actionability 探针给出的失败原因。 */
     let probeFailure: string | null = null;
+    /** 超时对账事实：探针超时但 URL 已变 = 点击已在途中生效（动作行记 navigated_after_timeout）。 */
+    let navigatedAfterTimeout = false;
     for (let attempt = 0; ; attempt++) {
       how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
+      navigatedAfterTimeout = false;
       // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
       // 不点击，如实记 hit_test 证据（绝不静默成功）。命中通过后仍走既有 actionability 探针。
       const declaredNow = targets.getDeclared();
@@ -282,6 +285,12 @@ export async function runActionExecute(mw: BrowserMiddleware, a: {
           } catch {
             /* nothing to wait for */
           }
+          how = "clicked";
+          arg = null;
+        } else if (probeFailure === "action-timeout" && mw._lastTimeoutNavigated === true) {
+          // 超时对账：探针报超时，但 URL 已与探针前不同 = 点击已在途中生效（异步导航/慢提交）。
+          // 按已动作记并落证据；仍报失败会让上层重放这次点击（破坏性动作尤其危险）。
+          navigatedAfterTimeout = true;
           how = "clicked";
           arg = null;
         }
@@ -441,6 +450,7 @@ export async function runActionExecute(mw: BrowserMiddleware, a: {
     const rowEvidenceOut = rowEvidence(el, rowParsed);
     trace.push({ step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)), risky, executed, confirmed, method, decision_kind: decisionKind, conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
       ref, op: actionOp, ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}), changed, ...(uploadFiles !== null ? { files: uploadFiles } : {}),
+      ...(navigatedAfterTimeout ? { navigated_after_timeout: true } : {}),
       ...(clickPosition !== null ? { position: clickPosition } : {}), ...(nominatedRepair ? { nominated_family_repair: true } : {}), ...(decisionKind === "model" && layaMargin !== null
         ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}), ...(method === "escalate" && escalatedPick ? { escalated: true } : {}), ...(prevented ? { prevented } : {}), ...(noted ? { noted: Object.keys(noted).length } : {}),
       ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question

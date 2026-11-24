@@ -38,6 +38,11 @@ export interface TraceStep {
   stale_retry?: Array<{ attempt: number; reason: string; ref: string }>;
   /** 本次动作按步级 `force` 声明执行（Playwright force：跳过 actionability，仍要求可定位）。 */
   forced?: boolean;
+  /**
+   * 超时对账：探针报 `action-timeout` 但动作前 URL 已变 ⇒ 点击已在途中生效，按已动作记。
+   * 缺字段 = 未发生（既有跳过的 action-timeout 行形状不变）。
+   */
+  navigated_after_timeout?: true;
   [k: string]: unknown;
 }
 

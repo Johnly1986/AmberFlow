@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "pool-js-pure",
-  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）",
+  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）；滑块身份修正批（`value` 不是身份——range 控件不再用活值当 label）为**有意非纯搬移变更**，按同一纪律把连带改变的 LABEL_HELPERS_JS / ROW_CLIMB_JS / HINT_HEAD 从 manifest 删除（三者口径必须同步，见 LABEL_HELPERS_JS 的 isRangeLike 注释），其余符号保持 hash 不动",
   "files": {
     "src/engine/pool-js-core.ts": {
       "symbols": {
@@ -9,8 +9,6 @@
         "BUCKET_HELPERS_JS": "079b2c7addbb2da675043582985849c7c287f32a56c79ceb76f3f2cc9f70bb42",
         "COLLECT_JS": "70a20216716813127e5409997d7d9ae808e3d60d612fc49cf8d2063cc061d598",
         "compile": "5f17f11158ef2bcafdf1e1c1d52114c84a76bdfe2578cb8e14d8b22d0efe576f",
-        "LABEL_HELPERS_JS": "1a9669a0faf67360cca9f99bcfb3f1f619f1b8a0799e48cb4ef9abda6d943cb7",
-        "ROW_CLIMB_JS": "53fbb67e16b721882d6aca7ecee17df081b0a08acd02e47583174d0609b85ad4",
         "STRUCTURE_HELPERS_JS": "d662b7b63a9a2752f4d0280e0f992239552abf0526c9bc71f99008163f6a1554"
       }
     },
@@ -20,7 +18,6 @@
         "FN_TAG": "625a94832966392ec17f259c91ef681f2e32bc4b0090b374d48bbd55146fd605",
         "FN_WRAPPER": "2c1bd711156ea059b79f942d2e2110dd494504dd2b25e0908c3d2653929c141e",
         "HEURISTIC_WIDGET_JS": "d0f58c1de427643a3a36d6015c0de47ee0a5e2e34acdff6fa6e22f51b07aaa50",
-        "HINT_HEAD": "5ce582d4e7614c9d535db3165aa0925f67220a72d54911c3eca4ddfa57dd46a5",
         "META_JS": "845e6f94c97c12301b172f07ee8ed1fd73cfc3b3badf5e68721cf9b111c7cfea",
         "NEAR_JS": "75f0cb28b51ed50442b1dddd012ec982f7d89ff31d4c0aa1af815dd73ec8d0ec",
         "OBSERVE_JS": "78795751d5389ec083ca28e4b1387e090e508adb422450b9d0225fd66db820bc",

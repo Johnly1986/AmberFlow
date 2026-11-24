@@ -202,7 +202,8 @@ export const SESSION_EVIDENCE_CAP_TABLE = {
   },
   range: {
     bridgeKey: "range",
-    fields: ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "probe"],
+    fields: ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from",
+      "snapped_to", "handles", "valuetext", "probe"],
     strategies: ["fill", "keyboard", "pointer"],
     probes: ["value_unreadable", "home_ignored", "lattice_unreachable"],
     note: "范围控件实测（strategy/probe 是引擎闭集；数值字段无字符界）",
@@ -220,7 +221,7 @@ export const SESSION_EVIDENCE_CAP_TABLE = {
   miss: {
     bridgeKey: "miss",
     fields: ["target", "pool_size", "hint_shape", "hint_len", "settle_timed_out", "settle_waited_ms",
-      "rescan", "candidates", "near", "rejected"],
+      "rescan", "candidates", "near", "rejected", "shape_problem"],
     candidatesMax: 3,
     nearMax: 3,
     rejectedMax: 2,

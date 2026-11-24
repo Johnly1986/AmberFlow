@@ -52,8 +52,10 @@ export const HINT_SHAPES: readonly HintShape[] = [
     kind: "attrEq", note: "属性精确匹配（大小写折叠）",
   },
   {
-    token: "角色词", en: "tag (button|link|input|textarea|select)", example: "button",
-    kind: "tag", note: "角色词：button | link | input | textarea | select",
+    token: "角色词", en: "one role word (button OR link OR input OR textarea OR select)",
+    example: "button",
+    kind: "tag", note: "角色词：**单独一个词**，取自 button | link | input | textarea | select（不是"
+      + "\"标签 + 文本\"的写法；`button 搜索` 会被当成一个裸词）",
   },
   {
     token: "裸词", en: "bare-token", example: "travel",

@@ -673,3 +673,96 @@ function hasUnclosedBracket(s: string): boolean {
   return depth > 0;
 }
 
+
+/* ------------------------------------------------ 落空时的形状判别（invalid_hint 语义） */
+
+/** 元素标签词（`tag + 文本` 误写形态的第一词判定；不是语法的一部分）。 */
+const TAG_WORDS = new Set([
+  "a", "button", "input", "textarea", "select", "label", "div", "span", "li", "td", "th", "tr",
+  "img", "form", "nav", "header", "footer", "main", "section", "article", "dialog", "iframe",
+  "option", "ul", "ol", "table", "h1", "h2", "h3", "h4", "h5", "h6", "p", "em", "strong", "svg",
+  "icon", "html", "body", "title", "figure", "picture", "video", "canvas", "details", "summary",
+]);
+
+export type HintShapeProblemKind =
+  /** `tag + 文本`：作者按"标签+名字"的自然语言写法，闭集里没有这种形状。 */
+  | "tag-plus-text"
+  /** 出现选择器语法（`>`/`[`/`]`/组合），闭集不接受任意 CSS。 */
+  | "selector-syntax"
+  /** 角色词 + 额外词（`button 搜索`）——与 tag-plus-text 同一类，措辞区分"枚举词"误读。 */
+  | "role-word-plus-text";
+
+export interface HintShapeProblem {
+  kind: HintShapeProblemKind;
+  /** 人读一句话：这串写法为什么不在闭集里。 */
+  reason: string;
+  /** 可照抄的可行动建议（从闭集与已知 label 出发，不猜具体选择器）。 */
+  suggestion: string;
+}
+
+/**
+ * **落空之后**的 hint 形状判别：回答"是页面没有，还是这串根本不是一种形状"。
+ *
+ * 为什么必须放在落空之后而不是解析期：闭集里 `裸词` 收一切字符串——`button 搜索` 是合法的
+ * **裸词**（label 恰好可以叫 "button 搜索"），解析期拒绝会把真 label 误杀。只有"这串在页面上
+ * 一个都没命中"时，下面这些**可疑形态**才有判别力：
+ *   - 首词是元素标签且后面还有词（`div 价格评分时间所有过滤条件`）；
+ *   - 首词是角色枚举词且后面还有词（`button 搜索`——作者把 `tag (button|…)` 读成"标签+名字"）；
+ *   - 串里出现选择器语法（`>`、未配对的 `[`/`]`）。
+ *
+ * 纪律：**只陈述形态事实 + 闭集建议**，不改命中结果、不自动改写 hint、不新增停因码
+ * （调用方把它作为落空诊断的一段；停因仍是 target_not_found）。
+ */
+export function hintShapeProblem(hint: string): HintShapeProblem | null {
+  const raw = hint.trim();
+  if (raw === "") return null;
+  const parsed = parseHint(raw);
+  // 有尾缀的形状已经在"合法形状 + 限定"的语义里，不按裸词嫌疑判（尾缀合法性与限定的错
+  // 另有 describe*Rejection 通道）。
+  if (parsed.within !== undefined || parsed.frameChain !== undefined
+      || parsed.inRow !== undefined || parsed.rowIndex !== undefined) return null;
+  // `#id` 形态里塞了空格/选择器（`#outer input`、`#a > #b`）：闭集的 id 形状只认单个 id 词元。
+  if (parsed.kind === "id" && /[\s>+~]/.test(parsed.value)) {
+    return {
+      kind: "selector-syntax",
+      reason: `\`#\` 开头的形状只认**单个 id 词元**，这串在 id 里带了空格/组合符（${JSON.stringify(parsed.value.slice(0, 40))}）——`
+        + "闭集不接受后代/兄弟组合选择器，它永远解析不到元素",
+      suggestion: "写成单个 `#id`（页面元素自己的 id），或用 `within:#id` 尾缀限定子树"
+        + "（`<hint> within:#outer` 等价于\"在 #outer 内部找\"）",
+    };
+  }
+  const token = parsed.kind === "bare" ? parsed.token : "";
+  if (token === "") return null;
+  const first = token.split(/\s+/)[0]!.toLowerCase();
+  const rest = token.slice(first.length).trim();
+  const closedSet = `闭集：\`#id\` ｜ \`tag[attr=value]\` ｜ \`tag[attr~substr]\` ｜ \`tag~token\` ｜ 角色词（button/link/input/textarea/select 之一，单独一个词）｜ 裸词（整段就是元素的可见标签）`;
+  if (rest !== "" && ["button", "link", "input", "textarea", "select"].includes(first)) {
+    return {
+      kind: "role-word-plus-text",
+      reason: `首词 "${first}" 是**角色枚举词**，但闭集里的角色词必须单独成串（不能后接文本）——`
+        + `整串因此被当成一个裸词，页面上没有元素的标签恰好是 "${token}"`,
+      suggestion: `要按标签匹配就写整段裸词（若元素可见标签确实是 "${token}"）；要按属性匹配可写 `
+        + `\`button[aria-label=${token.slice(rest === "" ? 0 : first.length + 1)}]\`，`
+        + `或先用 observe/inspect 抄该元素的 hint_candidates（${closedSet}）`,
+    };
+  }
+  if (rest !== "" && TAG_WORDS.has(first)) {
+    return {
+      kind: "tag-plus-text",
+      reason: `首词 "${first}" 是元素标签，闭集里没有"标签 + 文本"这种形状——整串被当成一个裸词，`
+        + `页面上没有元素的标签恰好是 "${token}"`,
+      suggestion: `按可见标签匹配就写整段裸词；按元素类型匹配就单独写角色词（button/link/input/`
+        + `textarea/select）或 \`${first}[aria-label=…]\`；先 observe 抄 hint_candidates 最稳`,
+    };
+  }
+  if (/[\[\]]/.test(token) || /(^|[^\s])\s>.+/.test(token)) {
+    return {
+      kind: "selector-syntax",
+      reason: "串里含选择器语法（`[`/`]`/`>`），闭集不接受任意 CSS/后代组合——这类串永远是"
+        + "\"合法的裸词但永不命中\"",
+      suggestion: "改用 `tag[attr=value]` / `tag[attr~substr]` 这类闭集形状（属性名只认 "
+        + "test、type、aria-label、href、name、id、role、near），或从 hint_candidates 照抄",
+    };
+  }
+  return null;
+}

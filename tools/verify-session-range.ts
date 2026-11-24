@@ -22,6 +22,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { exportSessionRecord } from "../src/app/session-export.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const SESSION_TIMEOUT_MS = 180_000;
@@ -39,6 +40,9 @@ const RANGE_PAGE = `<!doctype html>
 <label for="vol">音量</label>
 <input id="vol" type="range" min="0" max="100" step="10" value="10">
 <div id="state" aria-live="polite"></div>
+<!-- 一对耦合手柄：同容器内两个 range = 多柄事实（percent 无唯一目标）。 -->
+<div id="dual"><input id="dual-lo" type="range" min="0" max="100" step="10" value="20">
+<input id="dual-hi" type="range" min="0" max="100" step="10" value="80"></div>
 <script>
   const el = document.getElementById('vol');
   const state = document.getElementById('state');
@@ -93,7 +97,22 @@ function script(origin: string): Step[] {
     { id: 10, request: { type: "act", op: "set_range", target: "input[type=range]" } },
     { id: 11, request: { type: "act", op: "set_range", target: "input[type=range]", value: { value: "70" } } },
     { id: 12, request: { type: "read", what: "value", selector: "input[type=range]" } },
-    { id: 13, request: { type: "close" } },
+    // 格点吸附（step=10）：11 物理上不存在 → 吸附到 10，applied:true / accurate:false /
+    // snapped_to:10，页面值读回 "10"（不报 slider_not_settable、不白等满超时）。
+    { id: 13, request: { type: "act", op: "set_range", target: "input[type=range]", value: { value: 11 } } },
+    { id: 14, request: { type: "read", what: "value", selector: "input[type=range]" } },
+    // 同一 hint 连续设值（滑块身份 = 稳定句柄，不是活值）：70 → 11 → 30 都命中同一元素。
+    { id: 15, request: { type: "act", op: "set_range", target: "input[type=range]", value: { value: 30 } } },
+    { id: 16, request: { type: "read", what: "value", selector: "input[type=range]" } },
+    // 多柄用例（页面上另有两个耦合 range）：percent 无唯一目标 → 结构化拒绝、零动作。
+    { id: 17, request: { type: "act", op: "set_range", target: "#dual-lo", value: { percent: 50 } } },
+    { id: 18, request: { type: "read", what: "value", selector: "#dual-lo" } },
+    // 形状判别（P0-1 端到端）：「角色词 + 文本」是合法裸词但零命中 → target_not_found +
+    // shape_problem（role-word-plus-text），且 reason 尾部带闭集提示（与命令步同一份文案）。
+    { id: 19, request: { type: "act", op: "click", target: "button 音量" } },
+    // 真 label 反例：整段裸词「音量」应正常命中（形状判别不得把真 label 误杀）。
+    { id: 20, request: { type: "act", op: "click", target: "音量" } },
+    { id: 21, request: { type: "close" } },
   ];
 }
 
@@ -108,7 +127,7 @@ interface SessionRun {
 }
 
 /** 写 `--input` 文件并跑真实 `amber session`；按 id 收集协议响应。 */
-async function runSession(steps: Step[], dir: string): Promise<SessionRun> {
+async function runSession(steps: Step[], dir: string, record: string | null = null): Promise<SessionRun> {
   const inputFile = path.join(dir, "requests.jsonl");
   fs.writeFileSync(inputFile, `${steps.map((s) => JSON.stringify({ id: s.id, ...s.request })).join("\n")}\n`);
   const outDir = path.join(dir, "session-evidence");
@@ -119,6 +138,7 @@ async function runSession(steps: Step[], dir: string): Promise<SessionRun> {
     "--input", inputFile,
     "--out", outDir,
     "--idle-timeout-ms", String(SESSION_TIMEOUT_MS),
+    ...(record === null ? [] : ["--record", record]),
   ], {
     cwd: REPO,
     stdio: ["ignore", "pipe", "pipe"],
@@ -300,10 +320,119 @@ function assertScript(run: SessionRun, steps: Step[]): string[] {
     check(problems, String(finalRead["value"]) === "50", `#12 页面值应仍是 "50"（拿到 ${JSON.stringify(finalRead["value"])}）`);
   }
 
-  // #13 close：干净收尾。
-  const close = expectResponse(run, steps, 13, problems);
-  if (close !== undefined) check(problems, close["ok"] === true, "#13 close 应 ok:true");
+  // #13/#14 格点吸附：11 不在 step=10 的格点上 → 吸附到 10 并**成功**（不报不可设置）。
+  const snapped = expectResponse(run, steps, 13, problems);
+  if (snapped !== undefined) {
+    check(problems, snapped["ok"] === true,
+      `#13 set_range {value:11}（step=10）应吸附后成功（code=${JSON.stringify(snapped["code"])}）`);
+    check(problems, snapped["applied"] === true, "#13 吸附后应 applied:true");
+    check(problems, snapped["accurate"] === false, "#13 吸附后 accurate 必须为 false（精确值不在值域里）");
+    check(problems, numberField(snapped, "snapped_to") === 10,
+      `#13 snapped_to 应为 10（拿到 ${JSON.stringify(snapped["snapped_to"])}）`);
+    check(problems, numberField(snapped, "requested") === 11,
+      `#13 requested 应如实保留原请求 11（拿到 ${JSON.stringify(snapped["requested"])}）`);
+    check(problems, snapped["strategy"] === "fill", `#13 吸附仍走 fill（拿到 ${JSON.stringify(snapped["strategy"])}）`);
+  }
+  const readSnapped = expectResponse(run, steps, 14, problems);
+  if (readSnapped !== undefined) {
+    check(problems, String(readSnapped["value"]) === "10", `#14 页面值应为 "10"（拿到 ${JSON.stringify(readSnapped["value"])}）`);
+  }
 
+  // #15/#16 同一 hint 连续设值：滑块身份是稳定句柄（#id），不是活值。
+  const set30 = expectResponse(run, steps, 15, problems);
+  if (set30 !== undefined) {
+    check(problems, set30["ok"] === true,
+      `#15 同一 hint 第三次设值应仍命中（code=${JSON.stringify(set30["code"])}）`);
+    check(problems, numberField(set30, "achieved") === 30,
+      `#15 achieved 应为 30（拿到 ${JSON.stringify(set30["achieved"])}）`);
+    check(problems, set30["accurate"] === true, "#15 30 在格点上，应 accurate:true");
+  }
+  const read30 = expectResponse(run, steps, 16, problems);
+  if (read30 !== undefined) {
+    check(problems, String(read30["value"]) === "30", `#16 页面值应为 "30"（拿到 ${JSON.stringify(read30["value"])}）`);
+  }
+
+  // #17/#18 多柄：percent 在耦合范围上无唯一目标 → 结构化拒绝、零动作、页面值不变。
+  const dual = expectResponse(run, steps, 17, problems);
+  if (dual !== undefined) {
+    check(problems, dual["ok"] === false, "#17 多柄 percent 必须 ok:false（不猜目标）");
+    check(problems, dual["code"] === "config_error",
+      `#17 多柄 percent 应 code:"config_error"（拿到 ${JSON.stringify(dual["code"])}）`);
+    check(problems, dual["executed"] === false, "#17 多柄 percent 应 executed:false（零动作）");
+    check(problems, numberField(dual, "handles") === 2,
+      `#17 应如实带出手柄数 2（拿到 ${JSON.stringify(dual["handles"])}）`);
+  }
+  const readDual = expectResponse(run, steps, 18, problems);
+  if (readDual !== undefined) {
+    check(problems, String(readDual["value"]) === "20", `#18 多柄拒绝后页面值应仍是 "20"（拿到 ${JSON.stringify(readDual["value"])}）`);
+  }
+
+  // #19 形状判别：`button 音量` 是合法裸词但零命中 → 形状可疑 + 闭集提示；停因仍是既有码。
+  const miss = expectResponse(run, steps, 19, problems);
+  if (miss !== undefined) {
+    check(problems, miss["ok"] === false, "#19 形状可疑的落空应 ok:false");
+    check(problems, miss["code"] === "target_not_found",
+      `#19 停因应仍是 target_not_found（拿到 ${JSON.stringify(miss["code"])}）`);
+    const shape = miss["shape_problem"] as Record<string, unknown> | undefined;
+    check(problems, shape !== undefined, "#19 应带回 shape_problem（否则 agent 无法区分写错与页面没有）");
+    check(problems, shape?.["kind"] === "role-word-plus-text",
+      `#19 形状种类应为 role-word-plus-text（拿到 ${JSON.stringify(shape?.["kind"])}）`);
+    check(problems, String(miss["reason"] ?? "").includes("形状闭集"),
+      "#19 落空 reason 应带闭集提示（与命令步同一份文案）");
+  }
+  // #20 反例：真 label（整段裸词）照样命中——形状判别只在落空后判，不误杀。
+  const realLabel = expectResponse(run, steps, 20, problems);
+  if (realLabel !== undefined) {
+    check(problems, realLabel["ok"] === true,
+      `#20 真 label「音量」应正常命中（code=${JSON.stringify(realLabel["code"])}）`);
+    check(problems, !("shape_problem" in realLabel), "#20 成功路径不得带 shape_problem（键集不变）");
+  }
+
+  // #21 close：干净收尾。
+  const close = expectResponse(run, steps, 21, problems);
+  if (close !== undefined) check(problems, close["ok"] === true, "#21 close 应 ok:true");
+
+  return problems;
+}
+
+/**
+ * 轨迹完整性（P0-3）：`--record` 里 `set_range` 必须**逐次成行**（含失败），且
+ * `session export` 能把它还原成 `ctx.setRange` 骨架并过 `apps check`。
+ */
+function assertRecord(record: string, dir: string): string[] {
+  const problems: string[] = [];
+  const actions: Array<Record<string, unknown>> = [];
+  try {
+    for (const line of fs.readFileSync(record, "utf-8").split(/\r?\n/)) {
+      const text = line.trim();
+      if (text === "") continue;
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      if (typeof parsed["op"] === "string") actions.push(parsed);
+    }
+  } catch (e) {
+    return [`轨迹文件不可读/坏行：${e instanceof Error ? e.message : String(e)}`];
+  }
+  const rangeRows = actions.filter((a) => a["op"] === "set_range");
+  // 剧本里 6 次真正进入 mw.setRange 的请求（#2/#6/#8/#13/#15/#17）；#10/#11 是形状错，零动作不记账。
+  check(problems, rangeRows.length === 6, `轨迹里 set_range 行数应为 6（拿到 ${rangeRows.length}：${JSON.stringify(actions.map((a) => a["op"]))}）`);
+  check(problems, rangeRows.some((a) => a["ok"] === false && a["code"] === "value_out_of_range"),
+    "轨迹里应记下越界失败行（ok:false + code:value_out_of_range）——失败也是事实");
+  check(problems, rangeRows.some((a) => typeof a["snapped_to"] === "number" && a["snapped_to"] === 10),
+    "轨迹里应记下吸附事实（snapped_to:10）");
+  check(problems, rangeRows.every((a) => typeof a["target"] === "string" && a["target"] !== ""),
+    "轨迹里每条 set_range 行都应带 target（hint）");
+  // export：骨架必须包含 ctx.setRange 且能过 apps check。
+  try {
+    const out = path.join(dir, "exported", "app.mjs");
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    const exported = exportSessionRecord({ record, out, id: "verify-range-export", force: true });
+    check(problems, exported.ok === true, `session export 应成功（problems=${exported.problems.join("；")}）`);
+    const src = fs.readFileSync(out, "utf-8");
+    check(problems, src.includes("ctx.setRange("), "导出的骨架应包含 ctx.setRange 调用（否则重放必挂滑杆）");
+    check(problems, !src.includes("TODO_VALUE") || !src.includes("set_range"), "set_range 不应落进 TODO_VALUE 注释块");
+  } catch (e) {
+    problems.push(`session export 抛错：${e instanceof Error ? e.message : String(e)}`);
+  }
   return problems;
 }
 
@@ -314,15 +443,16 @@ async function main(): Promise<number> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-session-range-"));
   try {
     const steps = script(server.origin);
-    const run = await runSession(steps, dir);
-    const problems = assertScript(run, steps);
+    const record = path.join(dir, "actions.jsonl");
+    const run = await runSession(steps, dir, record);
+    const problems = [...assertScript(run, steps), ...assertRecord(record, dir)];
     if (problems.length > 0) {
       for (const p of problems) console.error(`verify-session-range: FAIL — ${p}`);
       if (run.stderrTail.trim() !== "") console.error(`verify-session-range: session stderr tail:\n${run.stderrTail.trim()}`);
       return 1;
     }
     assert.equal(run.exitCode, 0);
-    console.log("verify-session-range: OK — act set_range 合法/percent/越界/形状错误四条路径的协议事实与页面值全部对上");
+    console.log("verify-session-range: OK — set_range 合法/percent/越界/形状错/格点吸附/多柄/轨迹录制+导出/形状判别 八条路径全部对上");
     return 0;
   } catch (e) {
     console.error(`verify-session-range: FAIL — ${e instanceof Error ? e.message : String(e)}`);

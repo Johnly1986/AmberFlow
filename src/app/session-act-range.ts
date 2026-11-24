@@ -6,6 +6,10 @@
  * 不把失败说成成功（越界请求 = `value_out_of_range` 零动作，引擎事实原样透传）。
  *
  * 独立成模块而非写进 `doAct`：主文件与 doAct 是只减不增的存量基线（maintain 门禁）。
+ *
+ * 轨迹（`--record`）：本 op 与其它 act op 同一纪律——**动作发生即记一条**（成功与失败都记，
+ * 与 click/fill 的 `recordAction` 同一形状）。缺了它 `session export` 的结构化骨架就少一整步，
+ * 重放必挂在滑杆上；因此记录点在这里（执行体自持，不依赖 doAct 的通用记账）。
  */
 import { urlOf } from "../engine/extraction.ts";
 import type { BrowserMiddleware, AnyPage } from "../engine/executor.ts";
@@ -18,6 +22,10 @@ export interface SetRangeDeps {
   startedAt: number;
   mw(): BrowserMiddleware;
   log(line: string): void;
+  /** `--record` 轨迹写入（未开记录时调用方给 no-op；与其它 act op 同一入口）。 */
+  recordAction(entry: Record<string, unknown>): void;
+  /** 当前动作序号（轨迹 `i` 由会话层统一编号）。 */
+  actionCount(): number;
 }
 
 /**
@@ -35,6 +43,12 @@ function rangeEvidence(r: RangeOutcome): Record<string, unknown> {
   if (typeof r.target === "number" && Number.isFinite(r.target)) out["target_value"] = r.target;
   // 越界拒绝的零动作证据链（仅 value_out_of_range 出现）：被拒的钳制值如实带出。
   if (typeof r.clamped_from === "number" && Number.isFinite(r.clamped_from)) out["clamped_from"] = r.clamped_from;
+  // 请求值不在页面的格点上、被吸附到最近格点后**成功**：如实带出落地值（accurate 已为 false）。
+  if (typeof r.snapped_to === "number" && Number.isFinite(r.snapped_to)) out["snapped_to"] = r.snapped_to;
+  // 多柄/耦合控件的事实（仅 >1 柄时出现）：percent 被拒或值域瞬变的判别依据。
+  if (typeof r.handles === "number" && Number.isFinite(r.handles)) out["handles"] = r.handles;
+  // 页面提供的档位人读文本（只有页面给才有）。
+  if (typeof r.valuetext === "string" && r.valuetext !== "") out["valuetext"] = r.valuetext;
   // 键盘策略收敛失败的可判别原因（仅键盘路径失败时出现）。
   if (typeof r.probe === "string") out["probe"] = r.probe;
   return out;
@@ -45,7 +59,7 @@ function rangeEvidence(r: RangeOutcome): Record<string, unknown> {
  *
  * 形状校验先于页面交互：缺/非法 value = 结构化 `config_error`（零动作，不猜值）。
  * 合法后委托 `mw.setRange`——越界（`value_out_of_range`）/不可设置（`slider_not_settable`）
- * 等停因原样回显，`ok:false` 绝不伪装成成功。
+ * 等停因原样回显，`ok:false` 绝不伪装成成功。**两次都进轨迹**（失败也是事实）。
  */
 export async function doActSetRange(
   target: string, value: unknown, deps: SetRangeDeps,
@@ -61,6 +75,16 @@ export async function doActSetRange(
   const r: RangeOutcome = await deps.mw().setRange(deps.page, target, value as SessionSetRangeValue);
   const evidence = rangeEvidence(r);
   const elapsedMs = Date.now() - deps.startedAt;
+  // 轨迹：只记事实（目标 hint、请求值形状、引擎给的 applied/accurate/achieved/策略），
+  // 明文值不进轨迹（与 fill/select 的 value_hash 同纪律；本 op 的值是数字，不是凭据）。
+  const recorded = {
+    op: "set_range", target,
+    ok: r.ok === true,
+    ...(r.ok === true ? {} : { code: String(r.stopCode ?? "slider_not_settable") }),
+    ...evidence,
+    url: urlOf(deps.page),
+  };
+  deps.recordAction(recorded);
   if (r.ok !== true) {
     const code = String(r.stopCode ?? "slider_not_settable");
     deps.log(`act set_range ${JSON.stringify(target)} → ${code}${r.reason === undefined ? "" : ` (${r.reason.slice(0, 120)})`}`);
