@@ -5,7 +5,7 @@
  * `elemFamily` + rules/model。这里只回答“这个元素是谁、属于哪个 frame、能做什么、
  * 有哪些可验证 hint”。
  */
-import { actionCapabilities, elemFamily, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
+import { actionCapabilities, elemFamily, type ElemPool, type PageLike } from "./extraction.ts";
 import { suggestHints } from "./rules.ts";
 
 export type PoolActionCapability = ReturnType<typeof actionCapabilities>[number];

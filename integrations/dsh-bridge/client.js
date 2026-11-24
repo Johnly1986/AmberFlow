@@ -29,7 +29,7 @@ window.__ModuleLoader__.load({
 
     const en = {
       modelBaseUrl: 'Decision model URL',
-      modelBaseUrlHint: 'token-plan compatible-mode base URL, e.g. https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 (the plugin appends /systemone).',
+      modelBaseUrlHint: 'Decision service URL, e.g. https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1, http://localhost:8008 or a full …/v1/systemone. The bridge forwards the value to the engine verbatim (it no longer appends /systemone); the engine picks the protocol and completes the endpoint (…/v1/systemone or …/v1/decisions). Empty = local ONNX model.',
       modelApiKey: 'Decision Token Key',
       modelApiKeyHint: 'Sent to the engine as TOKEN_PLAN_API_KEY. Write-only: the saved value is never shown again.',
       modelApiKeySet: 'configured',
@@ -53,12 +53,14 @@ window.__ModuleLoader__.load({
       loading: 'Loading the current configuration…',
       unavailable: 'Configuration is not served by this Host (non-loopback browser or missing Settings service).',
       readOnly: 'This Host document is read-only.',
-      hint: 'The model fields configure AmberFlow\'s ONLINE DECISION MODEL (token-plan SystemOne). '
-        + 'With URL and token set, app runs use the token-plan decision provider; empty keeps the local ONNX '
-        + 'model (or rules-only). The step gap slows the pace between engine steps (politeness / rate-limit '
-        + 'headroom). The HEADFUL switch forces a visible browser window for every engine child process — '
-        + 'unticked, the engine decides from its own layering. LLM doors (planner/auditor/escalation) are '
-        + 'separate and still read OPENAI_* from the environment.',
+      hint: 'The model fields configure AmberFlow\'s ONLINE DECISION MODEL (System One or OpenAI Decisions). '
+        + 'The URL is handed to the engine as-is — the bridge appends nothing; the engine infers the protocol '
+        + 'from the URL (a /decisions path means OpenAI Decisions) and completes the endpoint '
+        + '(…/v1/systemone or …/v1/decisions). With URL and token set, app runs use the decision-service '
+        + 'provider; empty keeps the local ONNX model (or rules-only). The step gap slows the pace between '
+        + 'engine steps (politeness / rate-limit headroom). The HEADFUL switch forces a visible browser window '
+        + 'for every engine child process — unticked, the engine decides from its own layering. LLM doors '
+        + '(planner/auditor/escalation) are separate and still read OPENAI_* from the environment.',
       summaryUnset: 'Online decision model not configured',
       summaryConfigured: 'Decision model: ',
       remoteSummary: 'Configuration is editable on the Host machine only (loopback).',
@@ -72,7 +74,7 @@ window.__ModuleLoader__.load({
     }
     const zh = {
       modelBaseUrl: '决策模型 URL',
-      modelBaseUrlHint: 'token-plan 兼容模式基址，例如 https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1（插件会自动补 /systemone）',
+      modelBaseUrlHint: '决策服务地址，例如 https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1、http://localhost:8008 或完整 …/v1/systemone。桥把该值**原样**交给引擎（不再自动补 /systemone）；协议与端点后缀由引擎决定（…/v1/systemone 或 …/v1/decisions）。留空 = 本地 ONNX 模型。',
       modelApiKey: '决策模型 Token Key',
       modelApiKeyHint: '作为 TOKEN_PLAN_API_KEY 传给引擎。只写不读：保存后不会再回显。',
       modelApiKeySet: '已配置',
@@ -100,8 +102,10 @@ window.__ModuleLoader__.load({
       loading: '正在读取当前配置…',
       unavailable: '当前 Host 未提供配置（非回环浏览器或缺少 Settings 服务）。',
       readOnly: '该 Host 文档是只读的。',
-      hint: '模型三项配置 AmberFlow 的**线上决策模型**（token-plan SystemOne）：URL 与 Token 都设置后，'
-        + '应用运行默认走 token-plan 决策 provider；留空则继续用本地 ONNX 模型（或 rules-only）。'
+      hint: '模型三项配置 AmberFlow 的**线上决策模型**（System One 或 OpenAI Decisions）：'
+        + 'URL 原样交给引擎——桥不补任何后缀；引擎按 URL 推断协议（含 /decisions 即 OpenAI Decisions）'
+        + '并补齐端点（…/v1/systemone 或 …/v1/decisions）。URL 与 Token 都设置后，'
+        + '应用运行默认走 decision-service provider；留空则继续用本地 ONNX 模型（或 rules-only）。'
         + '步间距用于放慢引擎步与步之间的节奏（降载/限频余量）。'
         + 'HEADFUL 强制引擎子进程显示浏览器窗口；不勾选 = 引擎按自己的层叠决定。'
         + 'LLM 门（规划器/审计/语义升级）是另一条路径，仍从环境变量读 OPENAI_*。',

@@ -23,8 +23,6 @@ import path from 'node:path'
 const REPO = path.resolve(import.meta.dirname, '..')
 const FIXTURES = path.join(REPO, 'fixtures', 'engine', 'pilot')
 const CLI = path.join(REPO, 'src', 'cli', 'main.ts')
-const HOME_TITLE = 'pilot acceptance: home'
-const DETAIL_TITLE = 'pilot acceptance: detail'
 
 interface Fixture { origin: string; close(): Promise<void> }
 interface CliResult { status: number | null; stdout: string; stderr: string }
@@ -100,7 +98,6 @@ async function main(): Promise<void> {
   const fixture = await startFixture()
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'af-verify-parity-'))
   const homeUrl = `${fixture.origin}/home.html`
-  const detailUrl = `${fixture.origin}/detail.html`
   try {
     // ---------------- session 腿（零模型） ----------------
     const sessionOut = path.join(tmp, 'session-out')

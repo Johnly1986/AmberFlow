@@ -6,24 +6,17 @@
  * 也让任何面（dry/replay/词面）能直接复用同一份实现（行为逐字节不变）。
  */
 import os from "node:os";
-import path from "node:path";
 import * as browserEnv from "../browser/browser-env.ts";
 import { lastBrowserLaunchFacts } from "../browser/browser-env.ts";
-import {
-  type BindingDiagnostics,
-  type OptionCandidate,
-} from "./bindings.ts";
-import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type ExcludedHintProbe, type FrameGate, type HintInDomProbe, type PageLike } from "./extraction.ts";
+import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemPool, type ExcludedHintProbe, type HintInDomProbe, type PageLike } from "./extraction.ts";
 import { WIDE_POOL_ELEMENTS } from "./extraction.ts";
 import { WIDE_SCAN_POOL_ELEMENTS_MAX } from "../support/tuning.ts";
 import type { CommandDecl } from "./actions.ts";
 import { parseHint } from "./hint.ts";
-import { hintCandidates, hintMatch, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
-import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE, type SignalSpec } from "./signals.ts";
+import { hintCandidates, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
 import { FILLER_TOKENS, ROLE_TOKENS, STOP_TOKENS } from "./rules.ts";
-import type { DecisionProvider } from "../support/decision-provider-contract.ts";
-import type { RangeOptions, RangeOutcome, RangeValue } from "./range.ts";
-import type { AuditVerdictLike, Readiness, ReadinessVerdict, AnyLoc, PickProposal, PageSnapshot, HintMemoryLike, BrowserSession, PwLike, BrowserHandle, AnyPage } from "./executor-types.ts";
+
+import type { AnyLoc, BrowserSession, PwLike, BrowserHandle, AnyPage } from "./executor-types.ts";
 /** Frame URL 的 host gate：host 边界覆盖 frame，而不是只覆盖顶层导航。 */
 /**
  * Popup / new tab 的 host gate：只看当前 page.url 会漏掉 `window.open()` 开出的新页。
@@ -846,7 +839,6 @@ export function routerMaxLoaded(): number {
 }
 
 /* ------------------------------------------------------------------ middleware */
-
 
 /* ---------------------------------------------------------------- helpers (from executor.ts, F2) */
 /** `.first` across both Playwright runtimes (property vs method). */

@@ -148,7 +148,45 @@ amber config set AMBERFLOW_DECISION_API_KEY sk-...
 
 ## 7. 桥与 CLI：两条决策配置面（A3 建面 / A5 缺省探针与恢复指引，2026-11-02/03）
 
-同一份三件套有两个**注入面**，排查凭据问题前先分清这次运行走的是哪一条：
+| 字段 | 桥怎么处理这个值 | 引擎为什么这样归一 |
+|---|---|---|
+| 页面的「决策模型 URL」 | 只去掉首尾空白（全空 = 不注入 `AMBERFLOW_DECISION_BASE_URL`），**其余原值透传**——不推断协议、不补任何后缀 | `AMBERFLOW_DECISION_PROTOCOL` 缺省按 URL 形状推断（含 `/decisions` 即 OpenAI Decisions），再按协议补 `…/v1/systemone` 或 `…/v1/decisions`（§2 的表） |
+
+桥曾经把页面值当基址自己补 `/systemone`：页面填裸 host 时 DSH 部署面实际 POST
+`…/systemone`，而同一份值在 CLI 直跑是 `…/v1/systemone`（引擎补的）——两条面 POST 到不同路径；
+OpenAI Decisions 端点还会被二次加后缀。现在**唯一协议决策点**是引擎
+（`normalizeSystemOneEndpoint` / `normalizeOpenAIDecisionsEndpoint`），桥只是搬运。
+`verify:decision-endpoint-parity` 钉住这一条：同一值经两条注入面后引擎算出的有效端点必须相同
+（当前差异白名单 = 0 条）。
+
+### 7.1 迁移：桥不再自动补 `/systemone`（行为变更）
+
+**受影响**：最终生效的部署配置（DSH 插件配置页）在当前语义下**依赖桥补 `/systemone`** 的部署——
+典型是自建反向代理把裸 host / 端口的 `/systemone` 打到 System One，或页面上填的是不带 `/v1` 的
+基址。这类配置升级后，同一个页面值会由引擎归一成 `…/v1/systemone`，与原来 POST 的端点**不同**。
+
+**怎么迁移**（改完后引擎算出的端点必须与升级前**实际被服务接受**的端点逐字相同）：
+
+| 页面上原来填的 | 旧桥实际 POST | 升级后引擎会 POST | 要做的事 |
+|---|---|---|---|
+| `https://host`（裸 host，反代只收 `/systemone`） | `https://host/systemone` | `https://host/v1/systemone` | **改配置**：填 `https://host/v1/systemone`；或把反代收的路径改成 `/v1/systemone` |
+| `https://host/prefix`（自定义反代前缀） | `https://host/prefix/systemone` | `https://host/prefix/v1/systemone` | 同上：填 `https://host/prefix/v1/systemone` 或改反代路径 |
+| `http://localhost:8008`（自托管标准 System One） | `http://localhost:8008/systemone` | `http://localhost:8008/v1/systemone` | 标准服务只认 `/v1/systemone` 时**本来就不该 POST `/systemone`**（旧桥缺陷，本次修复）；服务/反代同时接受两种路径则**无需改**；只认 `/systemone` 则显式填完整端点并调整反代 |
+| `https://host/compatible-mode/v1` | `…/compatible-mode/v1/systemone` | 同一个端点 | 无需改 |
+| 已带 `/systemone` 或 `/decisions` 的完整端点 | 原样 | 原样 | 无需改 |
+
+判断口径：从部署日志里取升级前**真实发出去且被 2xx 接受**的请求路径。只有当那条路径与上表
+「旧桥实际 POST」一列吻合、且服务侧**只**接受旧路径时，才需要按「改配置」那一格处理；
+其余部署升级后端点不变。
+
+**不受影响**：CLI 直跑与其它配置层叠面（它们本来就走引擎归一化）；页面值本来就以 `/systemone`
+或 `/decisions` 结尾的部署；空值（不配置 → 本地模型）。
+
+**部署面提示**：改的是桥进程内的 `decisionEnv` 逻辑，**已加载的 DSH 宿主需要重启**（或重新加载
+插件 bundle）才会生效；配置页保存本身只更新 profile 里的值。改完用 `amberflow_status`
+（= `amber doctor --json`）的 `provider.ask_probe` 确认新端点可达。
+
+排查凭据问题前先分清这次运行走的是哪一条：
 
 | | 桥通道（DSH 插件） | CLI 直跑（`amber run` / `npm run apps` / `npm start`） |
 |---|---|---|
@@ -168,7 +206,7 @@ A5 起 `amber doctor` **缺省**执行一次最小 ask 探针（仅当 `AMBERFLO
 探针只诊断：**失败不改变 doctor 退出码**；JSON 里在 `data.provider.ask_probe`
 （`{ok, provider, ref?, conf?, error?}`），文本里打印 HTTP 事实 + 两条通道的恢复指引。
 
-### 7.1 真实案例：403 AccessDenied.Unpurchased 被吞成「未过闸门」（2026-11-02 实证）
+### 7.2 真实案例：403 AccessDenied.Unpurchased 被吞成「未过闸门」（2026-11-02 实证）
 
 症状（修复前的行为，排查时按这个形状认）：
 
@@ -192,7 +230,7 @@ A3 修复后的透传链（每一环都带 HTTP 事实）：
    `decisions.failed_asks` 单独记账，line 写成「模型被咨询 N 次（M 次未过闸门，K 次失败）」——
    闸门是对模型意见打分，抛错没拿到意见，不算"未过闸门"。
 
-### 7.2 排查路径（按序）
+### 7.3 排查路径（按序）
 
 ```bash
 # ① 医生探针（缺省执行；只诊断，不改退出码）：走与运行时同一装配路径真发一次最小 ask
@@ -218,7 +256,7 @@ workspace 未购买此模型（换可用的凭据面，或在服务侧开通）�
 429 = 限流；超时/DNS 见错误文本里的 cause 关键句。修复后用 `amber doctor` 复验（缺省探针已发
 请求），再跑一次真实应用确认 `decisions.failed_asks=0`。
 
-### 7.3 恢复指引（A5）：同一条文案出现在哪里
+### 7.4 恢复指引（A5）：同一条文案出现在哪里
 
 运行结果里 `provider_degraded` 非空、或有步以 `no_model_runtime` 停下时，说明这次撞上的是决策
 通道（配置面/凭据/网关），而不是应用脚本。CLI（`amber run`，含 `--json` 的 stderr 与 envelope

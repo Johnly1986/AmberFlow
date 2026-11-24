@@ -27,11 +27,7 @@
       "symbols": {
         "createCtxTools": "c0ab8241352a56e5eb12953544323a38379c178dc2931c8f74df9c160138f46e"
       }
-    },
-    "src/app/ctx.ts": {
-      "symbols": {
-        "createCtx": "c72112555e7d016de16596ea7f89dfa786bb3112d46d38007fb451bc1f0f1952"
-      }
     }
-  }
+  },
+  "note": "非纯搬移：删除未用绑定/参数（本轮 unused 清理）；符号移出纯搬移清单"
 }

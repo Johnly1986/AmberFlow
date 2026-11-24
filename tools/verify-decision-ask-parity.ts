@@ -26,7 +26,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { browserSession, type BrowserMiddleware } from "../src/engine/executor.ts";
-import { esig, type ElemPool } from "../src/engine/elem-model.ts";
+import { esig } from "../src/engine/elem-model.ts";
 import { buildMiddleware } from "../src/app/middleware-factory.ts";
 import { installLayaRuntime } from "../src/model/model.ts";
 import { installDecisionProvider } from "../src/model/decision-provider.ts";

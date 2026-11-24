@@ -119,7 +119,7 @@ function isLocalHost(raw: string): boolean {
   }
 }
 
-function parseFloatInRange(raw: string | undefined, key: string): number | null {
+function parseFloatInRange(raw: string | undefined, _key: string): number | null {
   const text = (raw ?? "").trim();
   if (text === "") return null;
   const value = Number(text);

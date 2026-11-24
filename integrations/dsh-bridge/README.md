@@ -164,7 +164,7 @@ shows exactly the `.volatile()` fields of the plugin's Config — the three **de
 
 | Field | Forwarded to the engine CLI as | Meaning |
 |---|---|---|
-| **Decision model URL** | `AMBERFLOW_DECISION_BASE_URL` | service base URL (e.g. `https://…/compatible-mode/v1` or `http://localhost:8008`); the bridge normalizes it to the `/systemone` endpoint (an already-suffixed value is kept as-is) |
+| **Decision model URL** | `AMBERFLOW_DECISION_BASE_URL` | decision service URL (e.g. `https://…/compatible-mode/v1`, `http://localhost:8008` or a full `…/v1/systemone`); forwarded to the engine **verbatim** — the engine infers the protocol and completes the endpoint (`…/v1/systemone` / `…/v1/decisions`), the bridge appends nothing |
 | **Decision Token Key** | `AMBERFLOW_DECISION_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
 | **Decision ModelName** | `AMBERFLOW_DECISION_MODEL` | decision model id (e.g. `decision-model-preview`); empty uses the provider default |
 | **Step gap (ms)** | `AMBERFLOW_STEP_DELAY_MS` | minimum wait between two engine steps (0–60000); an app's own `meta.pace` still wins |

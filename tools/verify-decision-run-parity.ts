@@ -195,7 +195,7 @@ function makeHost(mw: BrowserMiddleware, acct: ReturnType<typeof createRunAccoun
   };
 }
 
-function makeCtx(page: AnyPage, spec: DriveSpec, host: RunPickHost, acct: ReturnType<typeof createRunAccounting>): RunPickCtx {
+function makeCtx(page: AnyPage, spec: DriveSpec, _host: RunPickHost, acct: ReturnType<typeof createRunAccounting>): RunPickCtx {
   return {
     pg: page, stepNo: 1, instruction: spec.instruction, verbose: false, elems: spec.elems,
     ruleRef: spec.ruleRef ?? null, curHint: spec.curHint ?? null, commandMode: false,
@@ -325,7 +325,7 @@ const CASES: Case[] = [
     name: "rule-hit",
     page: "/cards.html",
     turns: () => ({ score: 0.1 }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const ruleRef = Object.keys(elems)[0] ?? null;
@@ -338,7 +338,7 @@ const CASES: Case[] = [
     name: "tiered-narrow-fallback",
     page: "/cards.html",
     turns: (snap) => (snap.seq === 0 ? { score: 0.05, passthrough: false, probs: { p: 0.05 } } : { score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "选一个", elems: elems as ElemPool, curHint: "button", tieredHint: true });
@@ -354,7 +354,7 @@ const CASES: Case[] = [
     name: "tiered-narrow-hit",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: false, probs: { p: 0.9 } }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "选一个", elems: elems as ElemPool, curHint: "button", tieredHint: true });
@@ -368,7 +368,7 @@ const CASES: Case[] = [
     name: "low-conf-wide-reobserve",
     page: "/wide.html",
     turns: (snap) => (snap.seq === 0 ? { score: 0.05, passthrough: false, probs: { p: 0.05 } } : { score: 0.95, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
@@ -381,7 +381,7 @@ const CASES: Case[] = [
     name: "escalate",
     page: "/wide.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false, escalate: true });
@@ -393,7 +393,7 @@ const CASES: Case[] = [
     name: "adjudicate",
     page: "/wide.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false, adjudicate: true });
@@ -405,7 +405,7 @@ const CASES: Case[] = [
     name: "r2b",
     page: "/wide.html",
     turns: (snap) => (snap.seq === 0 ? { score: 0.6, passthrough: true } : { score: 0.95, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "zzz qqq", elems: elems as ElemPool });
@@ -423,7 +423,7 @@ const CASES: Case[] = [
       }
       return { score: 0.9, passthrough: true };
     },
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/family.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "选一个", elems: elems as ElemPool, expectedFamily: "check" });
@@ -435,7 +435,7 @@ const CASES: Case[] = [
     name: "family-empty",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "选一个", elems: elems as ElemPool, expectedFamily: "check" });
@@ -460,7 +460,7 @@ const CASES: Case[] = [
     name: "low-confidence-stop",
     page: "/wide.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false });
@@ -472,7 +472,7 @@ const CASES: Case[] = [
     name: "unknown-ref",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点击确认", elems: elems as ElemPool, ruleRef: "e999", curHint: "#b1" });
@@ -484,7 +484,7 @@ const CASES: Case[] = [
     name: "rules-only-no-model",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "选一个", elems: elems as ElemPool, rulesOnly: true });
@@ -497,7 +497,7 @@ const CASES: Case[] = [
     name: "rules-only-hint-unmatched",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       // curHint 非空 ⇒ 走"计划点了名但规则没解出来"的闭集引导文案分支。
@@ -510,7 +510,7 @@ const CASES: Case[] = [
     name: "wide-hard-cap-rung-hit",
     page: "/wide180.html",
     turns: (snap) => (snap.seq < 2 ? { score: 0.05, passthrough: false, probs: { p: 0.05 } } : { score: 0.95, passthrough: true }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide180.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
@@ -524,7 +524,7 @@ const CASES: Case[] = [
     name: "window-chain-all-miss",
     page: "/wide180.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin, drive }) => {
+    run: async ({ mw, page, origin, drive }) => {
       await page.goto(`${origin}/wide180.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });

@@ -531,7 +531,7 @@ export async function _liveDomIdFallback(mw: BrowserMiddleware, page: AnyPage, t
   }
 
   /** E1-c：探针属性清理（`_liveDomIdFallback` 与后续复用共用；失败静默）。 */
-export async function _probeCleanup(mw: BrowserMiddleware, page: AnyPage, token: string): Promise<void> {
+export async function _probeCleanup(_mw: BrowserMiddleware, page: AnyPage, token: string): Promise<void> {
     for (const fr of framesOf(page as never)) {
       try {
         await (fr as unknown as { evaluate(fn: (tok: string) => void, tok: string): Promise<void> }).evaluate((tok: string) => {

@@ -472,7 +472,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       .filter((st) => st.adapter === "manual")
       .map((st) => ({ index: st.index, desc: st.desc, done: false, attested: false, reason: "needs_interactive_terminal" }));
     const selectedBrowserIndices = new Set(segmentSteps
-      .map((st, i) => browserIndexOf[segmentStart + i] ?? -1)
+      .map((_st, i) => browserIndexOf[segmentStart + i] ?? -1)
       .filter((j) => j >= 0));
     return {
       app: pack.id, label: pack.label, goal: pack.goal,

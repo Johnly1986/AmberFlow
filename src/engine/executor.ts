@@ -51,99 +51,28 @@
  *      DEFAULT_CONFIRM). Safer than blocking on a stdin that has no tty.
  */
 
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { getAuditor, type Auditor, type TraceStep } from "./audit.ts";
+import { INTERACTIVE_ALL, MAX_CHOICES, esig, extractSlots, probeHintInDom, frameAt, frameHintFailureEvidence, framesOf, hintLookup, orderElemsByFamily, poolSniff, stateText, urlOf, type Elem, type ElemPool, type FrameGate, type PageLike } from "./extraction.ts";
 
-import { getAuditor, type AuditVerdict, type Auditor, type TraceStep } from "./audit.ts";
-import * as browserEnv from "../browser/browser-env.ts";
-import { lastBrowserLaunchFacts } from "../browser/browser-env.ts";
-import type { BrowserLike, LaunchOptions } from "../browser/browser-env.ts";
-import {
-  INTERACTIVE_ALL,
-  MAX_CHOICES,
-  WIDE_POOL_ELEMENTS,
-  WIDE_QUOTAS,
-  ariaInteractiveLines,
-  criteriaView,
-  esig,
-  extractSlots,
-  elemFamily,
-  lexicalOverlap,
-  filterElemsByFamily,
-  actionCapabilities,
-  firstOf,
-  probeHintInDom,
-  frameAt,
-  frameGateOf,
-  frameHintFailureEvidence,
-  framesOf,
-  framesScopedPage,
-  hintLookup,
-  orderElemsByFamily,
-  poolSniff,
-  probeExcludedHint,
-  stateText,
-  urlInHostsEnvelope,
-  urlOf,
-  viewportUnderload,
-  type ActionCapability,
-  type Elem,
-  type ElemFamily,
-  type ElemPool,
-  type FrameGate,
-  type FrameLike,
-  type PageLike,
-} from "./extraction.ts";
-import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { assembleDecisionRuntime } from "./decision-seam.ts";
 import { ANCHOR_JS, ROW_CLIMB_JS, compile } from "./pool-js.ts";
-import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
+import { type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
-import {
-  getLayaRuntime,
-  type ChoiceAnswer,
-  type DecisionAgent,
-  type ModelState,
-  type NoulAnswer,
-  type RouterLike,
-} from "../model/model.ts";
-// task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
-import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
+import { getLayaRuntime, type DecisionAgent, type ModelState, type NoulAnswer, type RouterLike } from "../model/model.ts";
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider, EvidenceTruncation } from "../support/decision-provider-contract.ts";
 import { sleep } from "../support/sleep.ts";
 import { buildChoiceRequest, effectiveNotes } from "./decision-request.ts";
-// task-14（D1）：探测失败分类与建议文案的单一出处。
-import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
-import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
-import {
-  DESTRUCTIVE_PATTERNS,
-  FILLER_TOKENS,
-  NAV_VERBS,
-  ROLE_TOKENS,
-  STOP_TOKENS,
-  affordanceRule,
-  anchorChainMatch,
-  hintCandidates,
-  hintMatch,
-  navRule,
-  takeHintMatchOthers,
-  type HintMatchCandidate,
-  type HintMatchOptions,
-  type HintMatchOthersDiag,
-} from "./rules.ts";
-import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE, type SignalSpec } from "./signals.ts";
+import { DESTRUCTIVE_PATTERNS, FILLER_TOKENS, NAV_VERBS, ROLE_TOKENS, STOP_TOKENS, affordanceRule, hintCandidates, hintMatch, navRule, takeHintMatchOthers, type HintMatchOthersDiag } from "./rules.ts";
+import { type SignalSpec } from "./signals.ts";
 // S2 稳定门：MutationObserver 传感器 + 有界静默等待（只作观察增强，不中断执行循环）。
-import { DEFAULT_SETTLE, installSettle, settle, type SettlePage, type SettleResult } from "./settle.ts";
-// 语法报错文案的唯一出处：形状清单不再手抄（grammar-prompt import 时自证与 parseHint 对齐）。
-import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
+import { DEFAULT_SETTLE, settle, type SettlePage, type SettleResult } from "./settle.ts";
 import { RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
 // A2 判别：命令 target 是 hint 语法字符串，词面要从同一份解析器里取（不新开第二种解析）。
 import { parseHint } from "./hint.ts";
-import { induceHint } from "../model/hint-memory.ts";
-import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
+
+import { resolveCommandValue, type CommandDecl } from "./actions.ts";
 import { emptySlotBindingReason, type BindingDiagnostics } from "./bindings.ts";
-import { parseClickAtValue } from "./click-at.ts";
+
 import type { DatasetReader } from "./dataset.ts";
 import { optionCandidatesFrom, type OptionCandidate } from "./bindings.ts";
 
@@ -161,48 +90,11 @@ import {
   DEFAULT_DECISION_STATE, STATE_DIGEST_MAX_BYTES,
   type AnyLoc,
 } from "./executor-types.ts";
-import type {
-  ActionabilityDetail,
-  AnyPage,
-  AuditVerdictLike,
-  BrowserHandle,
-  BrowserSession,
-  DecisionRuntimeHooks,
-  DecisionStateContext,
-  DecisionStateGate,
-  DecisionStateMetrics,
-  DecisionStatePolicy,
-  EscalationRequest,
-  EscalatorLike,
-  ExecutedAction,
-  HintMemoryLike,
-  MiddlewareOptions,
-  OutcomeMemoryLike,
-  OverlayEvidenceRow,
-  PageSnapshot,
-  PickProposal,
-  PwLike,
-  Readiness,
-  ReadinessVerdict,
-  ReadyState,
-  RunOptions,
-  RunReport,
-  SkippedAction,
-  StateDigest,
-  StateEffect,
-  Sig,
-  StateFingerprint,
-  StateFlag,
-  StepStateRecord,
-  StopCode,
-  ThrottleSuspect,
-} from "./executor-types.ts";
+import type { ActionabilityDetail, AnyPage, BrowserHandle, DecisionRuntimeHooks, DecisionStateMetrics, DecisionStatePolicy, EscalatorLike, HintMemoryLike, MiddlewareOptions, OutcomeMemoryLike, OverlayEvidenceRow, PageSnapshot, PickProposal, Readiness, ReadinessVerdict, RunOptions, RunReport, SkippedAction, StateDigest, StateEffect, StateFingerprint, StateFlag, StepStateRecord, StopCode } from "./executor-types.ts";
 
 /** `new Function("return (<expr>);")()` -> a real function object for evaluate(). */
 /** Host-side JS passes —— 拆到 eval-snippets.ts（F2）。 */
-import {
-  asFunction, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD, FN_OVERLAY,
-} from "./eval-snippets.ts";
+import { FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_OVERLAY } from "./eval-snippets.ts";
 import {
   clickActionableAncestor, declaredHitTest, describeActionFailure, hitRelation, occlusionProbe,
 } from "./executor-actionability.ts";
@@ -337,55 +229,17 @@ import { actOnce, _scrollIntoViewWithEvidence, scrollIntoView, _scrollContainerF
 import { runFrameGate, runPoolGate, runDeclaredTargets, runDeclaredHint } from "./executor-phases-a.ts";
 import { runPickPhase } from "./decision-pick-arm.ts";
 import { runPostAction } from "./executor-phases-b.ts";
-import { runActionPhase, runActionExecute, runSetup, runTail, runReportTail } from "./executor-phases-c.ts";
+import { runActionPhase, runSetup, runTail, runReportTail } from "./executor-phases-c.ts";
 export * from "./executor-pure.ts";
-import type { ActMissDiagnostics, ActMissRow, DeviceSpec } from "./executor-pure.ts";
-import {
-  firstLoc, round3, fnv1aText, structDigest, contentDigest, topTwoMargin,
-  describeActionError, sigEq, WIDER_ELEMENTS, WIDER_ELEMENTS_MAX, windowChainMissSuffix,
-  type WindowChainFact,
-  ALL_FAMILIES,
-  DEFAULT_CONFIRM,
-  EFFECT_MASK,
-  SECRET_INPUT_TYPES,
-  actMissDiagnostics,
-  actMissDiscrimination,
-  bindingCandidateSummaries,
-  candidateName,
-  candidateText,
-  carriesSecret,
-  cmdDiscrimination,
-  cmdFamilies,
-  contextPageCount,
-  declaredAllow,
-  deniedContextUrl,
-  disallowedHost,
-  firstPoolText,
-  frameTargetStopReason,
-  goalLexemes,
-  lexMatchOne,
-  lexWords,
-  lowConfDiscrimination,
-  matchedOthersWarning,
-  modelProjectionOf,
-  nearCandidates,
-  poolRoleSummary,
-  redactValue,
-  safeUrl,
-  targetMatcher,
-  weakHintRejectedWarning,
-  weakRejectedReason,
-} from "./executor-pure.ts";
+
+import { firstLoc, fnv1aText, structDigest, describeActionError, sigEq, WIDER_ELEMENTS, WIDER_ELEMENTS_MAX, windowChainMissSuffix, type WindowChainFact, ALL_FAMILIES, DEFAULT_CONFIRM, bindingCandidateSummaries, declaredAllow, matchedOthersWarning, modelProjectionOf, poolRoleSummary, safeUrl, weakHintRejectedWarning, weakRejectedReason } from "./executor-pure.ts";
 import { createRunAccounting, type RunAccounting } from "./run-context.ts";
 import { createRunDecisionAccounting } from "./decision-accounting.ts";
 import { askDoneProvider, askRiskProvider } from "./decision-questions.ts";
 import { attachDecisionContext, rememberStopDecisionContext, withStopDecisionContext } from "./decision-context-evidence.ts";
 import type { CandidateProducer } from "./candidate-contract.ts";
 import { createDeclaredTargetsResolver, type DeclaredTargetsResolver } from "./declared-targets.ts";
-import {
-  declaredEvidence, declaredHiddenSuffix, declaredMissSuffix, drfHintSuffix,
-  identityEvidence, identityHiddenSuffix, rowEvidence,
-} from "./evidence.ts";
+import { declaredHiddenSuffix, declaredMissSuffix, drfHintSuffix, identityHiddenSuffix } from "./evidence.ts";
 
 /**
  * B2：一次滚动的**实测证据**（容器滚动与滚入视口共用同一形状）。
@@ -1620,7 +1474,6 @@ export class BrowserMiddleware {
     return await occlusionProbe(this, page, el, probeMs, slowMs);
   }
 
-
   /**
    * P0-C：DRF 目标的**动作前** hit-test（click 族必须）。
    *
@@ -1934,8 +1787,6 @@ export class BrowserMiddleware {
       dataset = this.dataset,
       effect,
       adjudicate = false,
-      skipNavigation = false,
-      settleMs = 0,
       poolReady = false,
       poolReadyTimeoutMs = 700,
       poolReadyPollMs = 100,
@@ -1959,7 +1810,7 @@ export class BrowserMiddleware {
 
     // 四组记账（stop / forbid+why / noteSkipped / unforbid·pruneForbids）的唯一载体在 RunCtx；run() 只持入口。
     const acct: RunAccounting = createRunAccounting({ maxSteps: this.maxSteps });
-    const { stop, forbid, unforbid, pruneForbids, noteSkipped, forbidden, forbidWhy, blockedRetry, reAdmitted, skippedActions } = acct;
+    const { stop, forbid, unforbid, pruneForbids, noteSkipped, forbidden, blockedRetry, reAdmitted, skippedActions } = acct;
     const decisionAccounting = createRunDecisionAccounting(acct, outcomeMemory, instruction);
 
     // The navigation envelope: run-level declaration wins, else the middleware's (set once per journey).
@@ -2790,8 +2641,6 @@ export class BrowserMiddleware {
     };
     return withStopDecisionContext(await runReportTail(this, rttCtx), acct);
   }
-
-
 
   /* X1：公开方法面（实现已搬 executor-actions.ts；类型由实现函数推导，调用契约不变） */
   async actOnce(...args: OmitMw<Parameters<typeof actOnce>>): ReturnType<typeof actOnce> {

@@ -190,7 +190,7 @@ export async function runDeclaredTargets(mw: BrowserMiddleware, a: {
   }): Promise<DeclaredTargetsPhase> {
     const { pg, stepNo, verbose, elems, cmdSpace, cmdDone, cmdAttempts, noteSkipped, zeroExecSummary,
       goalHeld, goalSignalFn, frameTargetStop, targets, stop, stopReason, forbidden, pruneForbids, hintOpts,
-      surfacePolicy, frameHosts, targetResolutionDeclared, candidateAttempts, resolveCommandRef,
+      frameHosts, targetResolutionDeclared, candidateAttempts, resolveCommandRef,
       setDone, setViewportUnderloaded } = a;
     let cmdI = a.cmdI;
     let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
@@ -392,7 +392,7 @@ export async function runDeclaredTargets(mw: BrowserMiddleware, a: {
    * dead hint 沿有序 targetHints 前进；身份/DRF 结构化停因与 row-anchor 歧义在此早停。
    * 覆盖范围仅 act-hint 解析；commandValue binding 之后逻辑仍在 run()。
    */
-export async function runDeclaredHint(mw: BrowserMiddleware, a: {
+export async function runDeclaredHint(_mw: BrowserMiddleware, a: {
     pg: AnyPage; stepNo: number; verbose: boolean; elems: ElemPool; commandMode: boolean; targets: DeclaredTargetsResolver;
     warnings: string[]; stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
     noteSkipped: (s: SkippedAction) => void; hintMatch: typeof hintMatch; hintLookup: typeof hintLookup;

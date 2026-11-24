@@ -19,7 +19,7 @@ import { listAppDirs } from "./app-pack.ts";
 import { SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
 import { checkArtifacts, missingPieces } from "../model/model-artifacts.ts";
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
-import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
+import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec } from "../model/decision-provider.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { installLayaRuntime } from "../model/model.ts";
 import { nextForStop, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";

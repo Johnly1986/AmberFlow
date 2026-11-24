@@ -11,7 +11,7 @@ import { HOME_NEXT, OVERVIEW_TEXT } from "../support/help-map.ts";
 import { makeContext, say, emitJson, type CliContext, type GlobalOptions } from "./context.ts";
 import { CliError, EXIT, formatCliError, usageError } from "./errors.ts";
 import { errorEnvelope, successEnvelope } from "./json.ts";
-import { runNodeEntry, type EntryRunner } from "./process.ts";
+import { type EntryRunner } from "./process.ts";
 import { detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT } from "./invocation.ts";
 
 export interface MainOptions {
@@ -174,7 +174,7 @@ function reportError(ctx: CliContext, command: string, err: unknown, json: boole
 
 class HelpRequested extends Error {}
 
-async function dispatch(command: string, rest: string[], ctx: CliContext, rawRest: string[] = rest): Promise<number> {
+async function dispatch(command: string, rest: string[], ctx: CliContext): Promise<number> {
   switch (command) {
     case "run": {
       const { runRun } = await import("./commands/run.ts");
@@ -476,7 +476,7 @@ export async function main(argv: string[] = process.argv.slice(2), options: Main
       return await home(ctx);
     }
     try {
-      return await dispatch(command, invocation.rest, ctx, invocation.rawRest);
+      return await dispatch(command, invocation.rest, ctx);
     } catch (err) {
       if (err instanceof HelpRequested) {
         say(ctx, globalHelp());

@@ -14,23 +14,15 @@
  * hint_lookup's multi-word labels in the Python version.
  */
 
-import {
-  describeFrameSuffixRejection, describeRowIndexSuffixRejection, describeRowSuffixRejection,
-  frameChainValueProblem, parseHint, splitTailSuffixes, type ParsedHint,
-} from "./hint.ts";
-import { parseClickAtValue } from "./click-at.ts";
-import { sleepMs } from "../support/sleep.ts"; import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
+import { describeFrameSuffixRejection, describeRowIndexSuffixRejection, describeRowSuffixRejection, parseHint, splitTailSuffixes, type ParsedHint } from "./hint.ts";
+
+ import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
 // 判定与 frameOriginOf 的实现都在 frame-scope（这里 re-export 保持既有导出面不变）。
-import { elemFrameStamp, frameChainOf, frameGateExcludes, frameInHostsEnvelope, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { elemFrameStamp, frameChainOf, frameGateExcludes, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
 export { elemFrameStamp, frameChainOf, frameInHostsEnvelope, frameScopeMatches, frameScopeMatchesFrame, frameOriginOf } from "./frame-scope.ts";
 // 内嵌 JS 探针区（COLLECT_JS/PASS_*…）拆到 pool-js.ts（F6）；导出面不变，这里读回同一份。
-import {
-  COLLECT_JS, PASS_EXTRACT, PASS_OBSERVE, PASS_WINDOW, PASS_UNDERLOAD,
-  PASS_META, PASS_NEAR, PASS_HINT, PASS_HINT_PROBE, PASS_HEURISTIC, FN_TAG, FN_FIRST, FN_WRAPPER,
-  PASS_LISTENER_FINGERPRINT,
-  BUCKET_HELPERS_JS, compile,
-} from "./pool-js.ts";
+import { PASS_OBSERVE, PASS_WINDOW, PASS_UNDERLOAD, PASS_META, PASS_HINT, PASS_HINT_PROBE, PASS_LISTENER_FINGERPRINT } from "./pool-js.ts";
 // FW8 身份回捞区（identityHintInfo/identityLookup 等）拆到 identity.ts（F6）；
 // 这里 re-export 维持既有导出面不变（executor 等既有调用方零改动）。
 export {
@@ -42,10 +34,7 @@ export {
   EXTRACT_JS, OBSERVE_JS, PASS_EXTRACT, PASS_OBSERVE, PASS_WINDOW, PASS_UNDERLOAD,
   PASS_META, PASS_NEAR, PASS_HINT, PASS_HINT_PROBE, FN_TAG, FN_FIRST, FN_WRAPPER,
 } from "./pool-js.ts";
-import {
-  ADMIT_SEL, POOL_SEL, SURFACE_SELECTORS, WINDOW_CAPS,
-  admitSelectorWithJsFor, poolSelectorWithJsFor, type SurfacePolicy,
-} from "./surface.ts";
+import { ADMIT_SEL, POOL_SEL, SURFACE_SELECTORS, admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 
 /* ---- 纯区外搬（本轮拆分）：导出面由此处 re-export，既有 importer 零改动 ---- */
 import { firstOf, framesOf, urlOf } from "./page-shapes.ts";
@@ -65,7 +54,7 @@ export {
 export type { FrameGate, FrameScopeEvidence, SplitSelectorFrameSuffix } from "./frame-scope.ts";
 
 /* page 形状类型已下沉 L0（src/support/page-like.ts）：这里 re-export 保持既有 importer 不变。 */
-import type { FrameLike, InnerLoc, LocLike, PageLike } from "../support/page-like.ts";
+import type { FrameLike, PageLike } from "../support/page-like.ts";
 export type { FrameLike, InnerLoc, LocLike, PageLike } from "../support/page-like.ts";
 
 /**
@@ -73,9 +62,8 @@ export type { FrameLike, InnerLoc, LocLike, PageLike } from "../support/page-lik
  * 帧 URL 无法解析 / about:blank / file: 等：返回 true（不可判 origin 时绝不擅自排除）。
  */
 /** 信封布尔视图：true = 在声明的 hosts 信封内。单源实现见 host-envelope.ts（L2 合并）。 */
-import { urlInHostsEnvelope } from "./host-envelope.ts";
-export { urlInHostsEnvelope } from "./host-envelope.ts";
 
+export { urlInHostsEnvelope } from "./host-envelope.ts";
 
 /* ------------------------------------------------------------------ constants */
 
@@ -103,7 +91,6 @@ export const MAX_ELEMENTS = POOL_CAP_ELEMENTS;
  * 启发式伪按钮候选）。单一出处：executor 与 inspect --wide 共用。
  */
 export const WIDE_POOL_ELEMENTS = WIDE_SCAN_POOL_ELEMENTS;
-
 
 /**
  * A2：**决策服务单次候选上限**。评测/在线服务把候选清单当选项列表，服务侧硬上限 255；
@@ -156,7 +143,6 @@ export async function listenerCacheKeyOf(page: PageLike): Promise<string> {
   if (fp === null || typeof fp !== "object") return `${url}|nofp`;
   return `${url}|${part(fp.nodes)}|${part(fp.bodyChildren)}|${part(fp.visibleInteractive)}|${part(fp.jsStamped)}`;
 }
-
 
 /* ------------------------------------------------------------------ discovery */
 
@@ -456,7 +442,6 @@ export function lexicalOverlap(instruction: string, label: string): boolean {
 }
 
 /* ------------------------------------------------------------------ R2: heuristic widgets */
-
 
 /* ------------------------------------------------------------------ CDP probe */
 

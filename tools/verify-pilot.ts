@@ -407,7 +407,7 @@ async function scenarioNestedFold(origin: string): Promise<void> {
 }
 
 async function scenarioAmbiguous(origin: string): Promise<void> {
-  const { rt, events } = await boot({
+  const { rt } = await boot({
     url: `${origin}/home.html`, goal: "Same label",
     finalSignal: { css_exists: "#detail" }, maxSteps: 6,
   });

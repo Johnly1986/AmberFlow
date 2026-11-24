@@ -33,7 +33,7 @@ import type { Volatile } from '@deepseek-ai/cordis'
 // Erased at runtime — the running host provides both services.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-settings'
-import { fillArgMessage, listApps, normalizeDecisionEndpoint, type BridgeOptions, type JsonValue } from './bridge.ts'
+import { decisionEndpointFromPage, fillArgMessage, listApps, type BridgeOptions, type JsonValue } from './bridge.ts'
 import {
   appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowRunArgs, type AmberFlowService,
@@ -124,14 +124,16 @@ export interface Config {
    */
   appsHome?: string
   /**
-   * Unified **decision service** endpoint (System One protocol).
+   * Unified **decision service** endpoint.
    *
    * These three fields plus {@link Config.stepGapMs} and {@link Config.headful} are the ONLY
    * `.volatile()` fields in this Config, so the plugin's configuration page (`plugins.row.config`)
-   * shows exactly them. They are
-   * forwarded to the engine child process as `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL`,
-   * and when the URL + token are both set the bridge defaults runs to the `decision-service`
-   * provider. Empty means "not configured": runs keep the local ONNX decision model (or rules-only).
+   * shows exactly them. The URL is forwarded to the engine child process **verbatim** (whitespace
+   * trimmed only) as `AMBERFLOW_DECISION_BASE_URL`, together with `_API_KEY` / `_MODEL`; protocol
+   * inference and endpoint suffixes happen in the engine (`src/model/decision-service.ts` /
+   * `decision-openai.ts`), the only decision point. When the URL + token are both set the bridge
+   * defaults runs to the `decision-service` provider. Empty means "not configured": runs keep the
+   * local ONNX decision model (or rules-only).
    */
   modelBaseUrl?: Volatile<string>
   /** Bearer token for {@link modelBaseUrl}. Secret: the settings surface never reads it back. */
@@ -177,9 +179,10 @@ export const Config = z.object({
   keepRuns: z.natural().default(30),
   appsHome: z.string(),
   // The plugin's configuration page shows exactly these three fields (settings projects only
-  // volatile fields). They configure the unified decision service (System One): URL is normalized
-  // to the /systemone endpoint, token/key/model become AMBERFLOW_DECISION_* for the engine CLI,
-  // and a fully configured pair makes app runs default to the `decision-service` provider.
+  // volatile fields). They configure the unified decision service: the URL travels verbatim as
+  // AMBERFLOW_DECISION_BASE_URL (the engine selects the protocol and appends the endpoint suffix),
+  // while token/key/model become AMBERFLOW_DECISION_* for the engine CLI; a fully configured pair
+  // makes app runs default to the `decision-service` provider.
   modelBaseUrl: z.string().default('').volatile(),
   // No schema default: the settings secret-presence marker is `value !== undefined`, so a default
   // would make an unset token read as "configured" in the configuration page.
@@ -312,7 +315,7 @@ function resolveOptions(config: Config): BridgeOptions {
     forwardEnv: config.forwardEnv ?? [],
     keepRuns: config.keepRuns ?? 30,
     decisionModel: {
-      endpoint: normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? ''),
+      endpoint: decisionEndpointFromPage(volatileValue(config.modelBaseUrl) ?? ''),
       apiKey: (volatileValue(config.modelApiKey) ?? '').trim(),
       model: (volatileValue(config.modelName) ?? '').trim(),
     },
@@ -323,7 +326,7 @@ function resolveOptions(config: Config): BridgeOptions {
     headful: volatileValue(config.headful) === true,
     // Auto-select the online decision provider only when the endpoint AND token are both present:
     // a half-configured page must not break runs that otherwise work on the local model.
-    ...(normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? '').trim() !== ''
+    ...(decisionEndpointFromPage(volatileValue(config.modelBaseUrl) ?? '') !== ''
       && (volatileValue(config.modelApiKey) ?? '').trim() !== ''
       ? { decisionProvider: 'decision-service' as const }
       : {}),

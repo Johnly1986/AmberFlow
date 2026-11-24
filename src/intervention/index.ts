@@ -13,9 +13,7 @@
  *     之外的任何 app 概念；落盘回调由 adapter 提供，模块只保证「调通道前同步调用」）。
  */
 
-import type {
-  RescueChannel, RescueKind, RescueMode, RescueOutcome, RescueRequest, RescueShadowRecord,
-} from "../support/intervention-contract.ts";
+import type { RescueChannel, RescueKind, RescueOutcome, RescueRequest, RescueShadowRecord } from "../support/intervention-contract.ts";
 
 /** kind 注册表实例（v1 三 kind；credential 依赖保险箱未建——不注册）。 */
 export const RESCUE_KINDS = {

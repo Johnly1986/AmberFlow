@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import os from "node:os";
+
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
@@ -265,8 +265,6 @@ function validateGoalFlags(v: Values): void {
   if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用运行");
   if (str(v.today)) throw usageError("--today 只用于应用运行");
 }
-
-
 
 async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext): Promise<number> {
   // A6 防呆：walk 是真跑调试模式，dry 只展开调用序列、没有浏览器——同给是用法错误（exit 2）。

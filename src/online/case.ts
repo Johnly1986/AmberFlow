@@ -11,10 +11,8 @@ import { validateSignalSpec } from "../engine/signals.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "../engine/plan.ts";
 import { extractSlots } from "../engine/extraction.ts";
 import { isSecretKey } from "../support/config-schema.ts";
-import { PROBE_EXPECT_MEMBERS, type ProbeExpectMember } from "./types.ts";
-import type {
-  OnlineBundle, OnlineCase, OnlineOracle, OnlineSite, OnlineSubgoal, OnlineTier,
-} from "./types.ts";
+import { PROBE_EXPECT_MEMBERS } from "./types.ts";
+import type { OnlineBundle, OnlineCase, OnlineOracle, OnlineSite, OnlineTier } from "./types.ts";
 
 const TIERS: readonly OnlineTier[] = ["smoke", "core", "deep", "probe"];
 const FORBIDDEN_URL = /(^|[/:])(testpages|bench\/fixtures|transfer\/site|ctrip\/site|semantic\/site|qunar\/results)(\/|$)|^file:/i;

@@ -65,23 +65,51 @@ function text(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-/** browser 步的 trace（`captureTraces` 打开时才有）；缺字段时用 subgoals 兜底。 */
+/**
+ * `step_traces` 的原始行（可能缺字段：旧产物 / replay 没有步表）。
+ * 它是 flow 产物的**唯一步表**——每个 `ctx.step`/`arrive`/`manual`/`run`/`dangerous` 调用一行，
+ * `index` 是调用序（0 基）。
+ */
+function traceRows(result: AppRunResult): Array<Record<string, unknown>> {
+  return (result as unknown as { step_traces?: Array<Record<string, unknown>> }).step_traces ?? [];
+}
+
+/**
+ * 工具步（`ctx.run` / `ctx.dangerous`）的**行标记与拒绝分类**。
+ *
+ * `src/app/ctx-tools.ts` 把一次进程观察写进 trace 事件的 `result`：`source` 是工具步独有的键
+ * （浏览器步/人工步的 result 没有它），`refused` 是拒绝原因。行 `status` 只有
+ * done/failed/recovered/skipped——不补 refused 这一层，一次「危险步被拒」会被读成普通失败。
+ * 非工具步返回 null。
+ */
+function toolTraceRow(t: Record<string, unknown>): { refused: string | null } | null {
+  const r = t["result"];
+  if (typeof r !== "object" || r === null || Array.isArray(r)) return null;
+  const rec = r as Record<string, unknown>;
+  if (typeof rec["source"] !== "string") return null;
+  const refused = typeof rec["refused"] === "string" && rec["refused"] !== "" ? rec["refused"] : null;
+  return { refused };
+}
+
+/** browser/工具/人工步的 trace（`captureTraces` 打开时才有）；缺字段时用 subgoals 兜底。 */
 function traceSteps(result: AppRunResult): AgentStepView[] {
-  const traces = (result as unknown as { step_traces?: Array<Record<string, unknown>> }).step_traces ?? [];
+  const traces = traceRows(result);
   const meta = new Map(subgoalSteps(result).map((s) => [s.index, s]));
   return traces.map((t, i) => {
-    const status = text(t["status"]) || "unknown";
     const methods = Array.isArray(t["methods"]) ? t["methods"].map(String).filter(Boolean) : [];
     const index = typeof t["index"] === "number" ? t["index"] + 1 : i + 1;
     const sg = meta.get(index);
+    const tool = toolTraceRow(t);
+    const stop = (typeof t["stop_code"] === "string" ? t["stop_code"] : "") || sg?.stop_code || "";
     return {
       index,
       ...(typeof t["id"] === "string" ? { id: t["id"] } : {}),
       desc: text(t["desc"]) || `step ${i + 1}`,
-      status,
+      status: tool?.refused !== undefined && tool.refused !== null ? "refused" : (text(t["status"]) || "unknown"),
       ...(methods.length ? { method: methods[methods.length - 1] } : {}),
-      ...(typeof t["stop_code"] === "string" ? { stop_code: t["stop_code"] } : sg?.stop_code ? { stop_code: sg.stop_code } : {}),
-      ...(sg?.obstacle ? { obstacle: sg.obstacle } : {}),
+      ...(tool?.refused !== undefined && tool.refused !== null
+        ? { stop_code: tool.refused, obstacle: tool.refused }
+        : { ...(stop ? { stop_code: stop } : {}), ...(sg?.obstacle ? { obstacle: sg.obstacle } : {}) }),
     };
   });
 }
@@ -102,6 +130,7 @@ function subgoalSteps(result: AppRunResult): AgentStepView[] {
   });
 }
 
+/** `tool_steps` 的投影（声明式/无 trace 面的步表补充；flow 面见 `agentStepViews` 的契约）。 */
 function toolSteps(result: AppRunResult): AgentStepView[] {
   return (result.tool_steps ?? []).map((t) => ({
     index: t.index + 1,
@@ -112,9 +141,27 @@ function toolSteps(result: AppRunResult): AgentStepView[] {
   }));
 }
 
+/**
+ * 步表契约（与桥 `summarizeRun` 同一张表、同一 1-based 步序）：
+ *
+ *   - **flow 产物**（`script.mode === "flow"`）的 `step_traces` 是**唯一步表**：`app-runner` 的
+ *     step 事件过滤本来就包含 `run` / `dangerous`（工具事件），所以每个 `ctx.step` / `ctx.arrive` /
+ *     `ctx.manual` / `ctx.run` / `ctx.dangerous` 调用都在表内各占一行，`index` 是调用序（0 基）。
+ *     这里**不再叠加** `tool_steps`：那是同一批工具步的第二份投影（按工具序号而非调用序编号），
+ *     叠加会让同一个工具步出现两行、并让 `failure.step` 落到另一套 index 空间（桥只从 `step_traces`
+ *     投影一次，两面的步号必须同源）。工具步的 refused/failed 分类由该行的 `status`/`stop_code`
+ *     表达（拒绝原因从事件 `result.refused` 取，见 `toolTraceRow`）。
+ *   - **声明式产物**的浏览器步在 `subgoals`、工具步在 `tool_steps`，两张表都不含对方 ⇒ 照旧合并
+ *     （合并后按 1-based 步序排序；`step_traces` 只在 `captureTraces` 打开时存在，有就优先用它）。
+ *   - `tool_steps` 只在声明式分支参与合并：flow 的 `step_traces` 已含工具行，而桥 `summarizeRun`
+ *     对 flow 产物同样只读 `step_traces`——两面用同一张表，才能既不重复、又让步号同源。
+ */
 export function agentStepViews(result: AppRunResult): AgentStepView[] {
   const traced = traceSteps(result);
-  const steps = traced.length ? traced : subgoalSteps(result);
+  // flow：直接返回步表（顺序即调用序，不排序——排序会把"表本身乱序"这类漂移盖掉）。
+  if (result.script?.mode === "flow") return traced;
+  // 声明式：两张表都不含对方，合并后按 1-based 步序排序（工具步在旅程里的位置就是它的步号）。
+  const steps = traced.length > 0 ? traced : subgoalSteps(result);
   return [...steps, ...toolSteps(result)].sort((a, b) => a.index - b.index);
 }
 

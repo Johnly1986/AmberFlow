@@ -5,16 +5,7 @@
  * 纪律：**只重放、不猜**——调用序列、说明、URL 与 trace 不一致就结构化停因
  * （`trace_mismatch`），版本/输入不一致由 `replayCompatibility` 在进入前拒绝。
  */
-import {
-  StopError, validateCollectRequest, validateExpandRequest, validateExtractOptions,
-  validateScrollListRequest, validateSetRangeRequest,
-  validateSwitchTabMatch,
-  type CollectCoverage, type CollectRequest, type CollectResult, type CollectStopReason,
-  type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
-  type RangeValue, type ScrollListOptions, type ScrollListResult,
-  type SetRangeOptions, type SetRangeResult, type SwitchTabResult, type TabInfo,
-  type SourceObservationView, type StepResult,
-} from "./ctx.ts";
+import { StopError, validateCollectRequest, validateExpandRequest, validateExtractOptions, validateScrollListRequest, validateSetRangeRequest, validateSwitchTabMatch, type CollectCoverage, type CollectRequest, type CollectResult, type CollectStopReason, type Ctx, type CtxBudget, type ExpandResult, type RangeValue, type ScrollListResult, type SetRangeOptions, type SetRangeResult, type SwitchTabResult, type TabInfo, type SourceObservationView, type StepResult } from "./ctx.ts";
 import { createKit } from "./kit.ts";
 import type { TraceCall, TraceEvent, AppTrace } from "./trace.ts";
 import { canonicalJson } from "./trace.ts";
@@ -253,7 +244,7 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
         ? rec["stopReason"] as CollectStopReason : "stable";
       return { rows, coverage, stopReason } as CollectResult;
     },
-    manual: async (desc, req) => {
+    manual: async (desc, _req) => {
       const ev = nextEvent("manual", { desc });
       if (typeof ev.url === "string" && ev.url) currentUrl = ev.url;
       consume();

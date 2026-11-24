@@ -226,8 +226,8 @@ export async function foldNestedDuplicates(mw: BrowserMiddleware, page: AnyPage,
     } catch {
       return null;
     } finally {
-      await firstLoc(la).evaluate((n: any, t: string) => n.removeAttribute("data-af-fold"), tok.a).catch(() => {});
-      await firstLoc(lb).evaluate((n: any, t: string) => n.removeAttribute("data-af-fold"), tok.b).catch(() => {});
+      await firstLoc(la).evaluate((n: any) => n.removeAttribute("data-af-fold"), tok.a).catch(() => {});
+      await firstLoc(lb).evaluate((n: any) => n.removeAttribute("data-af-fold"), tok.b).catch(() => {});
     }
   };
   // ① 包含折叠：祖先出列，保留后代。部分包含但剩 >1 = 链不完整，按真歧义处理。

@@ -220,7 +220,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
    * 分支是**同一次页面调用**；没有可滚动的容器/祖先时 moved:false（这不是失败——元素本来
    * 就在视口里）。
    */
-export async function _scrollIntoViewWithEvidence(mw: BrowserMiddleware, page: AnyPage, loc: AnyLoc): Promise<ScrollEvidence> {
+export async function _scrollIntoViewWithEvidence(_mw: BrowserMiddleware, _page: AnyPage, loc: AnyLoc): Promise<ScrollEvidence> {
     let box: Record<string, unknown> | null = null;
     try {
       box = await firstLoc(loc).evaluate((node: any) => {
@@ -315,7 +315,7 @@ export async function _scrollContainerForElement(mw: BrowserMiddleware, page: An
    * B2：成功时如实带 `delta`（after - before，与 `moved` 同一对读数）——会话层要能
    * 回显「滚了多少」，而不是只知道"滚过"。
    */
-export async function _scrollWithLoc(mw: BrowserMiddleware, page: AnyPage, loc: AnyLoc, to: "bottom" | "top" | "page", by?: number, settleMs = 150,): Promise<ScrollEvidence> {
+export async function _scrollWithLoc(_mw: BrowserMiddleware, _page: AnyPage, loc: AnyLoc, to: "bottom" | "top" | "page", by?: number, settleMs = 150,): Promise<ScrollEvidence> {
     let box: Record<string, unknown> | null = null;
     try {
       box = await firstLoc(loc).evaluate((node: any, arg: { to: string; by?: number }) => {
@@ -433,7 +433,7 @@ export async function scrollContainer(mw: BrowserMiddleware, page: AnyPage, targ
    * 容器目标的既有路径（`scrollContainer` → `_scrollWithLoc`）逐字节不变。
    * B2：成功时带 `delta`（after - before），与 `_scrollWithLoc` 同一口径。
    */
-export async function scrollDocument(mw: BrowserMiddleware, page: AnyPage, to: "bottom" | "top" | "page" = "bottom",
+export async function scrollDocument(_mw: BrowserMiddleware, page: AnyPage, to: "bottom" | "top" | "page" = "bottom",
     opts?: { by?: number; settleMs?: number },): Promise<ScrollEvidence> {
     let box: Record<string, unknown> | null = null;
     try {

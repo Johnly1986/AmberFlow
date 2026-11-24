@@ -30,7 +30,7 @@ import { userAppsDir } from "../../support/amberflow-home.ts";
 import { browserSession } from "../../engine/executor.ts";
 import { CLI_COMMAND_DEFAULT_TIMEOUT_MS } from "../../support/tuning.ts";
 import { extractElements } from "../../app/candidate-scan.ts";
-import { hintCandidates, hintMatch } from "../../engine/rules.ts";
+import { hintCandidates } from "../../engine/rules.ts";
 import { createHintMemory } from "../../model/hint-memory.ts";
 import type { CliContext } from "../context.ts";
 import { emitJson, say } from "../context.ts";

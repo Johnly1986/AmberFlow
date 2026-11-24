@@ -26,7 +26,7 @@ import { extractElements } from "../../app/candidate-scan.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
 import { matchSelector } from "../../engine/signals.ts";
-import { parseCliArgs } from "../../support/cli-args.ts";
+
 import { parseRunDefaults } from "../../support/run-defaults.ts";
 import { commandHelp } from "../registry.ts";
 
@@ -151,7 +151,6 @@ function poolDebugView(
   });
   return { ...view, elements };
 }
-
 
 type InspectRunArgs =
   | {

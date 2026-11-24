@@ -148,7 +148,7 @@ bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配
 
 | 字段 | 转发到引擎 CLI 的环境变量 | 含义 |
 |---|---|---|
-| **决策模型 URL** | `AMBERFLOW_DECISION_BASE_URL` | 决策服务基址（如 `https://…/compatible-mode/v1` 或 `http://localhost:8008`）；桥自动归一成 `/systemone`（已带后缀则原样） |
+| **决策模型 URL** | `AMBERFLOW_DECISION_BASE_URL` | 决策服务地址（如 `https://…/compatible-mode/v1`、`http://localhost:8008` 或完整 `…/v1/systemone`）；**原样**交给引擎——协议与端点后缀由引擎决定（`…/v1/systemone` / `…/v1/decisions`），桥不补任何后缀 |
 | **决策模型 Token Key** | `AMBERFLOW_DECISION_API_KEY` | bearer token；只写不读——Host 不回传，页面只显示“已配置/未设置” |
 | **决策模型名 ModelName** | `AMBERFLOW_DECISION_MODEL` | 决策模型 id（如 `decision-model-preview`）；留空用 provider 默认 |
 | **步间距（毫秒）** | `AMBERFLOW_STEP_DELAY_MS` | 两次执行步之间的最小等待（0–60000）；应用自声明的 `meta.pace` 仍优先 |

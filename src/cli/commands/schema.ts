@@ -7,7 +7,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
 import { emitJson, say } from "../context.ts";

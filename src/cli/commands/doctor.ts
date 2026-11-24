@@ -95,7 +95,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   const askProbeDisabled = v["no-ask-probe"] === true;
   const askProbeForced = v["ask-probe"] === true;
   const askProbe = !askProbeDisabled && (askProbeForced || serviceConfigured)
-    ? await runAskProbe(provider)
+    ? await runAskProbe()
     : null;
   // 决策源解析失败是“可用性警告”，不是核心阻塞项；退出码只看 Node / Chromium / 配置。
   const exitCode = report.ok && config.errors.length === 0 ? 0 : 2;
@@ -273,9 +273,7 @@ interface AskProbeResult {
  * HTTP 成败给 ref/conf，失败给状态码+错误关键句（不含也不回显任何凭据）。
  * 探针底座抽到 `model/decision-probe.ts` 共享（run 起跑探测与 doctor 单一出处）。
  */
-async function runAskProbe(
-  provider: typeof import("../../model/decision-provider.ts"),
-): Promise<AskProbeResult> {
+async function runAskProbe(): Promise<AskProbeResult> {
   const r = await probeDecisionPlane();
   const out: AskProbeResult = { provider: r.provider, ok: r.ok };
   if (r.ok) { out.ref = r.ref ?? null; out.conf = r.conf; }

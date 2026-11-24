@@ -13,9 +13,7 @@ import { sleepMs } from "../support/sleep.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { BrowserMiddleware, AnyPage } from "../engine/executor.ts";
 import { type SessionActOp, type SessionScrollOut } from "./session-runtime-contract.ts";
-import {
-  actAmbiguity, ambiguityRecord, ambiguityResponse, displayHow, failureScreenshot, missDiagnosticsResponse, observeAfter,
-} from "./session-runtime-evidence.ts";
+import { actAmbiguity, ambiguityRecord, ambiguityResponse, failureScreenshot, missDiagnosticsResponse, observeAfter } from "./session-runtime-evidence.ts";
 import type { Ctx } from "./ctx.ts";
 
 /** scroll 分支的会话侧依赖（会话类的窄接口投影，不把整个类拖进模块）。 */

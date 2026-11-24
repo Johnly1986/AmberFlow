@@ -8,8 +8,14 @@
  *     `RunSummary.status?: string`（类型上无闭集）。
  * 本 lane 用固定 result JSON（按真实产物形状）走两条投影，逐字段比较语义；比较的项固定为：
  * status / ok / verified / dry / partial / completed / invariants / failure（presence + step /
- * desc / stop_code / obstacle）/ 步数 / 截断标注 / 截断总数 / MAX_STEPS 预算，另加 status 词表闭集
- * 与 `MAX_STEPS` 两处写的一致性。任何一条**未登记**的差异 = exit 1。
+ * desc / stop_code / obstacle）/ 步数 / **逐行步号** / 截断标注 / 截断总数 / MAX_STEPS 预算，另加
+ * status 词表闭集与 `MAX_STEPS` 两处写的一致性。任何一条**未登记**的差异 = exit 1。
+ *
+ * 步表契约（本 lane 用来对账的口径）：flow 产物的 `step_traces` 是**唯一步表**，工具步
+ * （`ctx.run` / `ctx.dangerous`）也在表内各占一行 ⇒ 两条模型可见视图的 `steps[].length` 与
+ * 逐行 `index` 必须同源（同一次调用同一个 1-based 步号）。下方含工具步的场景是这条契约的
+ * 负向证据：任一视图若又叠加第二份工具表，`steps.count` / `steps.indices` / `failure.step`
+ * 立刻判红。
  *
  * 白名单纪律：当前已存在的差异必须逐条登记（场景 + 字段 + 两侧取值 + 判断：audience 语义差异 /
  * 缺陷 + 依据）。登记键包含两侧取值，所以差异若**变形**（同一字段换了取值）一样按新差异处理；
@@ -66,6 +72,7 @@ type Field =
   | "failure.stop_code"
   | "failure.obstacle"
   | "steps.count"
+  | "steps.indices"
   | "steps.truncated"
   | "steps.total"
   | "steps.bridge_cap";
@@ -98,7 +105,11 @@ interface Scenario {
    * dry 分支不走 run view（CLI dry 信封直接给 events），这里显式传 `dry:true` 读 status 分支。
    */
   agentOptions: { partial?: boolean; dry?: boolean };
-  /** 该产物未被截断前的步表行数（独立于两个投影的期望值，用于对账截断总数）。 */
+  /**
+   * 该产物未被截断前的步表行数（独立于两个投影的期望值，用于对账截断总数）。
+   * 两侧步表必须**行数一致**：flow 产物的 `step_traces` 是唯一步表（含工具行），没有第二张表
+   * 可叠加到它上面。
+   */
   sourceStepCount: number;
 }
 
@@ -112,6 +123,8 @@ interface AgentProjection {
   invariants: InvariantView;
   failure: FailureView | null;
   stepCount: number;
+  /** 逐行 1-based 步号（`steps[].index` 的原始序列，不排序不归一）。 */
+  stepIndices: number[];
   truncated: boolean;
 }
 
@@ -125,6 +138,8 @@ interface BridgeProjection {
   invariants: InvariantView;
   failure: FailureView | null;
   stepCount: number;
+  /** 逐行 1-based 步号（`steps[].index` 的原始序列，不排序不归一）。 */
+  stepIndices: number[];
   truncated: boolean;
   stepsTotal: number | null;
 }
@@ -199,6 +214,15 @@ function toolRow(index: number, desc: string, extra: Record<string, unknown> = {
   return { index, desc, source: "fixture-cli", attempts: 1, done: false, ok: false, code: null, ...extra };
 }
 
+/**
+ * 工具步在 `step_traces` 里的 `result` 载荷（`src/app/ctx-tools.ts` 的 `finishToolRun` 写入）：
+ * `source` 是工具步独有的键——agent 视图靠它把「这一行是工具步」与浏览器步分开。
+ * 真实 flow 产物里被拒/失败的工具步同样带这份载荷（`refused` / `code` / `reason`）。
+ */
+function toolPayload(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { source: "fixture-cli", attempts: 1, code: null, refused: null, ...extra };
+}
+
 function scriptRecord(steps: number, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     mode: "flow", script_path: "<fixture>/app.mjs", steps,
@@ -267,7 +291,7 @@ const SCENARIOS: readonly Scenario[] = [
       tool_steps: [toolRow(0, "同步一次记录", { code: 3, reason: "signal not held" })],
       step_traces: [
         traceRow(0, "done", "打开首页"),
-        traceRow(1, "failed", "同步一次记录", { stop_code: "tool_failed" }),
+        traceRow(1, "failed", "同步一次记录", { stop_code: "tool_failed", result: toolPayload({ code: 3 }) }),
       ],
       script: scriptRecord(1),
     }),
@@ -362,7 +386,7 @@ const SCENARIOS: readonly Scenario[] = [
       tool_steps: [toolRow(0, "下载报表", { refused: "dangerous" })],
       step_traces: [
         traceRow(0, "done", "打开首页"),
-        traceRow(1, "failed", "下载报表", { stop_code: "dangerous" }),
+        traceRow(1, "failed", "下载报表", { stop_code: "dangerous", result: toolPayload({ refused: "dangerous" }) }),
       ],
       script: scriptRecord(1),
     }),
@@ -380,7 +404,7 @@ const SCENARIOS: readonly Scenario[] = [
       tool_steps: [toolRow(0, "同步一次记录", { code: 7, reason: "signal not held" })],
       step_traces: [
         traceRow(0, "done", "打开首页"),
-        traceRow(1, "failed", "同步一次记录", { stop_code: "tool_failed" }),
+        traceRow(1, "failed", "同步一次记录", { stop_code: "tool_failed", result: toolPayload({ code: 7 }) }),
       ],
       script: scriptRecord(1),
     }),
@@ -441,11 +465,13 @@ const SCENARIOS: readonly Scenario[] = [
  * 当前已存在的差异（逐条给判断）。判红规则：白名单外的差异 = exit 1；登记取值对不上 = exit 1；
  * 登记了但本次没观测到 = exit 1（白名单过期，必须收窄）。
  *
- * 两个缺陷族的共同根因：`agentStepViews` 把 `traceSteps(result)` 与 `toolSteps(result)` 相加，而
- * flow 产物的 `step_traces` 本身**已经包含** `run`/`dangerous` 工具事件行（`app-runner` 的
- * `stepEvents` 过滤条件），于是工具步在 agent 视图里出现两次、且两条记录用的 index 空间不同
- * （一条按 step_traces 位置 +1，一条按工具步序号 +1）。桥侧只从 step_traces 投影一次。修复要改
- * 投影行为，不在对账 lane 的行为面内——这里登记为缺陷并保持判红能力。
+ * 历史：本 lane 首轮登记过 6 条 defect（工具步在 agent 视图重复登记导致 `steps.count` / `failure.step`
+ * 与桥不一致）。那些差异已由 `agent-view.ts` 的 `agentStepViews` 修掉（flow 产物的 `step_traces`
+ * 是唯一步表，工具行不再叠加 `tool_steps` 的第二份投影），**白名单随之清零**——本 lane 现在是纯
+ * tripwire：两侧在固定产物上必须逐字段同语义，任何新差异 = 判红。
+ *
+ * 保留 4 条 audience 差异：同一事实的两种呈现口径（agent 侧没有 refused[]/failedTools[] 分类数组，
+ * 把「工具步没走成」折叠进 blocked），判断依据逐条见下。
  */
 const KNOWN_DIFFERENCES: readonly KnownDifference[] = [
   {
@@ -462,28 +488,11 @@ const KNOWN_DIFFERENCES: readonly KnownDifference[] = [
   },
   {
     scenario: "refused-tool",
-    field: "steps.count",
-    agent: "3",
-    bridge: "2",
-    kind: "defect",
-    why: "agent 视图把同一个工具步登记了两行（step_traces 的 run 事件行 + tool_steps 投影行，"
-      + "两行 index 都是 1 但 status 一个 refused 一个 failed）；桥侧只有 step_traces 一行。根因见白名单头注释。",
-  },
-  {
-    scenario: "refused-tool",
-    field: "failure.step",
-    agent: "1",
-    bridge: "2",
-    kind: "defect",
-    why: "同一根因：failure 取的是第一条失败行，两侧的行序/index 空间不同，于是同一步被标成 1 和 2。",
-  },
-  {
-    scenario: "refused-tool",
     field: "failure.obstacle",
     agent: "dangerous",
     bridge: "null",
     kind: "audience",
-    why: "同一拒绝事实的两种呈现：agent 的工具投影把 refused 同时写成 stop_code 与 obstacle；"
+    why: "同一拒绝事实的两种呈现：agent 的工具行把 refused 同时写成 stop_code 与 obstacle；"
       + "桥的 failure 块不写 obstacle（规范化后 null），拒绝原因在 refused[]（{\"下载报表: dangerous\"}）。事实没有丢。",
   },
   {
@@ -494,39 +503,6 @@ const KNOWN_DIFFERENCES: readonly KnownDifference[] = [
     kind: "audience",
     why: "与 refused-tool.status 同一条 audience 语义差异：agent 侧 failedTools 触发 blocked，桥侧 failedTools"
       + " 触发 failed；两侧都 ok=false、都列出失败工具步与停因。",
-  },
-  {
-    scenario: "failed-tool",
-    field: "steps.count",
-    agent: "3",
-    bridge: "2",
-    kind: "defect",
-    why: "同 refused-tool.steps.count 的重复登记根因（工具步在 agent 视图出现两行）。",
-  },
-  {
-    scenario: "failed-tool",
-    field: "failure.step",
-    agent: "1",
-    bridge: "2",
-    kind: "defect",
-    why: "同 refused-tool.failure.step 的 index 空间根因。",
-  },
-  {
-    scenario: "tolerated-failed-tool",
-    field: "steps.count",
-    agent: "3",
-    bridge: "2",
-    kind: "defect",
-    why: "同 refused-tool.steps.count 的重复登记根因；FW3（脚本已处理失败工具步、result.ok=true）"
-      + "两侧结论都仍是 passed，只有步表登记数不同。",
-  },
-  {
-    scenario: "tolerated-failed-tool",
-    field: "failure.step",
-    agent: "1",
-    bridge: "2",
-    kind: "defect",
-    why: "同 refused-tool.failure.step 的 index 空间根因；两侧 failure.desc/stop_code 一致。",
   },
   {
     scenario: "dry",
@@ -540,19 +516,6 @@ const KNOWN_DIFFERENCES: readonly KnownDifference[] = [
 ];
 
 /* ------------------------------------------------------------------ 投影 */
-
-function firstFailure(
-  rows: ReadonlyArray<{ index: number; desc: string; status: string; stop_code?: unknown; obstacle?: unknown }>,
-): FailureView | null {
-  const hit = rows.find((r) => r.status === "blocked" || r.status === "failed" || r.status === "refused");
-  if (hit === undefined) return null;
-  return {
-    step: hit.index,
-    desc: hit.desc,
-    stop_code: typeof hit.stop_code === "string" && hit.stop_code !== "" ? hit.stop_code : null,
-    obstacle: typeof hit.obstacle === "string" && hit.obstacle !== "" ? hit.obstacle : null,
-  };
-}
 
 function projectAgent(result: Record<string, unknown> | null, scenario: Scenario, outDir: string): AgentProjection {
   // dry 没有 result 产物：给最小形状，只读 agent-view 的 dry 分支（status/ok/verified）。
@@ -584,6 +547,7 @@ function projectAgent(result: Record<string, unknown> | null, scenario: Scenario
     invariants: view.invariants,
     failure,
     stepCount: view.steps.length,
+    stepIndices: view.steps.map((s) => s.index),
     truncated: view.truncated,
   };
 }
@@ -613,6 +577,7 @@ function projectBridge(summary: Record<string, unknown>): BridgeProjection {
         obstacle: typeof rawFailure["obstacle"] === "string" ? rawFailure["obstacle"] : null,
       },
     stepCount: steps.length,
+    stepIndices: steps.map((st) => (typeof st["index"] === "number" ? st["index"] : -1)),
     truncated: summary["steps_truncated"] === true,
     stepsTotal: typeof summary["steps_total"] === "number" ? summary["steps_total"] : null,
   };
@@ -656,11 +621,18 @@ function comparePair(pair: Pair): Diff[] {
     }
   }
   if (agent.stepCount !== bridge.stepCount) push("steps.count", agent.stepCount, bridge.stepCount);
+  // 行数一致时再逐行对步号：挡住"步表行数对了、但只有一面把某行的步号编错"的漂移
+  // （重号/跳号/两套 index 空间都能在这里现形）。行数不一致已由 steps.count 报，不重复刷屏。
+  if (agent.stepCount === bridge.stepCount && show(agent.stepIndices) !== show(bridge.stepIndices)) {
+    push("steps.indices", agent.stepIndices, bridge.stepIndices);
+  }
   if (agent.truncated !== bridge.truncated) push("steps.truncated", agent.truncated, bridge.truncated);
   // 截断总数与预算：期望值来自固定产物本身（sourceStepCount），不是某一侧投影的结果。
   const expectedTotal = scenario.sourceStepCount > DOCUMENTED_MAX_STEPS ? scenario.sourceStepCount : null;
   if (bridge.stepsTotal !== expectedTotal) push("steps.total", expectedTotal, bridge.stepsTotal);
   const expectedCapped = Math.min(scenario.sourceStepCount, DOCUMENTED_MAX_STEPS);
+  // 截断预算只对桥侧断言：agent 侧的预算由 steps.count 间接生效（两者行数相等 ⇒ 桥等于预算
+  // 就等于 agent 也等于预算）。dry 没有 run 视图步表，不参与这条。
   if (bridge.stepCount !== expectedCapped) push("steps.bridge_cap", expectedCapped, bridge.stepCount);
   return diffs;
 }
@@ -763,8 +735,9 @@ interface NegativeCheck {
 }
 
 /**
- * 负向自测：临时注入/抹掉差异，`evaluate` 必须报红。覆盖三类失效模式——
- * 新字段漂移、白名单取值变形、已知差异消失但白名单还挂着。
+ * 负向自测：临时注入/抹掉差异，`evaluate` 必须报红。覆盖四类失效模式——
+ * 新字段漂移、白名单取值变形、已知差异消失但白名单还挂着、**修好的缺陷又复发**（工具步重复行
+ * 与步号空间错位各一条：本 lane 修掉的 6 条 defect 的回归形状）。
  */
 const NEGATIVE_CHECKS: readonly NegativeCheck[] = [
   {
@@ -810,6 +783,27 @@ const NEGATIVE_CHECKS: readonly NegativeCheck[] = [
       const pair = pairs.find((p) => p.scenario.id === "failed-invariant");
       if (pair === undefined || pair.bridge.failure === null) throw new Error("failed-invariant 场景缺失败行");
       pair.bridge.failure.step += 1;
+    },
+  },
+  {
+    // 工具步重复登记回归（本 lane 首轮修掉的缺陷形状）：agent 侧多一行、且两行步号重号。
+    name: "工具步重复行回归（agent 侧多一行）",
+    expect: "unexpected",
+    mutate: (pairs) => {
+      const pair = pairs.find((p) => p.scenario.id === "refused-tool");
+      if (pair === undefined) throw new Error("refused-tool 场景缺失");
+      pair.agent.stepCount += 1;
+      pair.agent.stepIndices = [1, 1, 2];
+    },
+  },
+  {
+    // 行数一致但步号空间错位（重号/跳号）：只有逐行步号断言能抓住。
+    name: "步号空间错位（行数不变）",
+    expect: "unexpected",
+    mutate: (pairs) => {
+      const pair = pairs.find((p) => p.scenario.id === "failed-tool");
+      if (pair === undefined) throw new Error("failed-tool 场景缺失");
+      pair.agent.stepIndices = [1, 1];
     },
   },
 ];

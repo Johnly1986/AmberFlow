@@ -4,6 +4,80 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-24 批次 P1：桥决策端点原值透传（行为变更）
+
+> 承接同日 EP parity lane 登记的 18 条差异白名单（2 族）；本批把桥侧的第二份归一化删掉，
+> 白名单清零。**未提交 git。**
+
+- **行为变更**：DSH 桥不再把配置页的「决策模型 URL」当基址补 `/systemone`——
+  `integrations/dsh-bridge/src/bridge.ts` 的 `decisionEnv` 改为**只 trim、空=不注入、其余原值透传**
+  （`normalizeDecisionEndpoint` → `decisionEndpointFromPage`）；协议推断与端点后缀全部交给引擎
+  `normalizeSystemOneEndpoint` / `normalizeOpenAIDecisionsEndpoint`（引擎是唯一协议决策点）。
+- **修掉的两个缺陷**：① 页面填裸 host / 端口 / 自定义反代前缀时，DSH 部署面实际 POST
+  `…/systemone`，CLI 直跑 POST `…/v1/systemone`（同一份值两条面打到不同路径，文档推荐的
+  `http://localhost:8008` 正处此列）；② 部署进程显式 `AMBERFLOW_DECISION_PROTOCOL=openai-decisions`
+  或值含 `/decisions` 时，桥补的 `/systemone` 与 OpenAI 归一化器再补的 `/v1/decisions` 叠加成
+  双后缀 ⇒ DSH 部署面此前**无法使用 OpenAI Decisions**。两处都随原值透传消失。
+- **迁移（部署面必读）**：今天**依赖桥补 `/systemone`** 的自建反代部署需要改——在配置页显式填
+  完整端点（如 `https://host/v1/systemone`；若反代只认 `/systemone`，把反代路径改成
+  `/v1/systemone` 更干净）；`…/compatible-mode/v1` 与已带 `/systemone`／`/decisions` 的值
+  **行为不变**；`http://localhost:8008` 这类标准 System One 端点升级后补成 `/v1/systemone`（旧桥
+  缺陷修复；服务本就只认该路径，一般无需改）。完整对照表、判断口径与**宿主重启要求**（改的是桥
+  进程内逻辑，已加载的 DSH 宿主需重启或重新加载 bundle）见
+  [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) §7.1；接口层一句话说明见
+  [docs/AGENT_INTERFACE.md](docs/AGENT_INTERFACE.md) §3.1。
+- **EP lane 收窄为机制**：`tools/verify-decision-endpoint-parity.ts` 白名单 18 → **0 条**（族定义
+  保留为回归语义说明）；负向自测改为「只改一面」的突变器（桥注入值污染 / 桥回退补 `/systemone`
+  含 OpenAI 双后缀面 / 桥注入面引擎解析改道）——两面共用同一个引擎归一化器后，改引擎本身不再
+  造成分歧，灵敏度靠一面改道钉住。`--self-test` 9/9 绿；`npm run check`、`verify:lanes` 17/17
+  全绿，`bridge:test` 18/18。
+- **配置页文案同步（纯文案、零行为）**：`integrations/dsh-bridge/client.js` 的
+  `modelBaseUrlHint`（en/zh）与页首 `hint` 改为「端点原值透传、引擎决定协议与后缀、应填完整端点」，
+  `client-root.js` 经 `scripts/client-root-sync.mjs` 重新生成（生成物同步）；桥 `README.md` /
+  `README.zh.md` 的「Decision model URL」行同步。`locale/{en,zh}.json` 未动（meta 描述与端点语义无关）。
+- **不变**：CLI 直跑与其它配置层叠面（本来就走引擎归一化）；空的 URL（仍=本地模型）；
+  桥三件套的键名与 `decisionProvider` 自动选择规则。
+
+## [Unreleased] — 2026-11-24 RV defect 收口：agent 视图工具步重复行/索引空间修复（行为变更）
+
+> 承接同日 `verify:run-view-parity` lane 登记的 6 条 defect（工具步在 agent 视图重复登记、
+> 两处 index 空间不一致）。本批改投影行为 + 收窄白名单，并清掉一条阻塞未用声明清理的 TS6133。
+> **未提交 git。**
+
+- **行为变更（CLI `amber run --json` 的 `steps[]` / `failure.step`）**：`src/app/agent-view.ts` 的
+  `agentStepViews` 对 **flow 产物**不再把 `toolSteps(result)` 叠加到 `traceSteps(result)` 之上——
+  `step_traces` 本来就是 flow 的唯一步表（`app-runner` 的 step 事件过滤含 `run`/`dangerous`，
+  `ctx.run` 每调一次即一行），`tool_steps` 是同一批工具步按**工具序号**编号的第二份投影。
+  修复前同一个工具步在视图里出现两行（`index` 都是 1、status 一个 `refused` 一个 `failed`），
+  步数 3（桥 2）、失败步号 1（桥 2）。修复后：
+  - `steps[].length` 与桥 `summarizeRun` 的 `steps[]` 同表同源（同一次调用同一个 **1-based
+    step_traces 调用序**），含工具步的 flow 运行步数**少 1 行/每个工具步**；
+  - `failure.step` 与桥一致（本仓库场景里 1 → **2**）——消费方若按旧值定位步表请按 `desc`/`stop_code`
+    复核，或读 `artifacts.result_json` 的 `step_traces`（0 基调用序，未变）；
+  - 工具步的 refused/failed **分类不丢**：拒绝原因从 trace 行的事件 `result.refused` 取，该行
+    `status="refused"` 且 `stop_code`/`obstacle` 都是拒绝类别（旧口径由被删的重复行提供）。
+- **不变**：声明式（journey/plan 源）产物仍是 `subgoals` + `tool_steps` 两张表合并（两张表互不含对方）；
+  `agentRunStatus` 的 blocked/refused/failed 判定（仍读 `tool_steps`）与 `ok`/`verified` 语义不变；
+  `step_traces`/`tool_steps`/结果 JSON 与报告产物逐字节不变（只改**模型可见视图的投影**）。
+  flow 产物的 `tool_steps` 恒由同一批 trace 事件投影而来（`app-runner` 无条件写 `step_traces`），
+  所以不做"两张表叠加"的兜底分支；声明式产物才合并两张互不含对方的表。
+- **RV lane 收窄为纯 tripwire**：`tools/verify-run-view-parity.ts` 已知差异 **10 → 4 条**（defect
+  **6 → 0**，只剩 4 条 audience：refused/failed 工具步折叠进 `blocked` vs `failed`、agent 侧
+  `failure.obstacle` 带拒绝类别、dry 无调用序列）；新增**逐行步号断言** `steps.indices`（行数一致时
+  两侧 `steps[].index` 必须逐行同源：重号/跳号/两套 index 空间即红）与 2 条负向自测（工具步重复行
+  回归、行数不变但步号错位），负向自测 **5 → 7 条**。修复后白名单过期判红仍生效（差异消失即
+  要求再收窄），灵敏度由新断言兜住。
+- **顺手清阻塞项**：`tools/verify-run-view-parity.ts` 删掉未用局部 `firstFailure`（TS6133）——
+  它是 `tsconfig` 开 `noUnusedLocals`/`noUnusedParameters` 时该文件唯一的一条诊断；删除后
+  `npx tsc --noEmit --noUnusedLocals --noUnusedParameters -p .` 对该文件 0 诊断（全仓库未用清理另批）。
+- **回归**：`node --experimental-strip-types tools/verify-run-view-parity.ts` 绿（13 场景，已知差异
+  4 全按登记值命中，白名单过期 0，新差异 0，负向自测 7/7）；`npm run typecheck` / `npm run maintain:check`
+  / `npm run golden-manual` / `npm run check` exit 0；`npm run verify:lanes` **17/17**；
+  `verify:pilot` **21/21**；`verify:runtime:offline` **8/8**。
+- **未做（登记）**：agent/桥两面的 `status` 分支口径（refused/failed 工具步 ⇒ blocked vs failed）
+  仍是 4 条 audience 差异，把两个面的分支判定统一（`blocked[]`/`refused[]`/`failedTools[]` 三分类
+  进 agent 视图）需要改 `AgentRunStatus` 的消费面语义，另批。
+
 ## [Unreleased] — 2026-11-24 结构/证据批（QW+SC+EP+RV，讨论项续做）
 
 > 用户「全部开始」后并行落地四批；硬约束同前（不改外部行为/公开契约、不引入依赖、原测试全过）。

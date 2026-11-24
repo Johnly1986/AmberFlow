@@ -22,7 +22,7 @@ export async function runOneStep(rt: CtxRuntime, desc: string, req: {
     forceAct?: boolean; force?: boolean; staleRetry?: boolean; rehydrateRescan?: boolean;
     newTab?: { urlContains?: string };
 }): Promise<StepResult> {
-  const { deps, slots, budget, hosts, pageState, signalHosts, markDirectNavLanded, navGate, assertOpen, page, contextPages, listTabs, bounded, checkBudget, record, paceBeforeStep } = rt;
+  const { deps, slots, budget, hosts, pageState, signalHosts, markDirectNavLanded, navGate, assertOpen, contextPages, listTabs, bounded, checkBudget, record, paceBeforeStep } = rt;
 
 
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);

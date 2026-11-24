@@ -37,7 +37,7 @@ import { browserSession } from "../src/engine/executor.ts";
 import { buildMiddleware } from "../src/app/middleware-factory.ts";
 import { installDecisionProvider } from "../src/model/decision-provider.ts";
 import { installLayaRuntime } from "../src/model/model.ts";
-import type { AnyPage, MiddlewareOptions, RunReport } from "../src/engine/executor-types.ts";
+import type { MiddlewareOptions, RunReport } from "../src/engine/executor-types.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const FIXTURES = path.join(REPO, "fixtures", "engine", "rehydrate-rescan");

@@ -499,29 +499,33 @@ export const DECISION_ENV = {
 } as const
 
 /**
- * Normalize the URL typed on the configuration page into the engine's SystemOne endpoint.
- * The page asks for the OpenAI-compatible base URL (for example
- * `https://host/compatible-mode/v1`); the decision provider needs the `/systemone` suffix.
- * A value that already names the SystemOne endpoint is kept as-is.
- * @param baseUrl - the page's model URL.
- * @returns the endpoint, or `''` when unset.
+ * The configuration page's model URL as the bridge injects it into the engine child process.
+ *
+ * Passthrough on purpose: surrounding whitespace is trimmed, everything else is kept verbatim
+ * (empty = not configured). Protocol inference and endpoint suffixes belong to the engine's
+ * `normalizeSystemOneEndpoint` / `normalizeOpenAIDecisionsEndpoint` — they are the only place that
+ * decides whether a value means `…/v1/systemone` or `…/v1/decisions`. A bridge-side normalizer
+ * would be a second decision point, and the two drifted (a bare host became `…/systemone` through
+ * the bridge while the CLI sent `…/v1/systemone`).
+ * @param baseUrl - the page's raw model URL.
+ * @returns the value to inject, or `''` when unset.
  */
-export function normalizeDecisionEndpoint(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '')
-  if (trimmed === '') return ''
-  return /\/systemone$/i.test(trimmed) ? trimmed : `${trimmed}/systemone`
+export function decisionEndpointFromPage(baseUrl: string): string {
+  return baseUrl.trim()
 }
 
 /**
  * Translate the plugin's decision-model configuration into child-process environment entries.
- * Unset fields are omitted, so a deployment that configures nothing keeps inheriting env vars.
+ * Unset fields are omitted, so a deployment that configures nothing keeps inheriting env vars; a
+ * configured endpoint travels as the page's own text ({@link decisionEndpointFromPage}).
  * @param decision - the resolved decision-model section of the bridge options.
  * @returns environment entries to merge into the child environment.
  */
 export function decisionEnv(decision: BridgeOptions['decisionModel'] | undefined): Record<string, string> {
   const env: Record<string, string> = {}
   if (decision === undefined) return env
-  if (decision.endpoint !== '') env[DECISION_ENV.endpoint] = decision.endpoint
+  const endpoint = decisionEndpointFromPage(decision.endpoint)
+  if (endpoint !== '') env[DECISION_ENV.endpoint] = endpoint
   if (decision.apiKey !== '') env[DECISION_ENV.apiKey] = decision.apiKey
   if (decision.model !== '') env[DECISION_ENV.model] = decision.model
   return env

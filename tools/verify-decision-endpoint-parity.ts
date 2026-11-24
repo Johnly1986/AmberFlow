@@ -1,18 +1,24 @@
 /**
  * 决策端点两面归一化 parity lane（非门禁：零网络 / 零浏览器 / 零模型 / 零文件写）。
  *
- * 同一个配置值有两个归一化面：
- *   - **桥面**：DSH 插件配置页的模型 URL 经 `normalizeDecisionEndpoint` 归一，作为
- *     `AMBERFLOW_DECISION_BASE_URL` 注入引擎子进程（`integrations/dsh-bridge/src/bridge.ts`）；
+ * 同一个配置值有两个注入面：
+ *   - **桥面**：DSH 插件配置页的模型 URL 经 `decisionEndpointFromPage` 处理（只 trim，其余原值
+ *     透传），作为 `AMBERFLOW_DECISION_BASE_URL` 注入引擎子进程
+ *     （`integrations/dsh-bridge/src/bridge.ts`）；
  *   - **引擎面**：`AMBERFLOW_DECISION_BASE_URL` + `AMBERFLOW_DECISION_PROTOCOL` 决定协议与
  *     最终端点（`src/model/decision-service.ts` / `decision-openai.ts`），是**唯一协议决策点**。
- * 桥面不决定协议，只把页面值送进引擎面；真正决定 POST 到哪的是引擎在**子进程环境**上重算的
- * 结果。因此本 lane 比较的不是两个字符串，而是同一输入经两面注入后引擎算出的**有效结果**：
+ * 桥面不决定协议、也不补后缀，只把页面值送进引擎面；真正决定 POST 到哪的是引擎在**子进程环境**
+ * 上重算的结果。因此本 lane 比较的不是两个字符串，而是同一输入经两面注入后引擎算出的**有效结果**：
  *   - `direct`  = 引擎读「配置原值」；
- *   - `bridged` = 引擎读「桥归一后的注入值」。
+ *   - `bridged` = 引擎读「桥注入值」。
  * 两者一致 = 该值在两条注入面上行为相同；不一致 = 差异，必须在 `DIFF_WHITELIST` 逐条登记
  * （精确期望值 + 语义 + 影响面）。未登记差异 exit 1；白名单条目不再成立（差异消失或值漂移）
- * 也 exit 1——**本 lane 只记录现状，不改两面的行为**。
+ * 也 exit 1——本 lane 是 tripwire，不改两面的行为。
+ *
+ * 桥原值透传后两面收敛到同一份引擎归一化器，差异集**应为空**（`DIFF_WHITELIST` 保留为机制：
+ * 任一面再长出第二个决策点，新增差异会立刻出现并要求登记）。注意本 lane 的对照臂是「两条注入面
+ * 注入同一个值后是否算出同一个有效结果」——两面共用引擎时改引擎不造成分歧，所以负向自测用
+ * **只改一面**的突变器来钉灵敏度。
  *
  * 覆盖样本：裸 host / 尾斜杠（含多重）/ 无 scheme / 大写 host / `/v1` / `/v1/systemone` /
  * `/systemone` / compatible-mode 家族 / 端口 / 自定义反代前缀 / query / fragment / 空值 /
@@ -27,8 +33,8 @@
  */
 import {
   DECISION_ENV,
+  decisionEndpointFromPage,
   decisionEnv,
-  normalizeDecisionEndpoint,
 } from "../integrations/dsh-bridge/src/bridge.ts";
 import { normalizeOpenAIDecisionsEndpoint } from "../src/model/decision-openai.ts";
 import {
@@ -169,10 +175,13 @@ type FamilyId = "missing-v1" | "bridge-forces-systemone";
 /**
  * 差异族：同族的条目共享语义与影响面判断。族文本是给 review 的结论，不是运行期逻辑；
  * 出现新族 = 需要人判断影响面后登记。
+ *
+ * 桥改原值透传后，这两个族**只在回归时才会重新出现**：它们的语义描述"如果桥侧又长出第二份
+ * 归一化，两面会从哪里分开"，供白名单条目（若将来确实需要登记）与 `--explain` 使用。
  */
 const DIFF_FAMILIES: Readonly<Record<FamilyId, { summary: string; semantics: string; impact: string }>> = {
   "missing-v1": {
-    summary: "桥把基址直接拼 `/systemone`，引擎补 `/v1/systemone`（含 compatible-mode 的 `/v1`）",
+    summary: "桥侧若再次补齐端点，注入值会缺引擎会补的 `/v1` 段（默认 SystemOne 面）",
     semantics:
       "桥把页面值当基址直接追加 `/systemone`；引擎对同一个值按基址补 `/v1/systemone`"
       + "（`…/compatible-mode` 先补 `/v1`）。桥注入值已经以 `/systemone` 结尾，引擎按"
@@ -180,28 +189,27 @@ const DIFF_FAMILIES: Readonly<Record<FamilyId, { summary: string; semantics: str
     impact:
       "只影响桥注入面（DSH 插件部署、配置页填裸 host / 端口 / 自定义反代前缀 / 不带 `/v1` 的"
       + "compatible-mode 基址）；CLI 直跑与其它配置层叠面不受影响，引擎仍是唯一协议决策点。"
-      + "当前白名单 = 保留现状不改行为；修正口径应是**桥改原值透传**（页面值原样交给引擎归一），"
-      + "而不是在桥里实现第二份归一化。",
+      + "出现该族 = 桥又引入了一份归一化：修正口径是桥原值透传，而不是让引擎去认桥的产物。",
   },
   "bridge-forces-systemone": {
-    summary: "桥无条件补 `/systemone`，OpenAI Decisions 端点经桥后被二次加后缀",
+    summary: "桥侧若再次无条件补 `/systemone`，OpenAI Decisions 端点会被二次加后缀",
     semantics:
       "桥无条件追加 `/systemone` 且不识别协议；当引擎按 `/decisions` 推断为 OpenAI Decisions"
       + "（或部署进程显式设 `AMBERFLOW_DECISION_PROTOCOL=openai-decisions`）时，引擎拿到的是"
       + "已被加上 `/systemone` 的基址，OpenAI 归一化器再补 `/v1/decisions`，请求路径出现双后缀。",
     impact:
-      "DSH 部署面无法使用 OpenAI Decisions 端点（配置页没有协议字段，任何页面值都被 SystemOne 化）；"
-      + "CLI 直跑不受影响。修正口径同上：桥原值透传，协议与后缀只由引擎这一处决定。",
+      "该形态会让 DSH 部署面无法使用 OpenAI Decisions 端点（配置页没有协议字段，任何页面值都被"
+      + "SystemOne 化）；CLI 直跑不受影响。修正口径同上：桥原值透传，协议与后缀只由引擎这一处决定。",
   },
 };
 
-/* ------------------------------------------------------------ 差异白名单（当前现状） */
+/* ------------------------------------------------------------ 差异白名单 */
 
 interface WhitelistEntry {
   /** `样本 id@上下文 id`。 */
   key: string;
   family: FamilyId;
-  /** 桥归一后注入的 `AMBERFLOW_DECISION_BASE_URL`（空串 = 未注入）。 */
+  /** 桥注入的 `AMBERFLOW_DECISION_BASE_URL`（空串 = 未注入）。 */
   bridgeEnv: string;
   /** 引擎读配置原值的有效结果投影。 */
   direct: string;
@@ -209,136 +217,14 @@ interface WhitelistEntry {
   bridged: string;
 }
 
-const DIFF_WHITELIST: readonly WhitelistEntry[] = [
-  // —— missing-v1：桥注入值少了引擎会补的 `/v1` 段（默认 SystemOne 面）——
-  {
-    key: "host-bare@default",
-    family: "missing-v1",
-    bridgeEnv: "https://api.typesafe.ai/systemone",
-    direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone",
-    bridged: "endpoint[systemone] https://api.typesafe.ai/systemone",
-  },
-  {
-    key: "host-bare@protocol=systemone",
-    family: "missing-v1",
-    bridgeEnv: "https://api.typesafe.ai/systemone",
-    direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone",
-    bridged: "endpoint[systemone] https://api.typesafe.ai/systemone",
-  },
-  {
-    key: "host-trailing-slash@default",
-    family: "missing-v1",
-    bridgeEnv: "https://api.typesafe.ai/systemone",
-    direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone",
-    bridged: "endpoint[systemone] https://api.typesafe.ai/systemone",
-  },
-  {
-    key: "host-multi-slash@default",
-    family: "missing-v1",
-    bridgeEnv: "https://api.typesafe.ai/systemone",
-    direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone",
-    bridged: "endpoint[systemone] https://api.typesafe.ai/systemone",
-  },
-  {
-    key: "host-no-scheme@default",
-    family: "missing-v1",
-    bridgeEnv: "api.typesafe.ai/systemone",
-    direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone",
-    bridged: "endpoint[systemone] https://api.typesafe.ai/systemone",
-  },
-  {
-    key: "host-uppercase@default",
-    family: "missing-v1",
-    bridgeEnv: "HTTPS://Host.Example.COM/systemone",
-    direct: "endpoint[systemone] https://host.example.com/v1/systemone",
-    bridged: "endpoint[systemone] https://host.example.com/systemone",
-  },
-  {
-    key: "compatible-mode@default",
-    family: "missing-v1",
-    bridgeEnv: "https://host/compatible-mode/systemone",
-    direct: "endpoint[systemone] https://host/compatible-mode/v1/systemone",
-    bridged: "endpoint[systemone] https://host/compatible-mode/systemone",
-  },
-  {
-    key: "compatible-mode-trailing-slash@default",
-    family: "missing-v1",
-    bridgeEnv: "https://host/compatible-mode/systemone",
-    direct: "endpoint[systemone] https://host/compatible-mode/v1/systemone",
-    bridged: "endpoint[systemone] https://host/compatible-mode/systemone",
-  },
-  {
-    key: "port@default",
-    family: "missing-v1",
-    bridgeEnv: "http://localhost:8008/systemone",
-    direct: "endpoint[systemone] http://localhost:8008/v1/systemone",
-    bridged: "endpoint[systemone] http://localhost:8008/systemone",
-  },
-  {
-    key: "port-trailing-slash@default",
-    family: "missing-v1",
-    bridgeEnv: "http://localhost:8008/systemone",
-    direct: "endpoint[systemone] http://localhost:8008/v1/systemone",
-    bridged: "endpoint[systemone] http://localhost:8008/systemone",
-  },
-  {
-    key: "reverse-proxy-prefix@default",
-    family: "missing-v1",
-    bridgeEnv: "https://host/prefix/systemone",
-    direct: "endpoint[systemone] https://host/prefix/v1/systemone",
-    bridged: "endpoint[systemone] https://host/prefix/systemone",
-  },
-  {
-    key: "reverse-proxy-prefix-trailing-slash@default",
-    family: "missing-v1",
-    bridgeEnv: "https://host/prefix/systemone",
-    direct: "endpoint[systemone] https://host/prefix/v1/systemone",
-    bridged: "endpoint[systemone] https://host/prefix/systemone",
-  },
-  {
-    key: "path-after-systemone@default",
-    family: "missing-v1",
-    bridgeEnv: "https://host/v1/systemone/extra/systemone",
-    direct: "endpoint[systemone] https://host/v1/systemone/extra/v1/systemone",
-    bridged: "endpoint[systemone] https://host/v1/systemone/extra/systemone",
-  },
-  {
-    key: "decisions-path@protocol=systemone",
-    family: "missing-v1",
-    bridgeEnv: "https://host/v1/decisions/systemone",
-    direct: "endpoint[systemone] https://host/v1/decisions/v1/systemone",
-    bridged: "endpoint[systemone] https://host/v1/decisions/systemone",
-  },
-  // —— bridge-forces-systemone：桥无条件补 `/systemone` 后，OpenAI Decisions 端点被二次加后缀 ——
-  {
-    key: "host-bare@protocol=openai-decisions",
-    family: "bridge-forces-systemone",
-    bridgeEnv: "https://api.typesafe.ai/systemone",
-    direct: "endpoint[openai-decisions] https://api.typesafe.ai/v1/decisions",
-    bridged: "endpoint[openai-decisions] https://api.typesafe.ai/systemone/v1/decisions",
-  },
-  {
-    key: "compatible-v1@protocol=openai-decisions",
-    family: "bridge-forces-systemone",
-    bridgeEnv: "https://host/compatible-mode/v1/systemone",
-    direct: "endpoint[openai-decisions] https://host/compatible-mode/v1/decisions",
-    bridged: "endpoint[openai-decisions] https://host/compatible-mode/v1/systemone/v1/decisions",
-  },
-  {
-    key: "decisions-path@default",
-    family: "bridge-forces-systemone",
-    bridgeEnv: "https://host/v1/decisions/systemone",
-    direct: "endpoint[openai-decisions] https://host/v1/decisions",
-    bridged: "endpoint[openai-decisions] https://host/v1/decisions/systemone/v1/decisions",
-  },
-  {
-    key: "decisions-path@protocol=openai-decisions",
-    family: "bridge-forces-systemone",
-    bridgeEnv: "https://host/v1/decisions/systemone",
-    direct: "endpoint[openai-decisions] https://host/v1/decisions",
-    bridged: "endpoint[openai-decisions] https://host/v1/decisions/systemone/v1/decisions",
-  },
-];
+/**
+ * 有意差异白名单：**当前为空**——桥只 trim、原值透传，两面都交给引擎同一个归一化器，所以同一
+ * 输入在两条注入面上必然算出同一个有效端点（含协议）。
+ *
+ * 保留这张表而不是删掉机制：它是 tripwire 的登记位。桥或引擎任一侧再长出第二个决策点时，
+ * 未登记差异立刻 exit 1；确认影响面后在这里逐条登记（精确期望值 + 族），并注明为什么"有意"。
+ */
+const DIFF_WHITELIST: readonly WhitelistEntry[] = [];
 
 /* ------------------------------------------------------------ 比较 / 评估 */
 
@@ -359,6 +245,8 @@ function buildRows(
   bridge: (raw: string) => string,
   engine: (env: NodeJS.ProcessEnv) => Resolution,
   samples: readonly Sample[] = SAMPLES,
+  /** 只对「桥注入面」生效的引擎解析器（负向自测模拟一面改道；缺省两面同一解析器）。 */
+  bridgedEngine: (env: NodeJS.ProcessEnv) => Resolution = engine,
 ): ParityRow[] {
   const rows: ParityRow[] = [];
   for (const sample of samples) {
@@ -375,7 +263,7 @@ function buildRows(
       // 桥只注入非空三件套（空串 = 不注入，子进程保留部署环境里的值/不配置）。
       Object.assign(bridgedEnv, decisionEnv({ endpoint: bridgeEnv, apiKey: "", model: "" }));
       const direct = project(engine(directEnv));
-      const bridged = project(engine(bridgedEnv));
+      const bridged = project(bridgedEngine(bridgedEnv));
       rows.push({ key: `${sample.id}@${context.id}`, sample, context, bridgeEnv, direct, bridged, diff: direct !== bridged });
     }
   }
@@ -487,6 +375,16 @@ function printRows(rows: readonly ParityRow[], verbose: boolean): void {
 
 /* ------------------------------------------------------------ 负向自测 */
 
+/**
+ * 一个"又长出第二份归一化"的桥突变器：把页面值当基址补 `/systemone`（正是被修掉的那份）。
+ * 负向自测靠它证明 tripwire 仍然灵敏——桥侧一旦回退成两处决策点，差异就会出现在有效结果上。
+ */
+function mutantBridgeForcesSystemone(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/u, "");
+  if (trimmed === "") return "";
+  return /\/systemone$/i.test(trimmed) ? trimmed : `${trimmed}/systemone`;
+}
+
 function selfTest(): number {
   const failures: string[] = [];
   const run = (name: string, body: () => void): void => {
@@ -501,81 +399,113 @@ function selfTest(): number {
   const hasKind = (problems: readonly ParityProblem[], kind: ProblemKind): boolean =>
     problems.some((problem) => problem.kind === kind);
 
-  run("基线（真实两面 + 真实白名单）= 0 问题", () => {
-    const rows = buildRows(normalizeDecisionEndpoint, engineResolution);
+  run("基线（真实两面 + 空白名单）= 0 问题且无差异", () => {
+    const rows = buildRows(decisionEndpointFromPage, engineResolution);
     const problems = evaluateParity(rows, DIFF_WHITELIST);
     if (problems.length !== 0) {
       throw new Error(`基线应无问题，实际 ${problems.length}：${problems.slice(0, 3).map((p) => `${p.kind} ${p.key}`).join("；")}`);
     }
-    if (rows.every((row) => !row.diff)) throw new Error("基线没有任何差异——白名单/样本被掏空");
-  });
-
-  run("新样本未登记 → new-difference", () => {
-    const rows = buildRows(normalizeDecisionEndpoint, engineResolution, [
-      ...SAMPLES,
-      { id: "mutant-host", input: "https://mutant.example.test" },
-    ]);
-    const problems = evaluateParity(rows, DIFF_WHITELIST);
-    if (!hasKind(problems, "new-difference")) throw new Error("未登记的新差异没有被抓到");
-    if (!problems.some((problem) => problem.kind === "new-difference" && problem.key === "mutant-host@default")) {
-      throw new Error("新差异问题没有指向 mutant-host@default");
+    // 桥原值透传后两面共用同一个引擎归一化器：任何差异都意味着又出现了第二个决策点。
+    const diffs = rows.filter((row) => row.diff);
+    if (diffs.length !== 0) {
+      throw new Error(`基线应无差异，实际 ${diffs.length} 条（首条 ${diffs[0]!.key}）：桥侧又引入了第二份归一化`);
     }
   });
 
-  run("白名单期望值漂移 → drift", () => {
-    const rows = buildRows(normalizeDecisionEndpoint, engineResolution);
-    const mutated = DIFF_WHITELIST.map((entry, index) =>
-      index === 0 ? { ...entry, direct: `${entry.direct}（漂移）` } : entry);
-    const problems = evaluateParity(rows, mutated);
-    if (!hasKind(problems, "drift")) throw new Error("白名单期望值漂移没有被抓到");
+  run("桥注入值被污染（非 trim 改动）→ new-difference", () => {
+    // 只在"页面值走到桥"这一环注入噪声：模拟桥侧再长出一次改写（补后缀、改大小写都算）。
+    const noisyBridge = (raw: string): string => {
+      const passthrough = decisionEndpointFromPage(raw);
+      return passthrough === "" ? "" : `${passthrough}/systemone`;
+    };
+    const problems = evaluateParity(buildRows(noisyBridge, engineResolution), DIFF_WHITELIST);
+    if (!hasKind(problems, "new-difference")) throw new Error("桥注入值被改写后没有被抓到");
+    if (DIFF_WHITELIST.length !== 0) throw new Error("本组断言假设白名单为空——先重新评估负向自测口径");
+  });
+
+  run("桥回退成「补 /systemone」→ new-difference（含 OpenAI 双后缀面）", () => {
+    const problems = evaluateParity(buildRows(mutantBridgeForcesSystemone, engineResolution), DIFF_WHITELIST);
+    if (!hasKind(problems, "new-difference")) throw new Error("桥侧第二份归一化没有被抓到");
+    const keys = problems.filter((problem) => problem.kind === "new-difference").map((problem) => problem.key);
+    if (!keys.includes("host-bare@default")) throw new Error("缺少 missing-v1 形状的差异（host-bare@default）");
+    if (!keys.includes("decisions-path@protocol=openai-decisions")) {
+      throw new Error("缺少 bridge-forces-systemone 形状的双后缀差异（decisions-path@protocol=openai-decisions）");
+    }
+  });
+
+  run("建议族：missing-v1 与 bridge-forces-systemone 仍按形状归族", () => {
+    const rows = buildRows(mutantBridgeForcesSystemone, engineResolution);
+    const bare = rows.find((row) => row.key === "host-bare@default");
+    if (bare === undefined) throw new Error("样本 host-bare@default 不存在");
+    if (suggestFamily(bare) !== "missing-v1") throw new Error(`host-bare@default 归族应为 missing-v1，实际 ${suggestFamily(bare)}`);
+    const openai = rows.find((row) => row.key === "host-bare@protocol=openai-decisions");
+    if (openai === undefined) throw new Error("样本 host-bare@protocol=openai-decisions 不存在");
+    if (suggestFamily(openai) !== "bridge-forces-systemone") {
+      throw new Error(`host-bare@protocol=openai-decisions 归族应为 bridge-forces-systemone，实际 ${suggestFamily(openai)}`);
+    }
   });
 
   run("白名单条目不再产生差异 → stale-whitelist", () => {
-    const rows = buildRows(normalizeDecisionEndpoint, engineResolution);
+    const rows = buildRows(decisionEndpointFromPage, engineResolution);
     const problems = evaluateParity(rows, [
       ...DIFF_WHITELIST,
-      { key: "v1@default", family: "missing-v1", bridgeEnv: "https://api.typesafe.ai/v1/systemone", direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone", bridged: "endpoint[systemone] https://api.typesafe.ai/v1/systemone" },
+      { key: "v1@default", family: "missing-v1", bridgeEnv: "https://api.typesafe.ai/v1", direct: "endpoint[systemone] https://api.typesafe.ai/v1/systemone", bridged: "endpoint[systemone] https://api.typesafe.ai/v1/systemone" },
     ]);
     if (!hasKind(problems, "stale-whitelist")) throw new Error("不再产生差异的白名单条目没有被抓到");
   });
 
+  run("白名单期望值漂移 → drift", () => {
+    const rows = buildRows(mutantBridgeForcesSystemone, engineResolution);
+    // 拿一条真实存在的差异做底座，再把期望值改错：drift 必须被点名。
+    const actual = rows.find((row) => row.diff && row.key === "host-bare@default");
+    if (actual === undefined) throw new Error("突变器下应有 host-bare@default 差异");
+    const entry: WhitelistEntry = {
+      key: actual.key, family: "missing-v1", bridgeEnv: actual.bridgeEnv,
+      direct: actual.direct, bridged: `${actual.bridged}（漂移）`,
+    };
+    const problems = evaluateParity(rows, [entry]);
+    if (!hasKind(problems, "drift")) throw new Error("白名单期望值漂移没有被抓到");
+  });
+
   run("白名单指向不存在的样本 → unknown-whitelist-case", () => {
-    const rows = buildRows(normalizeDecisionEndpoint, engineResolution);
+    const rows = buildRows(decisionEndpointFromPage, engineResolution);
     const problems = evaluateParity(rows, [
-      ...DIFF_WHITELIST,
       { key: "no-such-sample@default", family: "missing-v1", bridgeEnv: "", direct: "unset[systemone]", bridged: "unset[systemone]" },
     ]);
     if (!hasKind(problems, "unknown-whitelist-case")) throw new Error("悬空白名单条目没有被抓到");
   });
 
-  run("桥归一器突变（补全 /v1）→ 旧白名单失效被抓", () => {
-    const fixedBridge = (raw: string): string => {
-      const normalized = normalizeDecisionEndpoint(raw);
-      return normalized.replace(/\/systemone$/u, "/v1/systemone");
+  run("白名单重复条目 → drift", () => {
+    const rows = buildRows(mutantBridgeForcesSystemone, engineResolution);
+    const actual = rows.find((row) => row.diff && row.key === "host-bare@default");
+    if (actual === undefined) throw new Error("突变器下应有 host-bare@default 差异");
+    const entry: WhitelistEntry = {
+      key: actual.key, family: "missing-v1", bridgeEnv: actual.bridgeEnv,
+      direct: actual.direct, bridged: actual.bridged,
     };
-    const problems = evaluateParity(buildRows(fixedBridge, engineResolution), DIFF_WHITELIST);
-    if (problems.length === 0) throw new Error("桥归一器变化后没有报任何问题");
-    if (!hasKind(problems, "stale-whitelist")) throw new Error("差异消失没有被白名单漂移断言抓到");
+    const problems = evaluateParity(rows, [entry, entry]);
+    if (!hasKind(problems, "drift")) throw new Error("重复白名单条目没有被抓到");
   });
 
-  run("引擎归一器突变（协议/后缀面改道）→ 白名单漂移被抓", () => {
+  run("桥注入面的引擎解析改道（协议/后缀面）→ new-difference", () => {
     const mutantEngine = (env: NodeJS.ProcessEnv): Resolution => {
       const resolved = engineResolution(env);
       return resolved.kind === "endpoint"
         ? { kind: "endpoint", protocol: "openai-decisions", url: normalizeOpenAIDecisionsEndpoint(resolved.url) }
         : resolved;
     };
-    const problems = evaluateParity(buildRows(normalizeDecisionEndpoint, mutantEngine), DIFF_WHITELIST);
-    if (!hasKind(problems, "drift") && !hasKind(problems, "new-difference")) {
-      throw new Error("引擎归一器突变没有被抓到");
-    }
+    // 两面共用同一个引擎归一化器时，改引擎不会造成「两面分歧」——真正的回归形状是一面改道：
+    // 只把桥注入面喂给突变引擎，差异就必须出现（tripwire 对引擎侧同样灵敏）。
+    const problems = evaluateParity(
+      buildRows(decisionEndpointFromPage, engineResolution, SAMPLES, mutantEngine), DIFF_WHITELIST);
+    if (!hasKind(problems, "new-difference")) throw new Error("桥注入面被改道后没有被抓到");
   });
 
   if (failures.length > 0) {
     console.error(`verify-decision-endpoint-parity self-test: ${failures.length} 项未过（${failures.join("、")}）`);
     return 1;
   }
-  console.log("verify-decision-endpoint-parity self-test: 7/7 通过（负向构造均被抓到）");
+  console.log(`verify-decision-endpoint-parity self-test: 9/9 通过（负向构造均被抓到；基线差异=0）`);
   return 0;
 }
 
@@ -608,7 +538,7 @@ function main(argv: readonly string[]): number {
     return status;
   }
 
-  const rows = buildRows(normalizeDecisionEndpoint, engineResolution);
+  const rows = buildRows(decisionEndpointFromPage, engineResolution);
   const problems = evaluateParity(rows, DIFF_WHITELIST);
 
   if (flags.has("--json")) {

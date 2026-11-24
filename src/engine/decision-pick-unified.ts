@@ -6,20 +6,19 @@
  * 分支；`decision-pick-phase.ts` 保留旧编排作 A/B 对照臂（`AMBERFLOW_DECISION_LADDER=phase`）。
  */
 import { decisionDegradedAdvice } from "../model/decision-probe.ts";
-import { type TraceStep } from "./audit.ts";
+
 import type { CandidateExtractRequest } from "./candidate-contract.ts";
-import { type DeclaredTargetsResolver } from "./declared-targets.ts";
+
 import { declaredHiddenSuffix, declaredMissSuffix, identityHiddenSuffix } from "./evidence.ts";
-import { WIDER_ELEMENTS, describeActionError, lowConfDiscrimination, topTwoMargin, windowChainMissSuffix, type WindowChainFact } from "./executor-pure.ts";
+import { WIDER_ELEMENTS, lowConfDiscrimination, topTwoMargin, windowChainMissSuffix } from "./executor-pure.ts";
 import { runWindowEscalationRung } from "./window-escalation.ts";
-import { type AnyPage, type EscalatorLike, type Sig, type StopCode } from "./executor-types.ts";
-import { type Elem, type ElemFamily, type ElemPool, WIDE_QUOTAS, ariaInteractiveLines, criteriaView, elemFamily, filterElemsByFamily, lexicalOverlap, urlOf } from "./extraction.ts";
+
+import { type ElemPool, WIDE_QUOTAS, elemFamily, filterElemsByFamily, lexicalOverlap } from "./extraction.ts";
 import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
-import { type HintMatchOptions, affordanceRule, hintCandidates, navRule } from "./rules.ts";
+import { affordanceRule, hintCandidates, navRule } from "./rules.ts";
 import type { BrowserMiddleware, ModelPickPhase } from "./executor.ts";
 import { askGoalOf, askPick, forbiddenOf, runRecoveryLadder } from "./decision-ask.ts";
-import type { DecisionAccounting, DecisionLayerReceipt } from "./decision-ask-contract.ts";
-import type { ProviderCapabilities } from "../support/decision-provider-contract.ts";
+
 import type { GateRecovery, PickAcc, RunPickCtx, RunPickHost } from "./decision-pick-types.ts";
 
 /** 阶梯入口：规则 → 窄问 → 停因/闸门 → R2b → 族修复；返回值即 `ModelPickPhase`。 */
@@ -68,7 +67,6 @@ export async function runDecisionPickUnified(host: RunPickHost, ctx: RunPickCtx)
   }
   return assemblePhase(st, mm, false);
 }
-
 
 /** 闸门线：禁选越多、可用动作越少，过闸线越低（与 run 面选择段的既有公式/时机一致）。 */
 export function floorOf(ctx: RunPickCtx): number {
@@ -121,7 +119,7 @@ export async function askNarrow(host: RunPickHost, ctx: RunPickCtx, st: PickAcc,
  * 分支③：没有任何可用提名时的结构化停因（choice-limit → rules-only → 动作空间耗尽）。
  * rules-only 且"这一步什么都没声明"时当场评估一次信号，把"缺模型"的谎言换成实况。
  */
-export async function stopOnNoRef(host: RunPickHost, ctx: RunPickCtx, st: PickAcc): Promise<void> {
+export async function stopOnNoRef(host: RunPickHost, ctx: RunPickCtx, _st: PickAcc): Promise<void> {
   // A2：候选窗口超过决策服务上限——结构化停因，绝不把 200+ 选项硬塞过去。
   if (host.choiceLimitReason() !== null) {
     const why = host.choiceLimitReason()!;

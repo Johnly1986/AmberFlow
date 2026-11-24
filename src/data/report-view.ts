@@ -93,7 +93,7 @@ function pyTruthy(v: unknown): boolean {
 
 import type { DateEntry, Rendered, Row, Source } from "./datasource.ts";
 import { cliBinOf, transportClient } from "./datasource.ts";
-import { firstNonEmptyScalar, selectSortKeys, selectValueField } from "./extract-ops.ts";
+import { firstNonEmptyScalar, selectValueField } from "./extract-ops.ts";
 
 /**
  * 报告里的"前 N 条原始行"（数据源的 `report.preview`）的**单一实现**。

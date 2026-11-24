@@ -567,6 +567,13 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 
 - 指引**只提示、不自动切换**，也不含任何密钥。走桥的场景请优先用 `amberflow_run`：桥注入的是
   部署配置，CLI 直跑读的是另一份用户配置。
+- **端点原值透传**：配置页的「决策模型 URL」只去掉首尾空白（空 = 不注入
+  `AMBERFLOW_DECISION_BASE_URL`），其余**原样**交给引擎；协议推断与端点后缀（`…/v1/systemone`
+  / `…/v1/decisions`）只在引擎（`normalizeSystemOneEndpoint` / `normalizeOpenAIDecisionsEndpoint`）
+  这一处发生。所以页面填值与 CLI 侧 `AMBERFLOW_DECISION_BASE_URL` 含义一致（见
+  [docs/DECISION_SERVICE_CONFIG.md](DECISION_SERVICE_CONFIG.md) §2）；部署面若曾经依赖桥补
+  `/systemone`，升级时按该文档 §7.1 显式填完整端点，并**重启已加载的 DSH 宿主**。
+  `verify:decision-endpoint-parity` 是这条的 tripwire（同一值两面有效端点必须相同）。
 
 ### 3.2 观察面元素投影合同（ElementView）与证据上限
 

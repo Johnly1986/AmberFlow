@@ -25,7 +25,7 @@ import type { DatasetReader } from "../engine/dataset.ts";
 import { checkToolSignal, explainToolSignal, validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 import type { ToolStepResult } from "./app-runner.ts";
 import type { ExpandedStep } from "./app-pack.ts";
-import type { Subgoal } from "../engine/plan.ts";
+
 import { validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 
 /** 所有适配器共用的步键（`adapter` 是类型选择器，任何类型都可以写）。 */

@@ -5,10 +5,8 @@
  * 与池扫描/观察完全不同生命周期；独立成模块后 extraction.ts 只保留扫描与视图。
  * 内容与搬移前逐字节一致。
  */
-import { parseHint, type ParsedHint } from "./hint.ts";
-import {
-  firstOf, framesOf, urlOf, type Elem, type FrameLike, type PageLike,
-} from "./extraction.ts";
+import { parseHint } from "./hint.ts";
+import { framesOf, type Elem, type PageLike } from "./extraction.ts";
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { anchorChainMatch } from "./rules.ts";
 import { ANCHOR_JS, compile } from "./pool-js.ts";

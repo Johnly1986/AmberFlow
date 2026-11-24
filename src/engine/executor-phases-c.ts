@@ -218,8 +218,8 @@ export async function runActionExecute(mw: BrowserMiddleware, a: {
     actionDeclEvidence: () => Record<string, unknown>; refCollision: () => Record<string, unknown>;
     domFallbackEvidence: () => Record<string, unknown>;
   }): Promise<ActionPhaseResult> {
-    const { pg, stepNo, instruction, verbose, elems: elems0, ref: ref0, el: el0, desc, cmdOpName, risky, confirmed,
-      force, method, conf, mm, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted,
+    const { pg, stepNo, verbose, elems: elems0, ref: ref0, el: el0, desc, cmdOpName, risky, confirmed,
+      force, method, conf, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted,
       cmdPick, commandMode, commandValue, commandByValue, slots, values, candidatePriority, curHint, staleRetry,
       rehydrateRescanFact, targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped,
       pruneForbids, stop, stopReason, domFallbackCleanup, getPendingAfterIdx, warnings, actionDeclEvidence,

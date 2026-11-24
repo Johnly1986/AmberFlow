@@ -23,7 +23,7 @@
  *     模型投影（调用方在 pickInner 剥离 `declared` 旁路标记）。
  */
 import { framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
-import { FULL_LABEL_MAX, MODEL_LABEL_MAX } from "./elem-model.ts";
+
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { anchorChainMatch, hintCandidates, type HintMatchOptions } from "./rules.ts";

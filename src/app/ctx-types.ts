@@ -13,7 +13,7 @@ import type {
 } from "../engine/executor.ts";
 import type { ObserveOptions, ObserveResult } from "../engine/observe.ts";
 import type { RangeOptions, RangeValue as EngineRangeValue } from "../engine/range.ts";
-import type { AppTrace, TraceCall } from "./trace.ts";
+import type { AppTrace } from "./trace.ts";
 import type { DatasetStore } from "../engine/dataset.ts";
 import type { ReturnExtractor } from "./app-adapters.ts";
 /** 运行期**配置级**停因：脚本可以 `catch`，但默认直接结束运行（不是业务失败）。 */

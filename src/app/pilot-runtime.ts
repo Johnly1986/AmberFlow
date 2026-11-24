@@ -56,11 +56,7 @@ import {
   handoffWhyEvidence, weakPicksFrom,
 } from "./pilot-evidence.ts";
 import { handlePilotLine, type PilotCommandTarget } from "./pilot-commands.ts";
-import {
-  PILOT_AWAIT_PICK, PILOT_DEFAULT_MAX_STEPS, PILOT_HISTORY_STEPS,
-  PILOT_INERT_LIMIT, drivingGoalText, pilotExitCode, unblockHintsFor,
-  type PilotHandoff, type PilotOptions, type PilotRecordLine, type PilotStopCode,
-} from "./pilot-contract.ts";
+import { PILOT_AWAIT_PICK, PILOT_DEFAULT_MAX_STEPS, PILOT_INERT_LIMIT, drivingGoalText, pilotExitCode, unblockHintsFor, type PilotHandoff, type PilotOptions, type PilotRecordLine, type PilotStopCode } from "./pilot-contract.ts";
 
 /** 驾驶日志/交接的输出面（CLI 注入 stdout JSONL；测试可替换）。 */
 export interface PilotSink {
@@ -254,7 +250,6 @@ export class PilotRuntime implements PilotCommandTarget {
     return s.page as AnyPage;
   }
 
-
   record(line: PilotRecordLine): void {
     if (this.recordPath === null || this.recordFailed) return;
     try {
@@ -283,7 +278,6 @@ export class PilotRuntime implements PilotCommandTarget {
       lastPool: this.lastPool, observe: (o) => this.ctx().observe(o),
     });
   }
-
 
   /** 驾驶问句的 goal 底座（总目标 + 当前页/期望页 + 有界步史；实现见 pilot-contract.drivingGoalText）。 */
   private drivingGoal(url = ""): string {
@@ -398,7 +392,6 @@ export class PilotRuntime implements PilotCommandTarget {
 
     // 族判定（引擎单源 `elemFamily`）：textarea/contenteditable/role=textbox|combobox|listbox
     // 都归 fill/select，不能只看原生 tag——否则这些元素被推成 click，在能力面上不可执行。
-    const tag = (el.tag ?? "").toLowerCase();
     const fam = elemFamily(el);
     const op: "click" | "check" | "fill" | "select" =
       fam === "check" ? "check" : fam === "fill" ? "fill" : fam === "select" ? "select" : "click";
@@ -510,7 +503,6 @@ export class PilotRuntime implements PilotCommandTarget {
     if (this.inertRun >= PILOT_INERT_LIMIT) return "stuck_inert";
     return null;
   }
-
 
   /** checkSignal 验证一条信号声明在当前页是否成立（--final-signal 每轮判与 finish 指令共用）。 */
   async signalHeld(spec: Record<string, unknown>): Promise<boolean> {

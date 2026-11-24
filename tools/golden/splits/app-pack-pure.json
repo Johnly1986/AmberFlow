@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "app-pack-pure",
-  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。；W3-4 字段映射配置化：resolveSourceSlots/rowMainValue 有意非纯搬移（移出 price→id→name 业务默认）；P1-1 DRF 缺省翻转：PackPolicy/POLICY_KEYS 的 target_resolution 注释与缺省语义改写（缺省 declared + off opt-out），有意非纯搬移——两符号已按 split-check 文档纪律从 manifest 删除（其余符号恢复原 hash 钉子）；死代码清理：pack-expand 的 placeholders 零引用删除（非纯搬移，符号已从 manifest 移除）",
+  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。；W3-4 字段映射配置化：resolveSourceSlots/rowMainValue 有意非纯搬移（移出 price→id→name 业务默认）；P1-1 DRF 缺省翻转：PackPolicy/POLICY_KEYS 的 target_resolution 注释与缺省语义改写（缺省 declared + off opt-out），有意非纯搬移——两符号已按 split-check 文档纪律从 manifest 删除（其余符号恢复原 hash 钉子）；死代码清理：pack-expand 的 placeholders 零引用删除（非纯搬移，符号已从 manifest 移除）；非纯搬移：删除未用绑定/参数（本轮 unused 清理）；符号移出纯搬移清单",
   "files": {
     "src/app/app-pack.ts": {
       "symbols": {
@@ -62,7 +62,6 @@
         "validatePack": "9bc44631ffa6411aa19b4459b20ce7ded65f2e793f8aa23088368982a81c8ed0",
         "validatePackHeaderFields": "aaee9437db374ef6bad4d406430b052d4768d8a1601369c1864da2f16e37dc89",
         "ValidatePackOptions": "ff9fce12ba2673ce46b7743d02bb8880eb9adba554a98ac6b90862ef57abf5d9",
-        "validatePlanExpansion": "e25e9ff51ee515e9665322ab2983b64e84bb47282c4e2ef4aaa1437184a7258d",
         "validatePolicy": "878acac41b3ae6b7955dd7516d6e47e1faf7b31be8e79925ae482c12a9b6dc3e",
         "validateSiteBlock": "df948881722780271c7fb5aad64e74f935374c1f816f5495d75b54f122cf2a19",
         "validateStepDeclarations": "839cc58c701b9e2888d81db921e8b6cf58edd04932d42bdf30a7e6f321eb612b"

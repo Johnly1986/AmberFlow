@@ -21,8 +21,8 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
-import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
+
+import { createCtx, StopError, type Ctx } from "./ctx.ts";
 // S1：行容器滚动（rows 寻址）与 scroll 分支执行体在独立模块（主文件只减不增）。
 import { doActScroll } from "./session-act-scroll.ts";
 // A3 范围原语的会话面：act set_range 分支执行体在独立模块（doAct 存量行数只减不增）。
@@ -34,35 +34,19 @@ import { doTabRequest, type TabOpDeps } from "./session-ops-extra.ts";
 import { SessionPilotDriver } from "./session-driver.ts";
 import { buildMiddleware } from "./middleware-factory.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
-import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
+import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
-import {
-  BrowserMiddleware, browserSession, disallowedHost,
-  type ActionabilityDetail, type ActMissDiagnostics, type AnyPage, type BrowserSession,
-} from "../engine/executor.ts";
-import {
-  countAnyFrame, rowStatsAnyFrame, urlOf, windowAudit, type ElemPool, type PageLike,
-} from "../engine/extraction.ts";
+import { BrowserMiddleware, browserSession, disallowedHost, type AnyPage, type BrowserSession } from "../engine/executor.ts";
+import { rowStatsAnyFrame, urlOf, windowAudit, type ElemPool, type PageLike } from "../engine/extraction.ts";
 import { extractElements } from "./candidate-scan.ts";
-import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 // task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态）， 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
 import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
-import type { LaunchWindowMode } from "../browser/browser-env.ts";
-import type { AmbiguityView } from "../engine/ambiguity.ts";
-import {
-  actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, displayHow,
-  doRead, doSignal, doWaitFor, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter,
-  RecentResolutions, rowsSettled, rowsSettledDual, signalSpec,
-} from "./session-runtime-evidence.ts";
-import {
-  FLAP_HEAL_SETTLE_MS, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES,
-  encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty,
-  type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit,
-  type SessionOptions, type SessionScrollOut, type SessionSink,
-} from "./session-runtime-contract.ts";
+
+import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, displayHow, doRead, doSignal, doWaitFor, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, rowsSettled, rowsSettledDual } from "./session-runtime-evidence.ts";
+import { FLAP_HEAL_SETTLE_MS, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
 export * from "./session-runtime-contract.ts";
 export { runSession } from "./session-runtime-entry.ts";
 
@@ -563,7 +547,6 @@ export class SessionRuntime {
     const rehydrateRescan = req["rehydrateRescan"] === true;
     const targetRaw = req["target"];
     const page = await this.page();
-    const hosts = this.hosts ?? undefined;
     this.actionCount += 1;
     const started = Date.now();
     // Phase 2：开记录时先做一次**只读**观察，取"同一个 hintMatch 自证"的候选（export 的每步

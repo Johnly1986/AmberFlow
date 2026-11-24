@@ -14,7 +14,7 @@
  * 用法：node --experimental-strip-types tools/verify-record-failure.ts
  * 退出码：0 绿 / 1 红 / 2 环境错误（非 Linux、缺 /dev/full 或 chromium）。
  */
-import assert from "node:assert/strict";
+
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";

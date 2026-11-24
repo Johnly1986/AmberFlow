@@ -16,7 +16,7 @@
  *
  * kit 只提供构造器，**不提供**模型、时钟、网络、文件系统。
  */
-import { loginWallSignal, type SignalSpec } from "../engine/signals.ts";
+import { loginWallSignal } from "../engine/signals.ts";
 import type { ToolSignal } from "../browser/tool-signals.ts";
 
 /** 浏览器面完成/适用信号（与 `plan.ts` 的 signal 同形）。 */

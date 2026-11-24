@@ -27,9 +27,7 @@ import { applyProbeExpectations, suiteExitCode } from "./suite-aggregate.ts";
 // B1 节奏统一：套件跟随 env 节奏（不显式关闭）；子目标/用例间/重试间都是
 // 「最小步间距」（start-to-start ≥ gap）语义，与规划脸共用同一时钟实现。
 import { envPace, newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
-import type {
-  CaseOutcome, CaseStatus, OnlineCase, OnlineSite, SuiteOutcome,
-} from "./types.ts";
+import type { CaseOutcome, OnlineCase, OnlineSite, SuiteOutcome } from "./types.ts";
 
 export interface RunOptions {
   headless?: boolean;
@@ -257,7 +255,6 @@ async function runOneCase(
     return { outcome: out };
   });
 }
-
 
 export async function runSuite(
   cases: OnlineCase[], sites: Map<string, OnlineSite>, opts: RunOptions = {},

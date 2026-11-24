@@ -12,41 +12,15 @@
  *   - 完成只认该面证据：`step`/`arrive` 的 `done` 由 `checkSignal`/`checkToolSignal` 裁决；
  *   - 值只来自声明/观察/派生：`read.*` 是只读观察，`source()` 是数据腿观察。
  */
-import path from "node:path";
-import {
-  disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
-  type RunReport, type SkippedAction, type StepStateRecord,
-} from "../engine/executor.ts";
-import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts"; import { validateCommands } from "../engine/actions.ts"; import { frameGateExcludes } from "../engine/frame-scope.ts";
-import {
-  firstOf, framesOf, locatorAnyFrame, urlOf, poolSniff,
-  splitFrameSuffixFromSelector, frameScopeEvidenceOf, frameScopeMatchesFrame,
-  type FrameScopeEvidence,
-  type FrameLike, type PageLike,
-} from "../engine/extraction.ts";
-import { extractElements } from "./candidate-scan.ts";
-// arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
-import { admitSelectorWithJsFor } from "../engine/surface.ts";
-// 限速判据阈值单一出处（step 侧与 arrive 侧共用）。
-import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO } from "../engine/throttle-signature.ts";
-// C2 waitForTarget：hint 语义核对与规则面同一份语法（hintCandidates → hintMatch 单一出处）。
-import { hintCandidates } from "../engine/rules.ts";
-import { observePage, validateObserveOptions, type ObserveOptions, type ObserveResult } from "../engine/observe.ts";
-import { checkSignal, signalHasFrameSuffix } from "../engine/signals.ts";
-import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
-import {
-  validateReturns, type ReturnExtractor,
-} from "./app-adapters.ts";
-import type { DatasetStore } from "../engine/dataset.ts";
-import { capToolText, stderrTail } from "./tool-artifact.ts";
-import { REPO } from "../flow/flow.ts";
-import { PageStateStore, type PageState } from "./page-state.ts";
-import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
-import { pushEvent, type AppTrace, type TraceCall } from "./trace.ts";
-import { validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
-// B1 节奏统一：最小步间距（start-to-start）的核心计算在三脸共用的 support/pace.ts。
-import { paceRemainder } from "../support/pace.ts";
-import { sleepMs } from "../support/sleep.ts";
+import { type PageLike } from "../engine/extraction.ts";
+import { checkSignal } from "../engine/signals.ts";
+// 未用（**必须保留**）：datasource 顶部有 CLI 直跑守卫（argv[1] 命中本模块时执行 main）。
+import "../data/datasource.ts";
+// 未用（**必须保留**）：app-adapters 模块顶层有 5 处 registerAppAdapter() 注册副作用。
+import "./app-adapters.ts";
+
+import { createKit } from "./kit.ts";
+import { pushEvent } from "./trace.ts";
 /** L2 运行期 ctx 的类型面与 StopError —— 拆到 ctx-types.ts（F1）。 */
 import {
   StopError,
@@ -93,7 +67,7 @@ import { createCtxTools } from "./ctx-tools.ts";
 
 export function createCtx(deps: CtxDeps): Ctx {
   const rt = createCtxRuntime(deps);
-  const { pack, slots, runtime, trace, budget, page, signalHosts, hosts } = rt;
+  const { pack, slots, runtime, trace, budget, page, signalHosts } = rt;
   const kit = createKit();
     // S1：`runtime.epoch` 是**执行器游标**的只读投影（不自建第二份状态来源）。
   // `dry:false`（eval3 消歧义）：这是真跑面——dry/replay 的 ctx（ctx-dry/ctx-replay）自己给 true。
@@ -166,5 +140,5 @@ export function createCtx(deps: CtxDeps): Ctx {
  * 加载期与运行期**同一份**校验）。坏声明 = 结构化 `config_error`，绝不"猜一个抽取方式"。
  */
 /** L2 ctx 的纯工具函数 —— 拆到 ctx-tool.ts（F1；toolReturns/toolFailureReason/pickRow）。 */
-import { toolReturns, toolFailureReason, pickRow, pickRowMin, pickRowMax } from "./ctx-tool.ts";
+import { toolReturns, toolFailureReason, pickRow } from "./ctx-tool.ts";
 export { toolReturns, toolFailureReason, pickRow };

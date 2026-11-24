@@ -6,22 +6,16 @@
  * 类体与外部面反复引用。集中到这里后，任何一面都能引用同一份类型而不造成执行器类的
  * 加载依赖（也避免 `import type` 与运行时 import 混在同一个 6000 行文件里）。
  */
-import type { AuditVerdict, Auditor, TraceStep } from "./audit.ts";
+import type { TraceStep } from "./audit.ts";
 import type { BrowserLike, LaunchOptions } from "../browser/browser-env.ts";
-import type { ActionCapability, Elem, ElemFamily, FrameGate, PageLike } from "./extraction.ts";
+import type { ElemFamily, PageLike } from "./extraction.ts";
 import type { SurfacePolicy } from "./surface.ts";
-import type { DeclaredCandidate } from "./declared.ts";
-import type {
-  ChoiceAnswer, DecisionAgent, ModelState, NoulAnswer, RouterLike,
-} from "../model/model.ts";
-import type { DecisionProvider } from "../support/decision-provider-contract.ts";
-import type { RangeOptions, RangeOutcome, RangeValue } from "./range.ts";
-import type { AttrValueMatch, HintMatchCandidate } from "./rules.ts";
+
 import type { AmbiguousOrdering } from "./ambiguity.ts";
 import type { SignalSpec } from "./signals.ts";
-import type { SettlePage, SettleResult } from "./settle.ts";
+
 import type { CommandDecl } from "./actions.ts";
-import type { BindingDiagnostics, OptionCandidate } from "./bindings.ts";
+
 import type { DatasetReader } from "./dataset.ts";
 
 export * from "./executor-middleware-types.ts";
@@ -816,7 +810,6 @@ export interface RunOptions {
    */
   dryRun?: boolean;
 }
-
 
 /* ------------------------------------------------------------------ JS passes
  *

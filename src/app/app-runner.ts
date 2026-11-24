@@ -24,74 +24,40 @@
  *   node --experimental-strip-types src/app/app-runner.ts --app <id> --dry             # 只展开计划
  */
 import { type EffectivePolicy, declaredPageUrls, preflightConfig, probeCompatDecisionPlane, promptManualOnTty, resolvePace, resolveRunPolicy } from "./app-runner-policy.ts";
-import { runToolStep } from "./app-runner-tool-step.ts";
 import { appStopContextFields, rememberAppStopContext } from "./app-stop-context.ts";
-import { type AppInvariantResult, type AppRunOptions, type AppRunResult, type AppSourceResult, type ToolStepResult, asAfterSignature, cleanStampAttrs, refusalLine, summarizeDecisions, invariantsFromTrace } from "./app-runner-types.ts";
-import fs from "node:fs";
-import os from "node:os";
+import { type AppInvariantResult, type AppRunOptions, type AppRunResult, type AppSourceResult, type ToolStepResult, asAfterSignature, cleanStampAttrs, summarizeDecisions, invariantsFromTrace } from "./app-runner-types.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createInterface } from "node:readline/promises";
 import { MockAuditor, type TraceStep } from "../engine/audit.ts";
-import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
-// 起跑探测（与 doctor 共享单一出处）。
-import { probeDecisionPlane } from "../model/decision-probe.ts";
 // SITE_FACTS 边缘注入（run 起跑提示 + result.site_facts；仅命中出现）。
 import { loadSiteFacts, matchSiteFacts, renderModelFence, renderSiteFactLines } from "./site-facts.ts";
-import { ensureDir, userAppsDir } from "../support/amberflow-home.ts";
-import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
-import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
-import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 import { readString } from "../support/env.ts";
-import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, SETTLE_QUIET_MS, SETTLE_TIMEOUT_MS } from "../support/tuning.ts";
 import { decisionServiceConfigured } from "../support/decision-env.ts";
 // B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
-import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceResolve } from "../support/pace.ts";
-import { sleepMs } from "../support/sleep.ts";
+import { paceNonDefault } from "../support/pace.ts";
 // §8 步 2 影子模式接线：记录器 + 开关（仅 AMBERFLOW_RESCUE_SHADOW=1 创建；缺省零行为变化）。
 import { createShadowRecorder, isRescueShadowEnabled, type ShadowRecorder } from "./intervention-shadow.ts";
-import { pickManualApprover, shadowManualOutcome, RescueRequestBuilder, journeyRescueInput, lastManualFactsFromTrace, rescueField, type RescueRequest } from "./intervention-adapter.ts";
-import type {  PaceSource, ResolvedPace  } from "../support/pace.ts";
-import { cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor, ValueError, type CliObservation, type PreviewTable } from "../data/datasource.ts";
-import { type CachedRuntime, type DecisionCacheStats } from "../model/decision-cache.ts";
-import { checkArtifacts, missingPieces, modelConfigError } from "../model/model-artifacts.ts";
-import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
-import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
-import { BrowserMiddleware, browserSession, disallowedHost, type BrowserSession, type DecisionStateMetrics, type DecisionStatePolicy, type ExecutedAction, type SkippedAction, type StepStateRecord } from "../engine/executor.ts";
+import { shadowManualOutcome, RescueRequestBuilder, lastManualFactsFromTrace, rescueField } from "./intervention-adapter.ts";
+import { loadSource } from "../data/datasource.ts";
+import { BrowserMiddleware, browserSession, type BrowserSession, type DecisionStateMetrics, type ExecutedAction, type SkippedAction, type StepStateRecord } from "../engine/executor.ts";
 import { urlOf } from "../engine/extraction.ts";
-import { REPO } from "../flow/flow.ts";
-import { installLayaRuntime } from "../model/model.ts";
-import { runSubgoalWithRetries } from "../engine/planner.ts";
-import { checkSignal } from "../engine/signals.ts";
-import { checkToolSignal, explainToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
-import { channelFromEnv } from "../browser/browser-env.ts";
-import { captureStateView } from "../flow/signal-induction.ts";
-import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import { runExecution } from "../engine/run-execution.ts";
-import type {  StateView  } from "../engine/signals.ts";
-import { expandPack, listAppDirs, resolveSourceSlots, type AppPack, type ExpandedStep, type PackPace, type PackPolicy, type SourceObservation } from "./app-pack.ts";
-import { extractProcessReturns, getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun } from "./app-adapters.ts";
-import { validateApp } from "./cross-ref.ts";
-import { MASKED_SLOT, SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
-import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
+// 未用（**必须保留**）：app-adapters 模块顶层有 5 处 registerAppAdapter() 注册副作用。
+import "./app-adapters.ts";
+import { maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
+import { type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx } from "./ctx.ts";
 import { createScriptToolRunner } from "./app-runner-script-tools.ts";
 import type {  CtxDeps  } from "./ctx-types.ts";
 import type {  MiddlewareOptions  } from "../engine/executor-types.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
 import { buildMiddleware } from "./middleware-factory.ts";
-import { finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace, type AppTrace, type TraceEvent } from "./trace.ts";
-import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
-import { capToolText, writeToolStepArtifact } from "./tool-artifact.ts";
-import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
-// 规划引导：run 失败时按停因给一行「下一步建议」（唯一出处 planning-playbook.ts，
-// 只进 report.md 与 stdout，不动 result JSON 契约——桥解析零风险）。
-import { nextForStop, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";
+import { finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace, type TraceEvent } from "./trace.ts";
+import { DatasetStore } from "../engine/dataset.ts";
 // 报告渲染区（appReportMarkdown/appReportHtml/invariantVerdictMd 等）拆到 app-report-view.ts（F7）；
 // re-export 维持既有导出面不变（session-runtime/main 等调用方零改动）。
 export { appReportMarkdown, appReportHtml } from "./app-report-view.ts";
-import { appReportMarkdown, appReportHtml } from "./app-report-view.ts";
 
 export const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--slot-file FILE] [--out DIR]
                   [--provider NAME] [--ablate stub|rules-only]
@@ -184,7 +150,6 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
    * 与 `runApp` 同一个 `DatasetStore` 实现、同一条 generation/失效纪律（不另造一套）。
    */
   const dataset = opts.dataset ?? new DatasetStore();
-
 
   let ok = false;
   /** 预算用满 = partial 执行事实（内核的停因分类单点判定；不是配置错误）。 */
@@ -857,7 +822,6 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   };
   return scrubSecrets(result, secretValues);
 }
-
 
 /* ---------------------------------------------------------------- CLI 入口（拆到 app-runner-cli.ts，F7） */
 

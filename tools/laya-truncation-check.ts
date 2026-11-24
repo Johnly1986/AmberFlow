@@ -31,7 +31,7 @@ import {
 } from "../src/model/laya-format.ts";
 import { aggregateEvidenceTruncation, prepareQuestionSequences } from "../src/model/laya-onnx.ts";
 import { layaProvider } from "../src/model/decision-provider.ts";
-import { scriptedAgent, type LayaRuntime, type ModelState, type PredictResult } from "../src/model/model.ts";
+import { scriptedAgent, type LayaRuntime, type PredictResult } from "../src/model/model.ts";
 import type {
   ChoiceOutcome, EvidenceTruncation, ProviderPage,
 } from "../src/support/decision-provider-contract.ts";

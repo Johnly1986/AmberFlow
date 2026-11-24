@@ -17,7 +17,7 @@ import { extractSlots } from "../engine/extraction.ts";
 import { PACK_KEYS, SPEC_VERSION, appStepKeys, DEVICE_KEYS } from "./app-pack.ts";
 import type { AppPack } from "./app-pack.ts";
 import { adapterKind, stepKind, substitute, RUNTIME_PLACEHOLDERS } from "./pack-expand.ts";
-import { POLICY_KEYS, RISK_ASK_MODES, NAVIGATION_MODES, ACT_HINT_MODES, ACT_HINT_TIER_MODES, TARGET_RESOLUTION_MODES, ATTR_VALUE_MATCH_MODES, BROWSER_CHANNELS, DECISION_STATE_GATES, DECISION_STATE_CONTEXTS, validatePolicyExtras } from "./pack-policy.ts";
+import { POLICY_KEYS, RISK_ASK_MODES, NAVIGATION_MODES, ACT_HINT_MODES, ACT_HINT_TIER_MODES, TARGET_RESOLUTION_MODES, ATTR_VALUE_MATCH_MODES, BROWSER_CHANNELS, validatePolicyExtras } from "./pack-policy.ts";
 
 type ValidatePackOptions = {
   slots?: Record<string, unknown>;
@@ -531,12 +531,12 @@ function validateInvariants(pack: AppPack, roles: Record<string, Record<string, 
   }
 }
 
-function validatePlanExpansion(pack: AppPack, roles: Record<string, Record<string, unknown>>, slots: Record<string, unknown>, opts: ValidatePackOptions, p: string[]): void {
+function validatePlanExpansion(pack: AppPack, roles: Record<string, Record<string, unknown>>, slots: Record<string, unknown>, _opts: ValidatePackOptions, p: string[]): void {
   // 展开成计划后再用计划自己的校验器过一遍（信号/hint/when/retries 一套口径）。
   // 只有**浏览器步**进计划；工具步的信号是进程观察面的，它们已经在上面按 TOOL_SIGNAL_OPS 校验过。
   if (!p.length) {
     try {
-      const browserSteps = pack.journey.map((e, i) => {
+      const browserSteps = pack.journey.map((e) => {
         const merged = e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : { ...e };
         delete merged["role"];
         const substituted = substitute(merged, { ...RUNTIME_PLACEHOLDERS, ...slots }, []) as Record<string, unknown>;
@@ -550,7 +550,7 @@ function validatePlanExpansion(pack: AppPack, roles: Record<string, Record<strin
         const rules = new PlanningRules(pack.max_subgoals ?? 12, true, false);
         // `next` 的落点按**整个旅程**校验（工具步不进计划，但可以是边的落点）。
         const journeyIds = new Set<string>();
-        pack.journey.forEach((e, i) => {
+        pack.journey.forEach((e) => {
           if (!isDict(e)) return;
           const rn = e["role"];
           const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};

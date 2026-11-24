@@ -24,7 +24,7 @@
  * 与旧缝的关系：`LayaRuntime` **保留**，它是 laya 的实现细节；`layaProvider()` 把它包成
  * provider。`installLayaRuntime()` 仍是 51 个文件在用的那扇门。
  */
-import { ariaInteractiveLines, criteriaView, stateText, urlOf, type PageLike } from "../engine/extraction.ts";
+import { ariaInteractiveLines, criteriaView, stateText, urlOf } from "../engine/extraction.ts";
 import { withDecisionCache, type DecisionCacheStats } from "./decision-cache.ts";
 import { decisionServiceConfigured } from "../support/decision-env.ts";
 import * as layaModelModule from "./model.ts";
@@ -33,19 +33,7 @@ import {
   type DecisionAgent, type LayaRuntime, type ModelState,
 } from "./model.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
-
-import type {
-  ChoiceOutcome,
-  ChoiceRequest,
-  ClosedSetChoice,
-  ClosedSetRequest,
-  DecisionProvider,
-  ProviderCapabilities,
-  ProviderFactory,
-  ProviderInfo,
-  ProviderPage,
-  StateDigestPayload,
-} from "../support/decision-provider-contract.ts";
+import type { ChoiceOutcome, ChoiceRequest, ClosedSetChoice, ClosedSetRequest, DecisionProvider, ProviderCapabilities, ProviderFactory, ProviderInfo } from "../support/decision-provider-contract.ts";
 
 /** 接口类型单源在 L0（`src/support/decision-provider-contract.ts`）；这里 re-export 保持既有 importer 不变。 */
 export type {
@@ -60,7 +48,6 @@ export type {
   ProviderPage,
   StateDigestPayload,
 } from "../support/decision-provider-contract.ts";
-
 
 const registry = new Map<string, ProviderFactory>();
 let active: DecisionProvider | null = null;
