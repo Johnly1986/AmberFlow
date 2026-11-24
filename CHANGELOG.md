@@ -4,6 +4,62 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-24 结构/证据批（QW+SC+EP+RV，讨论项续做）
+
+> 用户「全部开始」后并行落地四批；硬约束同前（不改外部行为/公开契约、不引入依赖、原测试全过）。
+> **未提交 git。**
+
+- **QW 快速赢**：新增 `bridge:typecheck`（本地/部署，不入 check）；`prompt-hit` 增文档断言
+  （APP_SCRIPT_AUTHORING 停因表码 ⊆ STOPCODE_MEANING、已删 API 名零出现，先红后绿）；
+  4 处 JSON.parse 包 try（失败点名 path）、2 处冗余 `as any`、getAuditor 半配置降级加 stderr 证据、
+  桥 `save:true` offset 上限文档；**2.0.x 弃用窗口**登记（picker-server/src/index.ts 保留至 2.1.0）。
+- **SC 会话闭集单源**：新增 L0 `src/support/session-contract.ts`（引擎 op 全集含 internal `mark`、
+  桥 op 含 bridgeOnly `list`、act/driver/cmd/tab/窗口/idle 界等）+ `tools/session-contract-gen.ts`
+  （`--write`/`--check`，与引擎契约逐值交叉校验）+ 桥 `session-contract.generated.ts`；
+  桥 `session.ts`/`index.ts` 闭集与数值界改由生成常量派生。**逐字节等价证据**：工具 schema
+  （10 工具/45,282 bytes）与 session 请求线（34 JSONL + 4 argv，24,553 bytes）pre/post sha256 全等；
+  负向注入一字节漂移被判红。`session-contract:check` 已入 `npm run check`（生成物一致性）。
+- **EP 决策端点 parity lane**：新增 `verify:decision-endpoint-parity`（33 样本×协议开关=40 case），
+  登记桥注入面 vs 引擎唯一协议点的 **18 条差异白名单**（2 族：`missing-v1` 14 条——桥注入裸 host
+  时实际 POST `…/systemone` 而引擎直跑补 `/v1/systemone`，含文档推荐的 `http://localhost:8008`；
+  `bridge-forces-systemone` 4 条——桥无条件补 `/systemone` 导致 DSH 部署面无法使用 OpenAI Decisions）。
+  lane 作 tripwire：新差异/白名单过期均 exit 1；建议后续批桥改原值透传（本批不改行为）。
+- **RV run 视图 parity lane**：新增 `verify:run-view-parity`（13 场景，0.4s），登记 10 条已知差异；
+  **新发现 defect**：`agent-view.ts#agentStepViews` 把 `traceSteps` 与 `toolSteps` 叠加，同一工具步
+  出现两行且 index 空间不一致（agent 3 行 vs 桥 2 行）；audience 差异 4 条（refused→blocked vs failed 等）
+  属呈现口径，建议后续统一并单独立项修重复行。
+- **回归**：`npm run check` exit 0（含 session-contract:check、bridge:test 18/18、run-parity 16/16）；
+  `verify:lanes` **17/17**；新增三 lane 全绿；`verify:pilot` 21/21、`verify:runtime:offline` 8/8、
+  parity/session-close/decision-context/characterization/golden-manual/run-execution/offline 全绿。
+
+## [Unreleased] — 2026-11-24 批次 QW：文档断言 + P3 失败路径 + 2.0.x 弃用窗口
+
+> 硬约束：零外部行为变更（仅失败路径文案/证据、文档与注释）；门禁全绿后同批落地。
+
+- **2.0.x 弃用窗口（用户确认）**：`picker-server`（`src/cli/picker-server.ts` + `npm run picker-server`）
+  与 `src/index.ts` 的公开导出面在 **2.0.x 保留、2.1.0 移除**；窗口期内**不新增消费者**（新集成一律走
+  `amber` CLI / DSH 桥），也不扩展两处接口形状。本批只落 CHANGELOG / 头注释 / BACKLOG / AGENTS 口径，
+  **不删代码、导出或 script**。窗口期纪律与 2.1.0 删除清单见 `docs/BACKLOG.md` §21。
+- **文档断言（先红后绿）**：`tools/prompt-hit.ts` 增两条 fail 断言——①`docs/APP_SCRIPT_AUTHORING.md`
+  §10 停因表声明码 ⊆ `STOPCODE_MEANING`（工具步拒绝类别行 ⊆ `REFUSAL_LABELS`；表格末行「其它（如 …）」
+  是不完全枚举，不参与）；②已删 API 名（`drive_step`）在 docs/桥工具描述中零出现——修
+  `docs/AGENT_INTERFACE.md` 的 `drive_closed` 段（驾驶面 op 闭集只有
+  `drive`/`drive_command`/`drive_status`/`drive_close`）。现有逐字句/overview 断言不受影响。
+  负向自测：临时在 §10 加一条假停因码 → prompt-hit exit 1 并点名该码；删 `drive_step` 后转绿。
+- **桥 typecheck**：`package.json` 增 `bridge:typecheck`（桥自有 `tsc -p integrations/dsh-bridge/tsconfig.json
+  --noEmit`，本机 RC=0）；**不入 `check` 链**——CI 缺桥依赖（`integrations/dsh-bridge/node_modules`），
+  只作本地/部署自检；`docs/BACKLOG.md` 桥 typecheck 条目按前提过期更新。
+- **P3 失败路径/证据（零成功路径变更）**：4 处 `JSON.parse` 包 try，坏输入的失败文案点名 path——
+  `TaskPlan.load`（plan 文件）、`readTrace`（trace 文件）、`src/online/case.ts` `readJson`（用例/站点文件）、
+  `src/data/extract-ops.ts` 页内嵌 JSON（无文件可点名，点名变量 + 解析错误）。去掉
+  `src/data/source-validate.ts` / `src/data/extract-ops.ts` 两处冗余 `as any`（可选链 + `||` 语义保持）。
+  `src/engine/audit.ts` `getAuditor` 半配置（有 key 缺 base URL 等）降级 Mock 时打 stderr 证据，
+  判定不变。`docs/AGENT_INTERFACE.md` 补 `save:true` 内部续页的 `offset ≤ 10000` 上限说明（桥不 clamp，
+  起点 > 8000 且未到末页会以 `config_error` 收尾）。`tools/golden/splits/datasource-pure.json` 按
+  manifest 纪律把有意改动的 `dateParams`/`jsonInScript` 两符号移出纯搬移清单（note 记原因，未重录 hash）。
+- **验证**：`npm run bridge:typecheck` RC=0；`npm run check` exit 0；`npm run verify:lanes` 15/15；
+  `npm run maintain:check` / `split:check` 绿。**未提交 git。**
+
 ## [Unreleased] — 2026-11-24 审查驱动优化批（A+B+C+D，用户确认后落地）
 
 > 流程：四路只读审计（/tmp/{dead-code,dup-interfaces,comments-docs,tech-debt}-audit.md）→

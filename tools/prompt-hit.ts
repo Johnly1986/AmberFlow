@@ -19,6 +19,8 @@
  *            的桥 schema/描述 ↔ 引擎形状校验 ↔ pilot JSONL 行三面一致。
  *   doc      `docs/APP_SCRIPT_AUTHORING.md` 逐字包含 ATTR_MATCH_MODEL_TEXT /
  *            PLAN_PLAYBOOK_TEXT / FAILURE_SIGNS_TEXT——文档也是消费面，关键句不许手抄。
+ *            另守 §10 停因表码 ⊆ 契约（STOPCODE_MEANING；拒绝类别行 ⊆ REFUSAL_LABELS）
+ *            与已删 API 名（如 `drive_step`）在 docs/桥描述中零出现。
  *   overview 概述层（层 1）多面一致：AGENTS.md 逐字含 OVERVIEW_TEXT；长度预算
  *            （概述 ≤400 字符、when ≤40、flow ≤4 行）；registry when ↔ help-map
  *            WHEN_TO_USE 双向一致；概述进桥生成物。
@@ -76,6 +78,7 @@ import {
 import { HOME_NEXT, OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.ts";
 import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES, RESCUE_RESULT_SHAPE_TEXT, RESCUE_SHADOW_SWITCH_TEXT } from "../src/cli/schema-gen.ts";
 import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
+import { REFUSAL_LABELS } from "../src/app/app-runner-types.ts";
 import { RESCUE_TEXTS, SIGNAL_NOT_HELD_TEXT, OUTCOME_TEXTS, FULFILLED_NOT_HELD_TEXT } from "../src/support/intervention-texts.ts";
 import { PROMPT_SPECS, renderedPrompts, SAMPLE_GOAL } from "../src/prompts/model-prompts.ts";
 import { AGENT_PROMPT_SPECS, PLAN_RULES_SPEC, buildPlanRulesPrompt } from "../src/prompts/agent-prompts.ts";
@@ -326,6 +329,68 @@ for (const [docRel, docBody] of [
   if (!docBody.includes(RESCUE_SHADOW_SWITCH_TEXT)) {
     problems.push(`doc: ${docRel} 未逐字包含影子开关权威句（RESCUE_SHADOW_SWITCH_TEXT）——从 schema-gen.ts 逐字复制，勿手抄改写`);
   }
+}
+
+/* ---- 6c. doc：§10 停因表码 ↔ 契约；已删 API 名零出现 ----------------------- */
+// 两类「文档手抄真源」的防漂移断言：
+// ① `docs/APP_SCRIPT_AUTHORING.md` §10 是作者查停因的入口，码表手抄自 schema 契约；
+//    声明行的码必须落在 STOPCODE_MEANING，拒绝类别行（显式提 REFUSAL_LABELS 的那行）
+//    必须落在 REFUSAL_LABELS——两表都是闭集，任何新码先在真源登记再改文档。
+// ② 桥/文档不得再提已删 API 名（模型会照抄）：`drive_step` 从未是 session op——
+//    驾驶面闭集只有 drive / drive_command / drive_status / drive_close。
+const STOP_TABLE_ANCHOR = "## 10. 错误码与排查";
+const stopTableSection = docText.split(STOP_TABLE_ANCHOR)[1]?.split(/\n## /)[0] ?? "";
+if (stopTableSection === "") {
+  problems.push(`doc: docs/APP_SCRIPT_AUTHORING.md 找不到 §10 错误码表（锚 '${STOP_TABLE_ANCHOR}'）——停因表断言失去锚点`);
+} else {
+  let declaredCodes = 0;
+  for (const line of stopTableSection.split("\n")) {
+    if (!line.startsWith("|")) continue;
+    const firstCell = line.split("|")[1]?.trim() ?? "";
+    if (firstCell === "" || firstCell === "stopCode" || /^[-: ]+$/.test(firstCell)) continue;
+    // 末行「其它（如 …）」是不完全枚举（含 subgoal 状态等非 stopCode 词），不是声明。
+    if (firstCell.includes("其它")) continue;
+    const refusalRow = line.includes("REFUSAL_LABELS");
+    for (const m of firstCell.matchAll(/`([a-z][a-z0-9_-]*)`/g)) {
+      const code = m[1]!;
+      declaredCodes += 1;
+      if (refusalRow ? !(code in REFUSAL_LABELS) : !(code in STOPCODE_MEANING)) {
+        problems.push(`doc: §10 停因表 '${code}' 不在 ${refusalRow ? "REFUSAL_LABELS" : "STOPCODE_MEANING"}——文档手抄了契约里没有的码`);
+      }
+    }
+  }
+  if (declaredCodes === 0) {
+    problems.push("doc: §10 停因表未解析出任何 code——表格形状变了，停因表断言已空转");
+  }
+}
+const DELETED_API_NAMES = ["drive_step"] as const;
+{
+  const docsDir = path.join(REPO, "docs");
+  const walkDocs = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = path.join(dir, e.name);
+      return e.isDirectory() ? walkDocs(full) : full.endsWith(".md") ? [full] : [];
+    });
+  const docCorpus: Array<[string, string]> = walkDocs(docsDir)
+    .map((file) => [path.relative(REPO, file), fs.readFileSync(file, "utf-8")] as [string, string]);
+  for (const rel of ["README.md", "AGENTS.md", "ARCHITECTURE.md"]) {
+    const abs = path.join(REPO, rel);
+    if (fs.existsSync(abs)) docCorpus.push([rel, fs.readFileSync(abs, "utf-8")]);
+  }
+  for (const [rel, body] of docCorpus) {
+    for (const name of DELETED_API_NAMES) {
+      if (new RegExp(`\\b${name}\\b`).test(body)) {
+        problems.push(`doc: ${rel} 仍出现已删 API 名 '${name}'——驾驶面 op 闭集只有 drive/drive_command/drive_status/drive_close，删掉该死名`);
+      }
+    }
+  }
+  bridgeDescriptionTexts.forEach((text, i) => {
+    for (const name of DELETED_API_NAMES) {
+      if (new RegExp(`\\b${name}\\b`).test(text)) {
+        problems.push(`bridge: 第 ${i + 1} 条工具描述仍出现已删 API 名 '${name}'——桥描述不许承诺不存在的 op`);
+      }
+    }
+  });
 }
 
 /* ---- 7. overview：概述层多面一致 ------------------------------------------- */
@@ -1062,6 +1127,7 @@ console.log(
     + `信号 ${Object.keys(SIGNAL_OPS).length} 算子提示词↔校验器一致，`
     + `桥 session signal 描述列全同一闭集、drive_command.note 承诺↔校验↔透传一致，`
     + `停因 ${Object.keys(STOPCODE_MEANING).length} 个 next/豁免全覆盖，`
+    + `§10 停因表码 ⊆ 契约、已删 API 名 0 出现，`
     + `概述层多面一致（AGENTS.md/桥/长度预算），CLI next 无死链，`
     + `求援文案 ${Object.keys(RESCUE_TEXTS).length} kind 六条清单全过，`
     + `模型 prompt ${PROMPT_SPECS.length} 条唯一文本 × ${PROMPT_SPECS.reduce((s, x) => s + x.consumers.length, 0)} 处消费点单源（快照 hash 一致），`

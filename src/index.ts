@@ -2,6 +2,9 @@
  * **INTERNAL barrel（不是公共 API，P2-2.3）**：包身份 = CLI + DSH 插件；
  * `package.json` 的 `exports["."]` 指向 DSH 桥（插件安装门），不指向本文件。
  * 仓内 importer = 0；不要把这里当作引擎库导入面。唯一公共入口是 `amber` CLI 与 DSH 桥契约。
+ *
+ * 2.0.x 弃用窗口：本文件的公开导出面与 `picker-server` 同窗口——2.1.0 一起移除；
+ * 窗口期内不新增消费者（新代码不得 import 本文件）。
  */
 export * from "./engine/extraction.ts";
 export * from "./engine/rules.ts";

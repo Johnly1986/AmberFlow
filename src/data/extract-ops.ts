@@ -123,7 +123,13 @@ function jsonInScript(html: string, spec: Record<string, any>): Page {
   if (!m) {
     throw new ValueError(`${varName} not found in page (blocked, or a different page shape?)`);
   }
-  const state: unknown = JSON.parse(m[1]!);
+  let state: unknown;
+  try {
+    state = JSON.parse(m[1]!);
+  } catch (e) {
+    // 页内嵌 JSON 没有文件路径可点名：点名变量与解析错误，配置/页面形状问题一眼可分。
+    throw new ValueError(`${varName} in page is not valid JSON (${e instanceof Error ? e.message : String(e)})`);
+  }
   if (!hasOwn(spec, "fields")) throw new KeyError(pyRepr("fields"));
   if (!hasOwn(spec, "rows")) throw new KeyError(pyRepr("rows"));
   const fields = spec["fields"] as Record<string, unknown>;
@@ -290,7 +296,7 @@ export function dateExpr(expr: string, date: string, today: DateLike): string | 
 export function dateParams(source: Source, date: string, today?: DateLike | null): Record<string, unknown> {
   const t: DateLike = today === undefined || today === null ? new Date() : today;
   const params: Record<string, unknown> = {};
-  const decl = ((source["date"] as any) || {}).params || {};
+  const decl = source.date?.params || {};
   for (const [k, v] of Object.entries(decl as Record<string, string>)) {
     params[k] = dateExpr(v, date, t);
   }

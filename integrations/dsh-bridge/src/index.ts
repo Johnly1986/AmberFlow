@@ -48,6 +48,12 @@ import { HINT_LEARN_NOTE, OVERVIEW_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TE
 import {
   DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_IDLE_MS, handleSessionTool, SessionManager, type SessionToolArgs,
 } from './session.ts'
+import {
+  BRIDGE_ACT_OPS, BRIDGE_AMBIGUITY_MODES, BRIDGE_DRIVE_COMMANDS, BRIDGE_DRIVE_DRIVERS,
+  BRIDGE_DRIVE_LIMITS, BRIDGE_READ_WHATS, BRIDGE_SCROLL_TARGETS, BRIDGE_SESSION_CONCURRENCY,
+  BRIDGE_SESSION_IDLE, BRIDGE_SESSION_OPS, BRIDGE_SESSION_TIMEOUTS, BRIDGE_TAB_ACTIONS,
+  BRIDGE_WINDOW_MODES,
+} from './session-contract.generated.ts'
 
 /**
  * C1：会话结果的模型可见渲染只给有界行数（完整形状在结构化 value 里，模型看不到）。
@@ -190,8 +196,10 @@ export const Config = z.object({
   // `amberflow_session` limits. Plain (non-volatile) fields on purpose: changing them means the
   // deployment restarts the session manager, while the tools themselves stay stateless per call.
   // Defaults never spawn anything: a session exists only after an explicit `open` op.
-  sessionIdleMs: z.natural().min(1_000).max(3_600_000).default(DEFAULT_SESSION_IDLE_MS),
-  maxSessions: z.natural().min(1).max(8).default(DEFAULT_MAX_SESSIONS),
+  sessionIdleMs: z.natural().min(BRIDGE_SESSION_IDLE.configMinMs).max(BRIDGE_SESSION_IDLE.configMaxMs)
+    .default(DEFAULT_SESSION_IDLE_MS),
+  maxSessions: z.natural().min(BRIDGE_SESSION_CONCURRENCY.configMinSessions)
+    .max(BRIDGE_SESSION_CONCURRENCY.configMaxSessions).default(DEFAULT_MAX_SESSIONS),
 })
 
 /**
@@ -1090,7 +1098,7 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       op: {
         type: 'string', required: true,
-        enum: ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'drive', 'drive_command', 'drive_status', 'drive_close', 'close', 'list'],
+        enum: BRIDGE_SESSION_OPS,
         description: 'Operation to run; `open` creates a session and returns `session_id`; `goto` navigates the '
           + 'current tab within the declared hosts envelope.',
       },
@@ -1106,7 +1114,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       headful: { type: 'boolean', description: 'open: show a browser window.' },
       window: {
-        type: 'string', enum: ['maximized', 'fullscreen'],
+        type: 'string', enum: BRIDGE_WINDOW_MODES,
         description: 'open: window size for a headed session: `maximized` keeps browser chrome, `fullscreen` covers '
           + 'the screen. Needs a visible window (headful or deployment config); a headless session rejects '
           + 'it.',
@@ -1117,7 +1125,7 @@ export function apply(ctx: Context, config: Config): void {
           + 'record path for `amber session export`; set `false` to disable.',
       },
       act_op: {
-        type: 'string', enum: ['click', 'check', 'fill', 'select', 'hover', 'scroll', 'set_range'],
+        type: 'string', enum: BRIDGE_ACT_OPS,
         description: 'act: single action to perform. `set_range` sets a range/slider control via the engine\'s '
           + 'fill→keyboard→pointer strategies (the same primitive as `ctx.setRange`); an out-of-range request is '
           + 'refused with `code:"value_out_of_range"` and zero interaction instead of being clamped.',
@@ -1127,7 +1135,7 @@ export function apply(ctx: Context, config: Config): void {
         + '(defaults to the key of the target that reported `needs_value`, else `resumed` — prefer the key from '
         + 'the handoff `needs_value` evidence).' },
       on_ambiguous: {
-        type: 'string', enum: ['fail', 'act'],
+        type: 'string', enum: BRIDGE_AMBIGUITY_MODES,
         description: 'act: what to do when several distinct candidates match the hint. `fail` executes nothing and '
           + 'returns `code:"target_ambiguous"` with a bounded ambiguity block; `act` clicks the first '
           + 'actionable candidate (legacy behavior, use only to reproduce an old flow). Prefer narrowing the '
@@ -1158,7 +1166,7 @@ export function apply(ctx: Context, config: Config): void {
           + 'Explicit only, never invented.',
       },
       to: {
-        type: 'string', enum: ['bottom', 'top', 'page'],
+        type: 'string', enum: BRIDGE_SCROLL_TARGETS,
         description: 'act `scroll`: scroll the target\'s scrollable container to `bottom` or `top`, or use `page` for '
           + 'the document. Omit `to` and `by` to scroll the target into the viewport instead.',
       },
@@ -1169,7 +1177,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       selector: { type: 'string', description: 'read: CSS selector to read.' },
       what: {
-        type: 'string', enum: ['text', 'value', 'count', 'attr'],
+        type: 'string', enum: BRIDGE_READ_WHATS,
         description: 'read: what to read: `text` (innerText), `value` (inputValue), `count` (match count) or `attr` '
           + '(attribute value).',
       },
@@ -1207,8 +1215,8 @@ export function apply(ctx: Context, config: Config): void {
       },
       timeout_ms: {
         type: 'integer',
-        description: 'wait_for: poll window in milliseconds. goto: navigation timeout (integer 1..120000; '
-          + 'engine default 30s).',
+        description: 'wait_for: poll window in milliseconds. goto: navigation timeout (integer '
+          + `${BRIDGE_SESSION_TIMEOUTS.gotoMinMs}..${BRIDGE_SESSION_TIMEOUTS.gotoMaxMs}; engine default 30s).`,
       },
       max: { type: 'integer', description: 'observe: maximum rows (same ElementView cap as `*_inspect` `max_elements`).' },
       include_hidden: { type: 'boolean', description: 'observe: include invisible elements.' },
@@ -1220,7 +1228,7 @@ export function apply(ctx: Context, config: Config): void {
       screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot. `act`: write a failure screenshot only when the '
         + 'action fails; only paths are returned.' },
       tab_action: {
-        type: 'string', enum: ['list', 'switch'],
+        type: 'string', enum: BRIDGE_TAB_ACTIONS,
         description: 'tab: `list` enumerates context pages without switching: active index plus TabInfo rows. `switch` '
           + 'moves the session to the one tab matching `match` and refreshes the idle TTL.',
       },
@@ -1235,15 +1243,23 @@ export function apply(ctx: Context, config: Config): void {
         type: 'object', additionalProperties: true,
         description: 'drive: optional completion signal (same signal language as run done / pilot final-signal).',
       },
-      max_steps: { type: 'integer', description: 'drive: driving-step budget 1..200 (default: engine default).' },
-      conf_floor: { type: 'number', description: 'drive: confidence floor in [0,1] (default: engine/provider floor).' },
+      max_steps: {
+        type: 'integer',
+        description: `drive: driving-step budget ${BRIDGE_DRIVE_LIMITS.maxStepsMin}..${BRIDGE_DRIVE_LIMITS.maxStepsMax} `
+          + '(default: engine default).',
+      },
+      conf_floor: {
+        type: 'number',
+        description: `drive: confidence floor in [${BRIDGE_DRIVE_LIMITS.confFloorMin},${BRIDGE_DRIVE_LIMITS.confFloorMax}] `
+          + '(default: engine/provider floor).',
+      },
       expect_url: {
         type: 'string',
         description: 'drive: expected URL substring; when the current URL does not contain it the driver stops with '
           + '`off_task_page` (deterministic, no model call).',
       },
       driver: {
-        type: 'string', enum: ['model', 'agent'],
+        type: 'string', enum: BRIDGE_DRIVE_DRIVERS,
         description: 'drive: decision driver — `model` votes each step (default) or `agent` waits for a '
           + '`drive_command` `resume{hint}` per step (zero model calls).',
       },
@@ -1252,7 +1268,7 @@ export function apply(ctx: Context, config: Config): void {
         description: 'drive: slot values `{name: "value"}`; values only come from the caller (never invented).',
       },
       cmd: {
-        type: 'string', enum: ['resume', 'redirect', 'finish', 'abort'],
+        type: 'string', enum: BRIDGE_DRIVE_COMMANDS,
         description: 'drive_command: fallback instruction (closed set). `resume` continues after a handoff '
           + '(hint/value/target/skip), `redirect` changes the goal/URL, `finish` closes with a signal check, '
           + '`abort` ends the walkthrough. `resume`/`redirect` on a terminal driver are refused with '
@@ -1271,8 +1287,8 @@ export function apply(ctx: Context, config: Config): void {
       idle_timeout_ms: {
         type: 'integer',
         description: 'open: per-session idle TTL in milliseconds. Omit for the deployment default; `0` means '
-          + 'unlimited. Values 1..999 are rejected with `config_error`; other ops passing it also return '
-          + '`config_error`. `op:"list"` rows echo the effective value.',
+          + `unlimited. Values 1..${BRIDGE_SESSION_IDLE.minExplicitMs - 1} are rejected with \`config_error\`; `
+          + 'other ops passing it also return `config_error`. `op:"list"` rows echo the effective value.',
       },
     },
     output: {

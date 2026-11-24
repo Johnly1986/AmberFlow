@@ -365,6 +365,10 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   `<evidence_dir>/extract-<n>.json`（n = 本会话落盘序号），结果带 `file`/`saved`/`bytes`；
   被硬顶截断时如实给 `truncated:true` + `save_limit`（`max_rows`|`max_bytes`）。`rows` 仍只给
   首页 ≤20 行。
+- **`save:true` 的内部续页同样受 `offset` 上限约束**：桥用 `offset+本页行数` 发下一张
+  `extract` 请求，引擎上限 `offset ≤ 10000` 不因 save 放宽、桥也不 clamp——请求起点 > 8000
+  且数据未到末页时，续页会越过 10000 并以 `config_error` 收尾（2000 行硬顶本身触不到该上限）。
+  需要更高起点时从更低 `offset` 分段落盘，或收窄 `rows` 选择器。
 - **`observe` 没有 offset**：元素序随水合/动画变化，无稳定锚——收窄用 `selector`、放宽用
   `max`（≤200），全量元素用 `snapshot`（`pool-<n>.json`）。模型可见渲染只在溢出时多两行
   （observe：`… +N more (M total, K omitted)` + selector/max/snapshot 指引；extract：
@@ -528,8 +532,9 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
     `next` = **起新 session** 重新驾驶（同一 driver 不可续）。
   - `budget_exhausted` —— 预算终态（`stop_code:"budget_exceeded"`）后的续驾驶拒绝；保留该专属码
     以便调用方区分「预算用尽」与「其它终态」。`next` = 起新 session 并增大 `max_steps`（或缩小目标）。
-  - `drive_closed` —— 已 `drive_close` 终结的驾驶面：`drive`/`drive_command`/`drive_step` 均拒绝；
-    session 本身仍可 `act/observe`，`next` = 起新 session（或继续用 session 手工步）。
+  - `drive_closed` —— 已 `drive_close` 终结的驾驶面：`drive`/`drive_command` 均拒绝（`drive_status`
+    仍可只读回显、`drive_close` 幂等收尾）；session 本身仍可 `act/observe`，`next` = 起新
+    session（或继续用 session 手工步）。
   - `handoff_open` —— 交接未决（`handoff_open` 存在）时再次 `op:"drive"` 的显式拒绝：**不静默
     续驾驶**（旧行为会重放同一交接且不显眼），回执带 `reused:true`、`handoff_open` 回显、
     `goal_ignored?`（请求 goal 未被采纳）与 `next`；继续本 run 用

@@ -303,7 +303,7 @@ export function validateSource(src: Source): string[] {
       }
     }
   }
-  const dparams = (((src["date"] as any) || {}).params || {}) as Record<string, unknown>;
+  const dparams = (src.date?.params || {}) as Record<string, unknown>;
   for (const [k, v] of Object.entries(dparams)) {
     try {
       dateExpr(v as string, "2026-01-01", "2026-01-01");

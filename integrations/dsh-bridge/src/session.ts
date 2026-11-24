@@ -23,17 +23,25 @@ import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { buildEnv, cliArgs, type BridgeOptions } from './bridge.ts'
 import { clampElementMax, ELEMENT_DEFAULT_MAX, projectElementViews } from './element-view.ts'
+import {
+  BRIDGE_ACT_OPS, BRIDGE_AMBIGUITY_MODES, BRIDGE_DRIVE_COMMANDS, BRIDGE_DRIVE_DRIVERS,
+  BRIDGE_DRIVE_LIMITS, BRIDGE_OP_ENGINE_TYPE, BRIDGE_READ_WHATS,
+  BRIDGE_SESSION_CONCURRENCY, BRIDGE_SESSION_IDLE, BRIDGE_SESSION_OPS, BRIDGE_SESSION_TIMEOUTS,
+  BRIDGE_TAB_ACTIONS, BRIDGE_WINDOW_MODES,
+  type BridgeAmbiguousMode, type BridgeDriveCommand, type BridgeDriveDriver, type BridgeReadWhat,
+  type BridgeScrollTarget, type BridgeTabAction, type BridgeWindowMode,
+} from './session-contract.generated.ts'
 
-/** 缺省 idle TTL（Lead 裁决 Q3：桥独占 300s，CLI 兜底 600s）。 */
-export const DEFAULT_SESSION_IDLE_MS = 300_000
-/** 缺省同时在册会话上限（Lead 裁决 Q1）。 */
-export const DEFAULT_MAX_SESSIONS = 2
-/** CLI 侧的孤儿兜底（2× 桥 TTL）。 */
-export const CLI_ORPHAN_IDLE_MS = 600_000
+/** 缺省 idle TTL（桥管理器与引擎 CLI 缺省同值；边界见生成物 `BRIDGE_SESSION_IDLE`）。 */
+export const DEFAULT_SESSION_IDLE_MS = BRIDGE_SESSION_IDLE.defaultMs
+/** 缺省同时在册会话上限。 */
+export const DEFAULT_MAX_SESSIONS = BRIDGE_SESSION_CONCURRENCY.defaultMaxSessions
+/** CLI 侧的孤儿兜底（缺省 TTL × orphanFactor；显式 ttl 按生成物里的区间钳制）。 */
+export const CLI_ORPHAN_IDLE_MS = BRIDGE_SESSION_IDLE.orphanDefaultMs
 /** 单 op 读超时缺省。 */
-export const DEFAULT_OP_TIMEOUT_MS = 60_000
+export const DEFAULT_OP_TIMEOUT_MS = BRIDGE_SESSION_TIMEOUTS.opDefaultMs
 /** `open` 的读超时（首次启动浏览器 + 导航）。 */
-export const DEFAULT_OPEN_TIMEOUT_MS = 120_000
+export const DEFAULT_OPEN_TIMEOUT_MS = BRIDGE_SESSION_TIMEOUTS.openDefaultMs
 /** 返回体有界裁剪（与设计 §6 一致）。observe 的元素行 cap/截断合同在 `./element-view.ts`。 */
 export const EXTRACT_MAX_ROWS = 20
 /**
@@ -75,7 +83,7 @@ export interface SessionManagerOptions {
    * 测试缝：子进程 argv 构造器。缺省 = `cliArgs(bridge, ['session', …])`。
    * 真引擎与 fake engine 共用同一条 spawn 路径（fake 用它把 node 指向假引擎脚本）。
    */
-  spawnArgv?: (spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null; /** F80：CLI 孤儿兜底（已按 openSession 规则算好；缺省 = CLI_ORPHAN_IDLE_MS 逐字节不变）。 */ orphanIdleMs?: number }) => string[]
+  spawnArgv?: (spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: BridgeWindowMode | null; /** F80：CLI 孤儿兜底（已按 openSession 规则算好；缺省 = CLI_ORPHAN_IDLE_MS 逐字节不变）。 */ orphanIdleMs?: number }) => string[]
   /** 测试缝：额外环境变量（在 buildEnv + appsEnv 之后合并）。 */
   env?: NodeJS.ProcessEnv
   /** reaper 扫描间隔（缺省 5s；测试可调小）。 */
@@ -134,13 +142,13 @@ export interface SessionToolArgs {
   hosts?: string[]
   headful?: boolean
   /** 有头窗口尺寸（open）：`maximized` | `fullscreen`；需有头（headful:true 或部署 Config.headful）。 */
-  window?: 'maximized' | 'fullscreen'
+  window?: BridgeWindowMode
   record?: boolean
   act_op?: string
   /** act：目标 hint 字符串；drive_command `resume`：字符串 value 的显式值袋键。 */
   target?: string
   /** A2：不传 = 引擎缺省 fail（歧义不执行）；`"act"` 恢复旧行为。只在有值时透传。 */
-  on_ambiguous?: 'fail' | 'act'
+  on_ambiguous?: BridgeAmbiguousMode
   /** F72：act 的 rehydrate 重扫 opt-in（true 才透传；缺省不传 = 引擎缺省关）。 */
   rehydrate_rescan?: boolean
   /**
@@ -148,10 +156,10 @@ export interface SessionToolArgs {
    * / drive_command `resume`。原样透传，桥不猜值。
    */
   value?: unknown
-  to?: 'bottom' | 'top' | 'page'
+  to?: BridgeScrollTarget
   by?: number
   selector?: string
-  what?: 'text' | 'value' | 'count' | 'attr'
+  what?: BridgeReadWhat
   attr?: string
   rows?: string
   fields?: Record<string, string>
@@ -173,7 +181,7 @@ export interface SessionToolArgs {
   include_structure?: boolean
   screenshot?: boolean
   /** F76：tab op 的动作（缺省 'list'；非法值 = config_error 报闭集）。 */
-  tab_action?: 'list' | 'switch'
+  tab_action?: BridgeTabAction
   /** F76：tab switch 的匹配条件（AND；至少一个键的语义校验在引擎 ctx-validate，桥只做形状校验）。 */
   match?: { index?: number; urlContains?: string; titleContains?: string }
   // ---- drive（pilot 在**同一会话页**上驾驶；不新增工具/命令，op 扩展）----
@@ -188,11 +196,11 @@ export interface SessionToolArgs {
   /** drive：任务页 URL 子串（每轮驾驶前不含即 off_task_page）。 */
   expect_url?: string
   /** drive：决策驱动档——model（模型投票，缺省）| agent（每步等 resume 点名，零模型票）。 */
-  driver?: 'model' | 'agent'
+  driver?: BridgeDriveDriver
   /** drive：槽位值（k=v 字符串；值只来自调用方显式给，桥不猜）。 */
   slots?: Record<string, string>
   /** drive_command：兜底指令闭集。 */
-  cmd?: 'resume' | 'redirect' | 'finish' | 'abort'
+  cmd?: BridgeDriveCommand
   /** drive_command resume：点名收窄目标（hint 唯一命中即确定性执行）。 */
   hint?: string
   /** drive_command resume.skip：把最近一次驾驶选中的目标加入禁选后继续（不点名换目标的兜底）。 */
@@ -207,9 +215,6 @@ export interface SessionToolArgs {
 }
 
 export type SessionToolResult = Record<string, unknown>
-
-const SESSION_OPS = ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'drive', 'drive_command', 'drive_status', 'drive_close', 'close', 'list'] as const
-const ACT_OPS = ['click', 'check', 'fill', 'select', 'hover', 'scroll', 'set_range'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -248,11 +253,11 @@ export class SessionManager {
   constructor(options: SessionManagerOptions) {
     this.options = {
       ...options,
-      idleMs: Math.max(1_000, options.idleMs ?? DEFAULT_SESSION_IDLE_MS),
-      maxSessions: Math.max(1, options.maxSessions ?? DEFAULT_MAX_SESSIONS),
-      opTimeoutMs: Math.max(1_000, options.opTimeoutMs ?? DEFAULT_OP_TIMEOUT_MS),
-      openTimeoutMs: Math.max(1_000, options.openTimeoutMs ?? DEFAULT_OPEN_TIMEOUT_MS),
-      reaperMs: Math.max(50, options.reaperMs ?? 5_000),
+      idleMs: Math.max(BRIDGE_SESSION_IDLE.minExplicitMs, options.idleMs ?? DEFAULT_SESSION_IDLE_MS),
+      maxSessions: Math.max(BRIDGE_SESSION_CONCURRENCY.configMinSessions, options.maxSessions ?? DEFAULT_MAX_SESSIONS),
+      opTimeoutMs: Math.max(BRIDGE_SESSION_TIMEOUTS.timeoutFloorMs, options.opTimeoutMs ?? DEFAULT_OP_TIMEOUT_MS),
+      openTimeoutMs: Math.max(BRIDGE_SESSION_TIMEOUTS.timeoutFloorMs, options.openTimeoutMs ?? DEFAULT_OPEN_TIMEOUT_MS),
+      reaperMs: Math.max(BRIDGE_SESSION_TIMEOUTS.reaperFloorMs, options.reaperMs ?? BRIDGE_SESSION_TIMEOUTS.reaperDefaultMs),
     }
     this.evidenceRoot = options.evidenceRoot
       ?? path.join(userHome({ ...buildEnv(options.bridge), ...(options.bridge.appsEnv ?? {}), ...(options.env ?? {}) }), 'session')
@@ -311,9 +316,9 @@ export class SessionManager {
   /** 工具入口：所有 op 的唯一实现。 */
   async handle(args: SessionToolArgs): Promise<SessionToolResult> {
     const op = typeof args.op === 'string' ? args.op : ''
-    if (!(SESSION_OPS as readonly string[]).includes(op)) {
-      throw new SessionToolError('config_error', `op must be one of ${SESSION_OPS.join(' | ')} (got ${JSON.stringify(args.op)})`, {
-        allowed_ops: [...SESSION_OPS],
+    if (!(BRIDGE_SESSION_OPS as readonly string[]).includes(op)) {
+      throw new SessionToolError('config_error', `op must be one of ${BRIDGE_SESSION_OPS.join(' | ')} (got ${JSON.stringify(args.op)})`, {
+        allowed_ops: [...BRIDGE_SESSION_OPS],
       })
     }
     // F80：idle_timeout_ms 是 open 专属参数——其他 op 传入 = config_error（不静默忽略）。
@@ -386,8 +391,8 @@ export class SessionManager {
     if (args.idle_timeout_ms !== undefined
       && (typeof args.idle_timeout_ms !== 'number'
         || !Number.isInteger(args.idle_timeout_ms)
-        || (args.idle_timeout_ms !== 0 && args.idle_timeout_ms < 1000))) {
-      throw new SessionToolError('config_error', `idle_timeout_ms must be 0 or an integer >= 1000 (got ${JSON.stringify(args.idle_timeout_ms)})`)
+        || (args.idle_timeout_ms !== 0 && args.idle_timeout_ms < BRIDGE_SESSION_IDLE.minExplicitMs))) {
+      throw new SessionToolError('config_error', `idle_timeout_ms must be 0 or an integer >= ${BRIDGE_SESSION_IDLE.minExplicitMs} (got ${JSON.stringify(args.idle_timeout_ms)})`)
     }
     const hosts: string[] = []
     if (args.hosts !== undefined) {
@@ -405,8 +410,8 @@ export class SessionManager {
     }
     // 窗口尺寸（window）：值闭集 + 必须真有头。无头下静默忽略就是「配了没反应」——
     // 与引擎侧 session CLI 的校验同一条纪律，桥先拒（结构化 config_error），不靠子进程报错。
-    if (args.window !== undefined && args.window !== 'maximized' && args.window !== 'fullscreen') {
-      throw new SessionToolError('config_error', `window must be one of maximized | fullscreen (got ${JSON.stringify(args.window)})`)
+    if (args.window !== undefined && !(BRIDGE_WINDOW_MODES as readonly string[]).includes(args.window)) {
+      throw new SessionToolError('config_error', `window must be one of ${BRIDGE_WINDOW_MODES.join(' | ')} (got ${JSON.stringify(args.window)})`)
     }
     const headed = args.headful === true || this.options.bridge.headful === true
     if (args.window !== undefined && !headed) {
@@ -427,7 +432,7 @@ export class SessionManager {
     //     （旧实现对 >12h 的 ttl 会生成 >24h argv 触发 spawn 用法错误）。
     const orphanIdleMs = idleTtl === undefined
       ? CLI_ORPHAN_IDLE_MS
-      : (idleTtl === 0 ? 0 : Math.min(24 * 60 * 60 * 1000, Math.max(CLI_ORPHAN_IDLE_MS, 2 * idleTtl)))
+      : (idleTtl === 0 ? 0 : Math.min(BRIDGE_SESSION_IDLE.orphanCapMs, Math.max(CLI_ORPHAN_IDLE_MS, BRIDGE_SESSION_IDLE.orphanFactor * idleTtl)))
     const argv = this.argvFor({
       url, outDir, recordPath, hosts,
       headful: args.headful === true,
@@ -543,12 +548,12 @@ export class SessionManager {
     const url = this.validateUrl(args.url)
     if (args.timeout_ms !== undefined
       && (typeof args.timeout_ms !== 'number' || !Number.isInteger(args.timeout_ms)
-        || args.timeout_ms < 1 || args.timeout_ms > 120_000)) {
+        || args.timeout_ms < BRIDGE_SESSION_TIMEOUTS.gotoMinMs || args.timeout_ms > BRIDGE_SESSION_TIMEOUTS.gotoMaxMs)) {
       throw new SessionToolError('config_error',
-        `goto timeout_ms must be an integer in [1, 120000] (got ${JSON.stringify(args.timeout_ms)})`)
+        `goto timeout_ms must be an integer in [${BRIDGE_SESSION_TIMEOUTS.gotoMinMs}, ${BRIDGE_SESSION_TIMEOUTS.gotoMaxMs}] (got ${JSON.stringify(args.timeout_ms)})`)
     }
     const response = await this.request(state, {
-      type: 'goto', url,
+      type: BRIDGE_OP_ENGINE_TYPE.goto, url,
       ...(args.timeout_ms === undefined ? {} : { timeoutMs: args.timeout_ms }),
     })
     if (response['ok'] !== true) return this.engineFailure(response, 'goto')
@@ -575,7 +580,7 @@ export class SessionManager {
     }
   }
 
-  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null; orphanIdleMs?: number }): string[] {
+  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: BridgeWindowMode | null; orphanIdleMs?: number }): string[] {
     if (this.options.spawnArgv !== undefined) return this.options.spawnArgv(spec)
     // F80：CLI 侧孤儿兜底只兜"桥进程整个没了"的会话（双层 idle）——openSession 已按
     // max(600s, 2×ttl) 算好传入；spec 没带（旧测试缝/直接调用）= 既有 600s 逐字节不变。
@@ -745,7 +750,7 @@ export class SessionManager {
       })
       state.child.stdin?.write(`${line}\n`)
       const response = await result
-      if (body['type'] === 'act') state.actions += 1
+      if (body['type'] === BRIDGE_OP_ENGINE_TYPE.act) state.actions += 1
       return response
     }
     const queued = state.queue.then(run, run)
@@ -761,7 +766,7 @@ export class SessionManager {
     // why_not_admitted / 同一 cap 表）。这里只决定行数钳制与信封字段，不手写字段裁剪。
     const max = clampElementMax(args.max, ELEMENT_DEFAULT_MAX)
     const response = await this.request(state, {
-      type: 'observe',
+      type: BRIDGE_OP_ENGINE_TYPE.observe,
       max,
       ...(args.selector === undefined ? {} : { selector: args.selector }),
       ...(args.include_hidden === undefined ? {} : { includeHidden: args.include_hidden }),
@@ -790,9 +795,9 @@ export class SessionManager {
 
   private async act(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const actOp = typeof args.act_op === 'string' ? args.act_op : ''
-    if (!(ACT_OPS as readonly string[]).includes(actOp)) {
-      throw new SessionToolError('config_error', `act needs act_op one of ${ACT_OPS.join(' | ')} (got ${JSON.stringify(args.act_op)})`, {
-        allowed_act_ops: [...ACT_OPS],
+    if (!(BRIDGE_ACT_OPS as readonly string[]).includes(actOp)) {
+      throw new SessionToolError('config_error', `act needs act_op one of ${BRIDGE_ACT_OPS.join(' | ')} (got ${JSON.stringify(args.act_op)})`, {
+        allowed_act_ops: [...BRIDGE_ACT_OPS],
       })
     }
     if (!nonEmpty(args.target) && actOp !== 'scroll') {
@@ -801,14 +806,14 @@ export class SessionManager {
     if ((actOp === 'fill' || actOp === 'select' || actOp === 'set_range') && args.value === undefined) {
       throw new SessionToolError('config_error', `act op '${actOp}' needs a value parameter (the tool never invents values)`)
     }
-    const body: Record<string, unknown> = { type: 'act', op: actOp, target: args.target ?? '' }
+    const body: Record<string, unknown> = { type: BRIDGE_OP_ENGINE_TYPE.act, op: actOp, target: args.target ?? '' }
     // A2：歧义策略只在显式给值时进请求体（缺省由引擎给 fail）；引擎/CLI 仍是唯一的语义面，
     // 桥只做形状校验 + 透传。
     if (args.on_ambiguous !== undefined) {
       const mode: unknown = args.on_ambiguous
-      if (mode !== 'fail' && mode !== 'act') {
-        throw new SessionToolError('config_error', `on_ambiguous must be one of fail | act (got ${JSON.stringify(args.on_ambiguous)})`, {
-          allowed_modes: ['fail', 'act'],
+      if (!(BRIDGE_AMBIGUITY_MODES as readonly unknown[]).includes(mode)) {
+        throw new SessionToolError('config_error', `on_ambiguous must be one of ${BRIDGE_AMBIGUITY_MODES.join(' | ')} (got ${JSON.stringify(args.on_ambiguous)})`, {
+          allowed_modes: [...BRIDGE_AMBIGUITY_MODES],
         })
       }
       body['onAmbiguous'] = mode
@@ -1052,11 +1057,11 @@ export class SessionManager {
 
   private async read(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const what = typeof args.what === 'string' ? args.what : ''
-    if (!['text', 'value', 'count', 'attr'].includes(what)) {
-      throw new SessionToolError('config_error', `read needs what one of text | value | count | attr (got ${JSON.stringify(args.what)})`)
+    if (!(BRIDGE_READ_WHATS as readonly string[]).includes(what)) {
+      throw new SessionToolError('config_error', `read needs what one of ${BRIDGE_READ_WHATS.join(' | ')} (got ${JSON.stringify(args.what)})`)
     }
     if (!nonEmpty(args.selector)) throw new SessionToolError('config_error', 'read needs a selector')
-    const body: Record<string, unknown> = { type: 'read', what, selector: args.selector }
+    const body: Record<string, unknown> = { type: BRIDGE_OP_ENGINE_TYPE.read, what, selector: args.selector }
     if (what === 'attr') {
       if (!nonEmpty(args.attr)) throw new SessionToolError('config_error', "read what='attr' needs attr")
       body['attr'] = args.attr
@@ -1096,7 +1101,7 @@ export class SessionManager {
     const rows = args.rows
     const fields = args.fields
     const response = await this.request(state, {
-      type: 'extract', rows, fields, maxItems,
+      type: BRIDGE_OP_ENGINE_TYPE.extract, rows, fields, maxItems,
       ...(offset > 0 ? { offset } : {}),
       ...(args.wait_settled === undefined ? {} : { waitSettled: args.wait_settled }),
     })
@@ -1149,7 +1154,7 @@ export class SessionManager {
     let stop: 'end' | 'max_rows' | 'max_bytes' = 'end'
     for (;;) {
       const page = await this.request(state, {
-        type: 'extract', rows: req.rows, fields: req.fields, maxItems: SAVE_PAGE,
+        type: BRIDGE_OP_ENGINE_TYPE.extract, rows: req.rows, fields: req.fields, maxItems: SAVE_PAGE,
         ...(offset > 0 ? { offset } : {}),
       })
       if (page['ok'] !== true) return { ok: false, response: this.engineFailure(page, 'extract') }
@@ -1204,18 +1209,19 @@ export class SessionManager {
 
   private async signal(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     if (!isObj(args.signal)) throw new SessionToolError('config_error', 'signal needs a signal object')
-    const response = await this.request(state, { type: 'signal', signal: args.signal })
+    const response = await this.request(state, { type: BRIDGE_OP_ENGINE_TYPE.signal, signal: args.signal })
     if (response['ok'] !== true) return this.engineFailure(response, 'signal')
     return { ok: true, op: 'signal', session_id: state.id, held: response['held'] === true }
   }
 
   private async waitFor(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     if (!isObj(args.signal)) throw new SessionToolError('config_error', 'wait_for needs a signal object')
-    const timeoutMs = Math.max(0, Math.min(120_000, Math.floor(args.timeout_ms ?? 15_000)))
+    const timeoutMs = Math.max(BRIDGE_SESSION_TIMEOUTS.waitMinMs, Math.min(BRIDGE_SESSION_TIMEOUTS.waitMaxMs,
+      Math.floor(args.timeout_ms ?? BRIDGE_SESSION_TIMEOUTS.waitDefaultMs)))
     const response = await this.request(
       state,
-      { type: 'waitFor', signal: args.signal, timeoutMs },
-      Math.max(this.options.opTimeoutMs, timeoutMs + 15_000),
+      { type: BRIDGE_OP_ENGINE_TYPE.wait_for, signal: args.signal, timeoutMs },
+      Math.max(this.options.opTimeoutMs, timeoutMs + BRIDGE_SESSION_TIMEOUTS.waitDefaultMs),
     )
     if (response['ok'] !== true) return this.engineFailure(response, 'wait_for')
     return {
@@ -1229,7 +1235,7 @@ export class SessionManager {
 
   private async snapshot(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const response = await this.request(state, {
-      type: 'snapshot',
+      type: BRIDGE_OP_ENGINE_TYPE.snapshot,
       // 设计 Q4：桥缺省不截图（模型面只看路径）；显式 screenshot:true 才截。
       screenshot: args.screenshot === true,
     }, Math.max(this.options.opTimeoutMs, 90_000))
@@ -1259,12 +1265,12 @@ export class SessionManager {
    */
   private async tab(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const action = args.tab_action === undefined ? 'list' : args.tab_action
-    if (action !== 'list' && action !== 'switch') {
-      throw new SessionToolError('config_error', `tab_action must be one of list | switch (got ${JSON.stringify(args.tab_action)})`, {
-        allowed_actions: ['list', 'switch'],
+    if (!(BRIDGE_TAB_ACTIONS as readonly string[]).includes(action)) {
+      throw new SessionToolError('config_error', `tab_action must be one of ${BRIDGE_TAB_ACTIONS.join(' | ')} (got ${JSON.stringify(args.tab_action)})`, {
+        allowed_actions: [...BRIDGE_TAB_ACTIONS],
       })
     }
-    const body: Record<string, unknown> = { type: 'tab' }
+    const body: Record<string, unknown> = { type: BRIDGE_OP_ENGINE_TYPE.tab }
     if (args.tab_action !== undefined) body['action'] = action
     if (args.match !== undefined) {
       const m: unknown = args.match
@@ -1319,10 +1325,12 @@ export class SessionManager {
     if (!nonEmpty(args.goal)) {
       throw new SessionToolError('config_error', 'drive needs a non-empty goal (one line describing the step)')
     }
-    const body: Record<string, unknown> = { type: 'drive', goal: args.goal.trim() }
+    const body: Record<string, unknown> = { type: BRIDGE_OP_ENGINE_TYPE.drive, goal: args.goal.trim() }
     if (args.max_steps !== undefined) {
-      if (typeof args.max_steps !== 'number' || !Number.isInteger(args.max_steps) || args.max_steps < 1 || args.max_steps > 200) {
-        throw new SessionToolError('config_error', `max_steps must be an integer 1..200 (got ${JSON.stringify(args.max_steps)})`)
+      if (typeof args.max_steps !== 'number' || !Number.isInteger(args.max_steps)
+        || args.max_steps < BRIDGE_DRIVE_LIMITS.maxStepsMin || args.max_steps > BRIDGE_DRIVE_LIMITS.maxStepsMax) {
+        throw new SessionToolError('config_error',
+          `max_steps must be an integer ${BRIDGE_DRIVE_LIMITS.maxStepsMin}..${BRIDGE_DRIVE_LIMITS.maxStepsMax} (got ${JSON.stringify(args.max_steps)})`)
       }
       body['max_steps'] = args.max_steps
     }
@@ -1333,8 +1341,10 @@ export class SessionManager {
       body['final_signal'] = args.final_signal
     }
     if (args.conf_floor !== undefined) {
-      if (typeof args.conf_floor !== 'number' || !Number.isFinite(args.conf_floor) || args.conf_floor < 0 || args.conf_floor > 1) {
-        throw new SessionToolError('config_error', `conf_floor must be a number in [0,1] (got ${JSON.stringify(args.conf_floor)})`)
+      if (typeof args.conf_floor !== 'number' || !Number.isFinite(args.conf_floor)
+        || args.conf_floor < BRIDGE_DRIVE_LIMITS.confFloorMin || args.conf_floor > BRIDGE_DRIVE_LIMITS.confFloorMax) {
+        throw new SessionToolError('config_error',
+          `conf_floor must be a number in [${BRIDGE_DRIVE_LIMITS.confFloorMin},${BRIDGE_DRIVE_LIMITS.confFloorMax}] (got ${JSON.stringify(args.conf_floor)})`)
       }
       body['conf_floor'] = args.conf_floor
     }
@@ -1345,9 +1355,9 @@ export class SessionManager {
       body['expect_url'] = args.expect_url
     }
     if (args.driver !== undefined) {
-      if (args.driver !== 'model' && args.driver !== 'agent') {
-        throw new SessionToolError('config_error', `driver must be one of model | agent (got ${JSON.stringify(args.driver)})`, {
-          allowed_drivers: ['model', 'agent'],
+      if (!(BRIDGE_DRIVE_DRIVERS as readonly string[]).includes(args.driver)) {
+        throw new SessionToolError('config_error', `driver must be one of ${BRIDGE_DRIVE_DRIVERS.join(' | ')} (got ${JSON.stringify(args.driver)})`, {
+          allowed_drivers: [...BRIDGE_DRIVE_DRIVERS],
         })
       }
       body['driver'] = args.driver
@@ -1366,12 +1376,12 @@ export class SessionManager {
   /** drive_command：把兜底指令（resume/redirect/finish/abort 闭集）交给驾驶面；drive 时继续一轮。 */
   private async driveCommandOp(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const cmd = args.cmd
-    if (cmd !== 'resume' && cmd !== 'redirect' && cmd !== 'finish' && cmd !== 'abort') {
-      throw new SessionToolError('config_error', `cmd must be one of resume | redirect | finish | abort (got ${JSON.stringify(args.cmd)})`, {
-        allowed_cmds: ['resume', 'redirect', 'finish', 'abort'],
+    if (cmd === undefined || !(BRIDGE_DRIVE_COMMANDS as readonly string[]).includes(cmd)) {
+      throw new SessionToolError('config_error', `cmd must be one of ${BRIDGE_DRIVE_COMMANDS.join(' | ')} (got ${JSON.stringify(args.cmd)})`, {
+        allowed_cmds: [...BRIDGE_DRIVE_COMMANDS],
       })
     }
-    const body: Record<string, unknown> = { type: 'driveCommand', cmd }
+    const body: Record<string, unknown> = { type: BRIDGE_OP_ENGINE_TYPE.drive_command, cmd }
     if (args.hint !== undefined) {
       if (!nonEmpty(args.hint)) throw new SessionToolError('config_error', 'hint must be a non-empty string when present')
       body['hint'] = args.hint
@@ -1405,13 +1415,13 @@ export class SessionManager {
 
   /** drive_status：只读回显（url/步数/咨询数/未决交接/证据目录；不推进驾驶）。 */
   private async driveStatusOp(state: SessionState): Promise<SessionToolResult> {
-    const response = await this.request(state, { type: 'driveStatus' })
+    const response = await this.request(state, { type: BRIDGE_OP_ENGINE_TYPE.drive_status })
     return this.driveResult(state, 'drive_status', response)
   }
 
   /** drive_close：收尾驾驶面（宿主浏览器归 session 所有，不在这里关闭）。 */
   private async driveCloseOp(state: SessionState): Promise<SessionToolResult> {
-    const response = await this.request(state, { type: 'driveClose' })
+    const response = await this.request(state, { type: BRIDGE_OP_ENGINE_TYPE.drive_close })
     return this.driveResult(state, 'drive_close', response)
   }
 
@@ -1687,7 +1697,7 @@ export class SessionManager {
     if (!state.dead && !state.closing) {
       state.closing = true
       try {
-        summary = await this.request(state, { type: 'close' }, 10_000)
+        summary = await this.request(state, { type: BRIDGE_OP_ENGINE_TYPE.close }, 10_000)
       } catch {
         // close 失败不影响"会话必须结束"：走 kill 树兜底。
       }

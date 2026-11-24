@@ -225,7 +225,7 @@ SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_ca
 
 | # | 项 | 说明 | 状态 |
 |---|---|---|---|
-| 1 | 桥 typecheck 纳入门禁 | 桥（`integrations/dsh-bridge`）尚无独立 tsc 门禁——先修既有 tsc 错误，再把桥 typecheck 接入 `npm run check`/CI，防止桥侧类型漂移逃过 PR 门禁 | open（需先修 bridge 既有 tsc 错误） |
+| 1 | 桥 typecheck 纳入门禁 | 桥（`integrations/dsh-bridge`）尚无独立 tsc 门禁——先修既有 tsc 错误，再把桥 typecheck 接入 `npm run check`/CI，防止桥侧类型漂移逃过 PR 门禁 | **script 已加（2026-11-24）**：桥既有 tsc 错误已清零，本机 `npm run bridge:typecheck` RC=0；**未入 `check`**——CI 缺桥依赖（`integrations/dsh-bridge/node_modules`），只作本地/部署自检；入 CI 门禁仍待桥依赖可安装 |
 | 2 | row-index 编号基统一到页级全量收集 | 当前编号基 = 各面收集到的成员（池面 `POOL_SEL`+heuristic vs 回捞/observe 面 `ADMIT_SEL` 两个元素宇宙）；跨面 N 可移植的前提 = 同名组成员在两集合都在场。统一到**页级全量收集（合并 POOL_SEL/ADMIT_SEL 口径）**后 N 才无条件可移植；池帽仍只截尾、编号是页面前缀。文档口径：照抄 inspect 候选前用 `ctx.observe`/run 复核 | open（有实测不可移植案例再排期） |
 | 3 | F72 `rehydrate_rescan` 的 miss+strict 路径 RunReport 缺重扫事实 | 评审 P2：act hint miss 且 `act_hint:"strict"` 时，RunReport/汇总未带 `rehydrate_rescan` 重扫事实（trace 行有、报告尾缺），归因链断一截 | done（2026-11-24）：`run()` 作用域保存 `lastRehydrateRescanFact`（重扫事实赋值处同步）并经 `RunReportTailCtx.rehydrateRescanFact` 传给 `runReportTail`；报告尾保留 trace 行优先查找，trace 无承载行（strict 在动作行之前早停）时退化为该字段输出 `rehydrate_rescan`——键仅在发生时出现，判定/退出码/既有报告形状不变；strict 停因 reason 追加「；rehydrate_rescan 已等 Xms 重抽池（N 项）仍未命中」。证据 lane：`tools/verify-rehydrate-rescan.ts`（`fixtures/engine/rehydrate-rescan/` 三场景：strict-miss 退化字段且 trace 无承载行、重扫命中时 trace 形状不变、`settle:off` 无键；规则面零模型、零外部网络；非门禁） |
 
@@ -465,3 +465,19 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 > **复审 4（2026-11-21，完整报告，基于 v3 工作树）**：verdict 不通过；P0-1/2/3 与 P1-1/3 已被 v4 吸收，增量收敛为 **v5**：类型单源复用（删结构复述防漂移）；outcome 字段更名 `executionPool` 并写明**模型投影永不返回执行面**、`target` 缩为 `{ref, sig}`；账本改**工厂按 lifetime 绑定策略**（prune/notesFor/forbiddenRefs；`recordMemory` 收 `Sig` 与 `"inert"|"effective"`，effective 清旧 inert；签名编码唯一 helper）；`DecisionAskPorts`（faces/segments/siteFacts）组合根注入，engine 禁 import 应用层/site-facts、不许模块全局；reason 复用 `StopCode`、limit 复用 `decision_service_choice_limit`、`narrow_abstain` 移为 ladder 事件；`ts` 统一 epoch ms；`stepTimeoutMs` 为阶梯硬约束；S1 不开放 segments（S4 结构化判别联合）。**批序改 S0a（characterization 先行）→ S0b（账本适配不删旧账）→ S1（仅 pilot 双臂）→ S2（runModelPick 整段）→ S3 → S4**。最终放行 = P0 全消 + 模型 stub 新旧臂请求序列/选中/动作/停因等价 + 既有 rules-only lane 不回归 + 危险 dry-run/default-deny 不变 + DC5 真站 A/B。
 >
 > **来源**：2026-11-21 决策上文审计（用户指示「理清引擎喂 vs 驾驶面喂，elems 归引擎」+「接口抽象」）。
+
+## 21. 2.0.x 弃用窗口：`picker-server` 与 `src/index.ts` 公开面
+
+**状态**：**2.0.x 保留（弃用中）、2.1.0 移除**｜ **优先级建议**：P1（版本窗口，用户已确认）
+
+> **结论**：`npm run picker-server`（`src/cli/picker-server.ts`）与 `src/index.ts` 的公开导出面
+> 在 **2.0.x 保留、2.1.0 移除**；窗口期内**不新增消费者**——新集成一律走 `amber` CLI / DSH 桥
+> （包身份 = CLI + DSH 插件；`package.json` 的 `exports["."]` 已指向桥）。本窗口**不删代码、导出或
+> script**，只落注释/CHANGELOG/文档口径。
+>
+> **窗口期纪律**：①不新增 importer（仓内 importer = 0）；②不扩展两处接口形状（`picker-server`
+> 协议/导出符号、`src/index.ts` 的 re-export 面）；③bug 修复可进，任何行为变更不进；④2.1.0
+> 删除时一并移除 `picker-server` script、`src/index.ts`、`files` 清单相关项与所有文档引用。
+>
+> **来源**：2026-11-24 审查驱动优化批遗留（`src/index.ts` barrel 与 `picker-server` 公开面删除
+> 原需产品决定，用户确认按语义化版本窗口处理）。

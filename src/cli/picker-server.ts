@@ -1,6 +1,8 @@
 /**
- * **DEPRECATED（P2-2.3）**：MV3 `extension/` 已删除；本服务仅作为兼容入口保留一版，
- * 评估后删除。新集成请走 CLI / DSH 桥（包身份见 README「消费面与包身份」）。
+ * **DEPRECATED（P2-2.3，2.0.x 弃用窗口）**：MV3 `extension/` 已删除；本服务与
+ * `npm run picker-server` script 在 **2.0.x 保留、2.1.0 移除**，窗口期内**不新增消费者**
+ * （新集成请走 CLI / DSH 桥，包身份见 README「消费面与包身份」）。`src/index.ts` 的公开
+ * 导出面同一窗口。
  *
  * Path B in TypeScript — the TS twin of `picker_server.py`.
  *

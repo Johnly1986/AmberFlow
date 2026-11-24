@@ -24,7 +24,12 @@ export function onlineRoot(root: string = REPO): string {
 }
 
 function readJson(file: string): unknown {
-  return JSON.parse(fs.readFileSync(file, "utf-8"));
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+  } catch (e) {
+    // 用例/站点声明是门禁输入：坏 JSON 要点名文件（后续校验只报形状问题，不会有路径）。
+    throw new Error(`${file} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 function jsonFiles(dir: string): string[] {

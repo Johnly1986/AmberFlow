@@ -45,7 +45,7 @@
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run precheck && npm run run-args:check && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run site-knowledge:check && npm run secret-scan && npm run examples-check && npm run bridge:test && npm run row-anchor:check && npm run laya-truncation:check && npm run maintain:check && npm run split:check && npm run test:validate && npm run verify:decision-run-parity",
+    "check": "npm run precheck && npm run run-args:check && npm run session-contract:check && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run site-knowledge:check && npm run secret-scan && npm run examples-check && npm run bridge:test && npm run row-anchor:check && npm run laya-truncation:check && npm run maintain:check && npm run split:check && npm run test:validate && npm run verify:decision-run-parity",
     "test": "node --experimental-strip-types src/cli/test.ts",
     "test:validate": "node --experimental-strip-types src/cli/test.ts --validate",
     "apps": "node --experimental-strip-types src/app/app-runner.ts",
@@ -62,6 +62,7 @@
     "secret-scan": "node --experimental-strip-types tools/secret-scan.ts",
     "examples-check": "node --experimental-strip-types tools/examples-check.ts",
     "bridge:test": "node --experimental-strip-types --test integrations/dsh-bridge/test/passthrough.test.ts",
+    "bridge:typecheck": "node integrations/dsh-bridge/node_modules/typescript/bin/tsc -p integrations/dsh-bridge/tsconfig.json --noEmit",
     "check:ci": "node --experimental-strip-types src/cli/main.ts schema ctx --out dist/schema/ctx.json && npm run check",
     "precheck": "node --experimental-strip-types tools/schema-ensure.ts",
     "run-args:gen": "node --experimental-strip-types tools/run-args-gen.ts --write",
@@ -92,10 +93,14 @@
     "verify:app-stop-context": "node --experimental-strip-types tools/verify-app-stop-context.ts",
     "verify:decision-accounting": "node --experimental-strip-types tools/verify-decision-accounting.ts",
     "verify:decision-ask-parity": "node --experimental-strip-types tools/verify-decision-ask-parity.ts",
-    "verify:lanes": "npm run golden-manual && npm run verify:run-execution && npm run verify:offline && npm run verify:decision-accounting && npm run verify:act-lock && npm run verify:session-range && npm run verify:session-drive && npm run verify:poolless-actions && npm run verify:dedup-controls && npm run verify:frame-budget && npm run verify:app-stop-context && npm run verify:decision-ask-parity && npm run verify:record-failure && npm run verify:ctx-validate && npm run verify:rehydrate-rescan && echo \"verify:lanes: OK — 15 non-gated lanes passed\"",
+    "verify:lanes": "npm run golden-manual && npm run verify:run-execution && npm run verify:offline && npm run verify:decision-accounting && npm run verify:act-lock && npm run verify:session-range && npm run verify:session-drive && npm run verify:poolless-actions && npm run verify:dedup-controls && npm run verify:frame-budget && npm run verify:app-stop-context && npm run verify:decision-ask-parity && npm run verify:record-failure && npm run verify:ctx-validate && npm run verify:rehydrate-rescan && npm run verify:decision-endpoint-parity && npm run verify:run-view-parity && echo \"verify:lanes: OK — 17 non-gated lanes passed\"",
     "verify:record-failure": "node --experimental-strip-types tools/verify-record-failure.ts",
     "verify:ctx-validate": "node --experimental-strip-types tools/verify-ctx-validate.ts",
-    "verify:rehydrate-rescan": "node --experimental-strip-types tools/verify-rehydrate-rescan.ts"
+    "verify:rehydrate-rescan": "node --experimental-strip-types tools/verify-rehydrate-rescan.ts",
+    "session-contract:gen": "node --experimental-strip-types tools/session-contract-gen.ts --write",
+    "session-contract:check": "node --experimental-strip-types tools/session-contract-gen.ts --check",
+    "verify:decision-endpoint-parity": "node --experimental-strip-types tools/verify-decision-endpoint-parity.ts",
+    "verify:run-view-parity": "node --experimental-strip-types tools/verify-run-view-parity.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

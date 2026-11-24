@@ -136,7 +136,13 @@ export function writeTrace(file: string, trace: AppTrace): string {
 }
 
 export function readTrace(file: string): AppTrace {
-  const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf-8")) as unknown;
+  } catch (e) {
+    // 坏 JSON 与坏形状同样是"审计产物不可信"，都要点名文件（形状校验在下面同口径）。
+    throw new Error(`trace ${file} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const problems = validateTrace(raw);
   if (problems.length) throw new Error(`trace ${file} is invalid:\n  - ${problems.join("\n  - ")}`);
   return raw as AppTrace;

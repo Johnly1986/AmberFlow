@@ -134,8 +134,12 @@ export function getAuditor(): Auditor {
   if (readOptionalString("OPENAI_API_KEY")) {
     try {
       return new LLMAuditor();
-    } catch {
-      /* half-configured env: fall through to the mock */
+    } catch (e) {
+      // 半配置（有 key 却缺 base URL 等）不是「审计面没配」：判定照旧降级 Mock（离线/部署
+      // 继续可跑），但必须留下证据——否则只填了 key 的部署会静默退回 Mock 审计而不自知。
+      console.warn(
+        `auditor: LLM auditor unavailable, falling back to MockAuditor: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
   return new MockAuditor();

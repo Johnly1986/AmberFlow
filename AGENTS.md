@@ -31,7 +31,7 @@ npm run check                          # precheck + 契约生成物一致性 + t
 npm run verify:offline                 # 非门禁等价验证（fixtures 抽取面；需 chromium，不进 check）
 npm run verify:runtime:offline         # 非门禁运行期等价 lane（fixtures + BrowserMiddleware.run；需 chromium）
 npm run verify:pilot                  # 非门禁：PILOTED_WALKTHROUGH §3.2 走查验收矩阵（停因/兜底/危险拒绝/降级；需 chromium）
-npm run verify:lanes                   # 非门禁：顺序跑本批证据面 15 条 lane（需 chromium；清单见「测试」节）
+npm run verify:lanes                   # 非门禁：顺序跑本批证据面 17 条 lane（需 chromium；清单见「测试」节）
 npm run test -- --tier smoke         # 真实站点快速可达性
 npm run test -- --tier core          # 短流程
 npm run test -- --tier deep          # 长流程
@@ -50,7 +50,7 @@ npm run apps -- --app <id>             # 用户作用域应用（同一运行器
 npm run learn                          # 演示一次，录成应用
 npx amber record https://<页面> --name <id>   # 同一入口的 CLI 形式
 npm run model:fetch -- --from <url|路径>
-npm run picker-server                 # DEPRECATED（P2-2.3）：MV3 extension 已删除，保留一版后评估移除
+npm run picker-server                 # DEPRECATED（P2-2.3）：MV3 extension 已删除；2.0.x 保留、2.1.0 移除，期间不新增消费者
 ```
 
 `npm run test` 是真实站点套件，不是单元测试；没有 `npm run verify`。PR 门禁只走 `npm run check`（需本机 chromium：`npx playwright install chromium`），真实站点回归走 `npm run test`（声明数据在 `online/`）。
@@ -93,9 +93,9 @@ online/cases/probe/*.json
 - 抽取/运行期：`verify:offline`（14 个夹具页的抽取面，比较按元素身份归一、ref 编号漂移不算差异）、`verify:runtime:offline`（唯一执行循环 8 场景）
 - 编排/话术：`verify:run-execution`（四源归一化产物 vs golden；池构成/排序/容量变更后须重录基线）、`golden-manual`（六条人工路径话术基线；静态源码扫描，毫秒级）
 - 会话/动作面：`verify:act-lock`、`verify:session-range`、`verify:session-drive`、`verify:poolless-actions`、`verify:dedup-controls`、`verify:frame-budget`
-- 决策/结果面：`verify:app-stop-context`、`verify:decision-accounting`、`verify:decision-ask-parity`
+- 决策/结果面：`verify:app-stop-context`、`verify:decision-accounting`、`verify:decision-ask-parity`、`verify:decision-endpoint-parity`（端点归一化差异白名单）、`verify:run-view-parity`（agent/桥 run 视图差异白名单）
 - 失败路径/校验：`verify:record-failure`（`--record` 写失败不崩）、`verify:ctx-validate`（extract maxItems 等入参）、`verify:rehydrate-rescan`（strict-miss 重扫证据）
-- 聚合：`npm run verify:lanes` 顺序跑上述 15 条（不含较重的 `verify:runtime:offline`），任一红即停。
+- 聚合：`npm run verify:lanes` 顺序跑上述 17 条（不含较重的 `verify:runtime:offline`），任一红即停。
 
 ## 架构
 

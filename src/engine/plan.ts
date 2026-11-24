@@ -376,7 +376,13 @@ export class TaskPlan {
 
   static load(p = ".task_state.json"): TaskPlan | null {
     if (!fs.existsSync(p)) return null;
-    const d = JSON.parse(fs.readFileSync(p, "utf-8")) as PlanFile;
+    let d: PlanFile;
+    try {
+      d = JSON.parse(fs.readFileSync(p, "utf-8")) as PlanFile;
+    } catch (e) {
+      // 磁盘上的计划是 checkpoint：坏了要点名文件，不能把裸 JSON.parse 栈抛给用户。
+      throw new Error(`plan file ${p} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
     const plan = new TaskPlan(d.goal, d.subgoals, p, d.slots ?? null);
     plan.subgoals = d.subgoals;   // disk is authoritative: verbatim, no re-filtering
     plan.path = p;

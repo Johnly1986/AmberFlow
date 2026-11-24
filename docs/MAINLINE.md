@@ -79,7 +79,9 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 |---|---|---|---|
 | **① 引擎入口** | `bin/amber.mjs` → `src/cli/main.ts` → `src/cli/registry.ts`（12 命令 + help/version/completion） | 当前部分 handler 经 `ctx.runEntry` 子进程转交旧入口（12 个调用点） | 新增命令只改 registry + handler + help-map；不新增第二命令表 |
 | **② 宿主集成** | `integrations/dsh-bridge/*`；`amber session` 长驻子进程 | **进程边界是契约**：bridge 只拼 CLI/解析 JSON/投影摘要（called, not embedded），spawn 是有意设计 | 不改 `package.json` `exports["."]`（= DSH 插件安装门）；`src/app/app-runner.ts` 路径本身是桥契约（checkout 探测 + spawn），**不得移动/改名**（A1 起它是 facade：运行面在 app-runner-types/policy/tool-step/declared，路径与入口 guard 不变） |
-| **③ 开发/创作脚本** | `npm start` / `apps` / `learn` / `test` / `plan-cli` / `tools/*` / MV3 extension | 非产品主线 | 新旗标只进 registry；**extension 已删除（P2-2.3）**，picker-server deprecated 一版后评估移除 |
+| **③ 开发/创作脚本** | `npm start` / `apps` / `learn` / `test` / `plan-cli` / `tools/*` / MV3 extension | 非产品主线 | 新旗标只进 registry；**extension 已删除（P2-2.3）**；picker-server 2.0.x 保留、2.1.0 移除（期间不新增消费者） |
+
+> **会话面闭集单源**（session 请求 op / act op / drive 的 cmd·driver / max_steps 与 idle 界）：唯一数据表 = `src/support/session-contract.ts`，桥侧唯一投影 = 生成物 `integrations/dsh-bridge/src/session-contract.generated.ts`（`tools/session-contract-gen.ts --check` 校验过期，并与引擎契约 `src/app/session-runtime-contract.ts` 逐值交叉校验；桥不手抄闭集）。
 
 **进程内化**（handler 不再 spawn）：**延后**，不在 P0/P1 承诺。任何内进程化必须保持退出码矩阵与 JSON envelope 逐字节一致，并先解决 provider 装配的 run-scoped 注入（禁模块级全局）。
 
@@ -112,7 +114,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 **8 个确定性场景**（成功/停因/遮挡/precondition/upload/scroll/range/actionable-ancestor-retarget） | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
 | 编排等价 lane | `tools/verify-run-execution.ts`、`tools/golden/run-execution/**`、`fixtures/engine/run-execution/**`（§6.10） | 非门禁（需 chromium）；四源（flow/declared-flow/plan/suite）canonical JSON，rules-only 零模型、外部请求 0 | 稳定 | 内核/适配器迁移前后对比；基线在干净 HEAD 副本 `--record` 两次一致才入库 |
 
-> 非门禁证据 lane 清单：抽取面 `verify:offline`、运行期 `verify:runtime:offline`、四源编排 `verify:run-execution`、人工话术 `golden-manual`，以及会话/动作/决策面 `verify:act-lock` / `verify:session-range` / `verify:session-drive` / `verify:poolless-actions` / `verify:dedup-controls` / `verify:frame-budget` / `verify:app-stop-context` / `verify:decision-accounting` / `verify:decision-ask-parity`、失败路径/校验 `verify:record-failure` / `verify:ctx-validate` / `verify:rehydrate-rescan`；聚合 `npm run verify:lanes` 顺序跑其中 15 条（不含较重的 `verify:runtime:offline`）。脚本清单唯一出处 = `package.json`，本文不抄全表。
+> 非门禁证据 lane 清单：抽取面 `verify:offline`、运行期 `verify:runtime:offline`、四源编排 `verify:run-execution`、人工话术 `golden-manual`，以及会话/动作/决策面 `verify:act-lock` / `verify:session-range` / `verify:session-drive` / `verify:poolless-actions` / `verify:dedup-controls` / `verify:frame-budget` / `verify:app-stop-context` / `verify:decision-accounting` / `verify:decision-ask-parity`、`verify:decision-endpoint-parity` / `verify:run-view-parity`，失败路径/校验 `verify:record-failure` / `verify:ctx-validate` / `verify:rehydrate-rescan`；聚合 `npm run verify:lanes` 顺序跑其中 17 条（不含较重的 `verify:runtime:offline`）。脚本清单唯一出处 = `package.json`，本文不抄全表。
 
 > 池外回退面补全（bugfix，受本节「候选/目标解析恢复链」冻结约束）：`actOnce` 的 `el === null` 分支按 op 分派（fill/select/hover 走各自 locator 原语；不支持的 op 结构化 `action_unsupported`，绝不退化成点击），A3 `_domFallbackResolve` 合成行补 `name`/`href` 投影——这是**补全既有回退面**，不新增第 5 条解析链；验证 lane = `tools/verify-poolless-actions.ts` + `fixtures/engine/poolless/`（非门禁）。
 

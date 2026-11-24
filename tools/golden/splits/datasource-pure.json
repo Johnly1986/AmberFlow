@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "datasource-pure",
-  "note": "datasource 稳定纯区拆分：83 个顶层符号逐字节搬迁（types 13 / transport 18 / extract-ops 42 / source-validate 9 / datasource 1；hash 全部与搬移前一致）。非纯搬移：validateSource（151 行 > 新函数硬上限 150，拆出同文件私有 helper validateCliTransport，检查顺序与错误文案不变）；P2-2.2b-0（BACKLOG #2 扫描解耦）有意修改 main/renderAndSnapshot/runSource 的签名与实现（扫描器改为显式注入 scan 参数、移除对 engine extraction 的扫描依赖），三符号移出纯搬移 manifest，变更由该批 PR 说明承载；其余 6 个符号保持纯搬移 hash。；W3-4：selectIndex 去隐式 [\"price\"] 排序缺省，改配置驱动，非纯搬移",
+  "note": "datasource 稳定纯区拆分：83 个顶层符号逐字节搬迁（types 13 / transport 18 / extract-ops 42 / source-validate 9 / datasource 1；hash 全部与搬移前一致）。非纯搬移：validateSource（151 行 > 新函数硬上限 150，拆出同文件私有 helper validateCliTransport，检查顺序与错误文案不变）；P2-2.2b-0（BACKLOG #2 扫描解耦）有意修改 main/renderAndSnapshot/runSource 的签名与实现（扫描器改为显式注入 scan 参数、移除对 engine extraction 的扫描依赖），三符号移出纯搬移 manifest，变更由该批 PR 说明承载；其余 6 个符号保持纯搬移 hash。；W3-4：selectIndex 去隐式 [\"price\"] 排序缺省，改配置驱动，非纯搬移；QW：jsonInScript 页内嵌 JSON 解析加 try（坏 JSON 转 ValueError 点名变量）、dateParams 去冗余 as any（可选链 + || 语义保持），两符号非纯搬移移出 manifest",
   "files": {
     "src/data/extract-ops.ts": {
       "symbols": {
@@ -10,7 +10,6 @@
         "countRows": "0eb95bf86d007271a7fdb1976ef4d9a8a37115c1ceef03693c83842a3122b997",
         "DATE_EXPRS": "5cc31f3ad24f7d1d3cd2ed653a3c38af42b5573cc8af56e6ea04d0e8d89103a0",
         "dateExpr": "c98cae142a6a52f4e4d8ec0d3864307d9ab190ae2a75b73eb09eb2a4e0ca4387",
-        "dateParams": "7c4b3eeebdf6a9dc1c77d622b16e027b96b4bd0c46383d276bf517696e5c39a1",
         "dateToEpochDay": "47628d2697f33df506edd8c7159ecc2c8232755478610530e13064c755ad28bd",
         "defaultDates": "6df6de979e53698a8a778046cf567723c86cf9c32e0f1c614038d83183e81088",
         "defaultDatesSlotNames": "73bf12825c12ae7e9830e14db2bf300c19ebd0007b6b6d1cbfc706fa7e4be37b",
@@ -25,7 +24,6 @@
         "INDEX": "fb29c7a8614e33e1ee85559d79cdf75895ae2c4f996299e03608b58c4757989c",
         "inWindow": "e7798fa692421875ec352efe994e6bd497b4af26c8dab7463de0d7a13eadb4a7",
         "isoDateOrThrow": "cf489ad677dab085e7b80d359d91b8177129262d58e0780b1f578e82c3386586",
-        "jsonInScript": "5ad5e38a6c532203f68c972ef326f51d5d6140fe5e169df0f6074b918456c97b",
         "jsonStdout": "0786e6a7bbb205c85b2314d91589d68b9a13ca6538faecb41206218e70b20028",
         "linesRegex": "8e852553a3963e48f85cd5524fe474df449316b6d317bbba31c15a5c6e0c4ea4",
         "matches": "c92451d9872ddd76d06f3d1587c74029a781dc4796dd30add60b4dddf4a52cba",
