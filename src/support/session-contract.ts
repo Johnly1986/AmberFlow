@@ -231,7 +231,12 @@ export const SESSION_EVIDENCE_CAP_TABLE = {
     labelMaxChars: 40,
     whyMaxChars: 40,
     hintShapeMaxChars: 32,
-    note: "落空判别证据（候选/near/rejected 三组各自限行）",
+    /**
+     * `shape_problem.kind` 的**唯一闭集**（桥按它过滤：引擎新增类别必须同步这里，
+     * 否则桥面会静默丢掉诊断，变成「引擎说写法可疑、Agent 看不到原因」）。
+     */
+    shapeProblemKinds: ["tag-plus-text", "role-word-plus-text", "selector-syntax", "css-attr-operator"],
+    note: "落空判别证据（候选/near/rejected 三组各自限行；shape_problem.kind 按闭集过滤）",
   },
   wide: {
     bridgeKey: "wide",

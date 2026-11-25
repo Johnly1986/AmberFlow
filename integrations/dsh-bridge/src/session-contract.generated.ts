@@ -156,6 +156,9 @@ export const BRIDGE_EVIDENCE_AMBIGUITY_CAPS = {
 /** miss 证据块白名单（引擎给了才出现）。 */
 export const BRIDGE_EVIDENCE_MISS_FIELDS = ["target", "pool_size", "hint_shape", "hint_len", "settle_timed_out", "settle_waited_ms", "rescan", "candidates", "near", "rejected", "shape_problem"] as const;
 
+/** miss 证据块 shapeProblemKinds 的闭集。 */
+export const BRIDGE_EVIDENCE_MISS_SHAPEPROBLEMKINDS = ["tag-plus-text", "role-word-plus-text", "selector-syntax", "css-attr-operator"] as const;
+
 /** miss 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_MISS_FIELDS）。 */
 export const BRIDGE_EVIDENCE_MISS_CAPS = {
   candidatesMax: 3,

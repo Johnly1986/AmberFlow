@@ -29,9 +29,9 @@ import {
   BRIDGE_SESSION_CONCURRENCY, BRIDGE_SESSION_IDLE, BRIDGE_SESSION_OPS, BRIDGE_SESSION_TIMEOUTS,
   BRIDGE_TAB_ACTIONS, BRIDGE_WINDOW_MODES,
   type BridgeAmbiguousMode, type BridgeDriveCommand, type BridgeDriveDriver, type BridgeReadWhat,
-  type BridgeScrollTarget, type BridgeTabAction, type BridgeWindowMode,
-} from './session-contract.generated.ts'
+  type BridgeScrollTarget, type BridgeTabAction, type BridgeWindowMode } from './session-contract.generated.ts'
 import {
+  BRIDGE_EVIDENCE_MISS_SHAPEPROBLEMKINDS,
   BRIDGE_EVIDENCE_AMBIGUITY_CAPS,
   BRIDGE_EVIDENCE_MISS_CAPS,
   BRIDGE_EVIDENCE_WIDE_CAPS,
@@ -1653,7 +1653,9 @@ export class SessionManager {
     if (isObj(shape)) {
       const out_shape: Record<string, unknown> = {}
       const kind = shape['kind']
-      for (const k of ['tag-plus-text', 'role-word-plus-text', 'selector-syntax'] as const) {
+      // 闭集来自契约表（`SESSION_EVIDENCE_CAP_TABLE.miss.shapeProblemKinds`）的生成物——
+      // 引擎新增类别时这里自动跟随，不会静默丢诊断。
+      for (const k of BRIDGE_EVIDENCE_MISS_SHAPEPROBLEMKINDS) {
         if (kind === k) out_shape['kind'] = k
       }
       if (typeof shape['reason'] === 'string' && shape['reason'] !== '') out_shape['reason'] = clip(shape['reason'], 200)

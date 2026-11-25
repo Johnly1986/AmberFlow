@@ -583,6 +583,19 @@ function checkElementViewFields(): string[] {
     problems.push(`字段合同：address:true 必须恰好是 hint_candidates（实际 ${JSON.stringify(addressFields)}）——地址只来自自证 hint 候选`);
   }
 
+  // ③b. `shape_problem.kind` 闭集必须与引擎侧 union 一致（新增类别忘了同步表 = 桥面静默丢诊断）。
+  const declaredKinds = SESSION_EVIDENCE_CAP_TABLE.miss.shapeProblemKinds;
+  const hintSrc = fs.readFileSync(path.join(REPO, "src/engine/hint.ts"), "utf-8");
+  const unionBlock = hintSrc.split("export type HintShapeProblemKind")[1]?.split(";")[0] ?? "";
+  for (const k of declaredKinds) {
+    if (!unionBlock.includes(`"${k}"`)) problems.push(`证据块 miss.shapeProblemKinds 含 ${JSON.stringify(k)}，但 HintShapeProblemKind union 里没有`);
+  }
+  for (const m of unionBlock.matchAll(/"([a-z-]+)"/g)) {
+    if (!(declaredKinds as readonly string[]).includes(m[1]!)) {
+      problems.push(`HintShapeProblemKind 有 ${JSON.stringify(m[1])}，但 miss.shapeProblemKinds 未登记（桥面会丢掉该类别）`);
+    }
+  }
+
   // ④ 出现面自洽：只有一面产出的键不能声称另一面有；桥侧派生位（截断标记等）要显式登记。
   for (const row of SESSION_ELEMENT_VIEW_FIELDS) {
     const only = row.engineOnly ?? [];
@@ -676,6 +689,17 @@ function evidenceCapsSource(): string {
     const caps: Entries = Object.entries(table)
       .filter(([key, value]) => key !== "fields" && key !== "bridgeKey" && key !== "note" && typeof value === "number")
       .map(([key, value]) => [key, value as number] as const);
+    // 闭集列（字符串数组，如 shape_problem.kind）：投影成 tuple，桥按它过滤——引擎新增
+    // 类别必须同步契约表，否则桥面会静默丢掉该类别（诊断变哑）。
+    for (const [key, value] of Object.entries(table)) {
+      if (!Array.isArray(value)) continue;
+      if (key === "fields" || key === "strategies" || key === "probes") continue;  // 已由各自的 tuple 覆盖
+      blocks.push(tupleSource(
+        `BRIDGE_EVIDENCE_${name.toUpperCase()}_${key.toUpperCase()}`,
+        value as readonly string[],
+        `${name} 证据块 ${key} 的闭集。`,
+      ));
+    }
     if (caps.length === 0) continue; // 无字符/条数界的块只投影白名单（像素/数值类不受界）
     blocks.push(objectSource(
       `BRIDGE_EVIDENCE_${name.toUpperCase()}_CAPS`,
