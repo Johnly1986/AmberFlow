@@ -44,6 +44,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `ctx.scrollList("page")` 语义不动）；`not_scrollable` 的建议也改成会话面可执行的
   `act scroll target=document`（此前推荐 `ctx.scrollList`，会话面没有 ctx）。
 
+- **死页不再被吞成空结果**：会话页被关闭后，`observe` 曾返回 `ok:true` + `counts` 全 0、
+  `snapshot` 写出全空文件、`read` 返回 `value:null`——调用方无法区分「页面真的没内容」与
+  「上下文已经没了」（只有 `goto`/`act` 才会抛 `Target page... closed`）。现在 `dispatch` 前置
+  守卫：除 `close` 外一律按既有 `browser_dead` 收口并发 `session_end`，与运行期死亡的收口路径
+  完全一致（不新增码、不新增分支）。
+
 - **桥面 `shape_problem.kind` 闭集改由契约表生成**：桥此前硬编码三个类别，本批新增的
   `css-attr-operator` 会被静默过滤掉（引擎说写法可疑、Agent 看不到原因）。闭集移到
   `SESSION_EVIDENCE_CAP_TABLE.miss.shapeProblemKinds` 并生成

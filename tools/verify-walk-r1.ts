@@ -252,6 +252,47 @@ function script(origin: string): { steps: Step[]; index: Record<string, number> 
   return { steps, index };
 }
 
+/* ------------------------------------------------------------------ A7：死页不得被吞成空结果 */
+
+/**
+ * A7 走**进程内**会话（不是 CLI 子进程）：需要先拿到 page 再把它关掉，请求面没有"关页"原语。
+ * 断言的是诚实性：page 关闭后 `observe` / `snapshot` / `read` 必须报 `browser_dead`，
+ * 而不是 `ok:true` + 空元素 / 全空 snapshot / `value:null`（死页信号被吞成"页面没内容"）。
+ */
+async function assertDeadPageHonest(): Promise<void> {
+  const { SessionRuntime } = await import("../src/app/session-runtime.ts");
+  const { installDecisionProvider } = await import("../src/model/decision-provider.ts");
+  const { installLayaRuntime } = await import("../src/model/model.ts");
+  installLayaRuntime(null);
+  installDecisionProvider(null);
+  const fixture = await startFixtureServer();
+  const out: Array<Record<string, unknown>> = [];
+  const sink = { respond: (obj: Record<string, unknown>) => { out.push(obj); }, log: () => { /* quiet */ } };
+  const rt = new SessionRuntime({
+    url: `${fixture.origin}/std`, hosts: ["127.0.0.1"], headful: false, quiet: true,
+  } as never, sink as never, "walk-r1-dead");
+  try {
+    await rt.start();
+    const page = await (rt as unknown as { page(): Promise<{ close(): Promise<void> }> }).page();
+    await page.close();
+    for (const [key, request] of [
+      ["observe", { id: 90, type: "observe", max: 20 }],
+      ["snapshot", { id: 91, type: "snapshot" }],
+      ["read", { id: 92, type: "read", selector: "body", what: "text" }],
+    ] as const) {
+      out.length = 0;
+      await rt.handleLine(JSON.stringify(request));
+      const r = out.find((o) => o["id"] === request.id);
+      check(r !== undefined, `A7 ${key}：死页后应有响应（不是静默无输出）`);
+      check(r?.["ok"] === false, `A7 ${key}：死页后不得回 ok:true（拿到 ${JSON.stringify(r?.["ok"])}，完整=${JSON.stringify(r).slice(0, 160)}）`);
+      check(r?.["code"] === "browser_dead", `A7 ${key}：死页应报 browser_dead（拿到 ${JSON.stringify(r?.["code"])}）`);
+    }
+  } finally {
+    try { await rt.handleLine(JSON.stringify({ id: 99, type: "close" })); } catch { /* 已死 */ }
+    await fixture.close();
+  }
+}
+
 /* ------------------------------------------------------------------ A1/A2/A5/A6 断言 */
 
 function assertSession(run: SessionRun, index: Record<string, number>): void {
@@ -550,6 +591,7 @@ async function main(): Promise<number> {
     assertSession(run, index);
     await assertHeadfulWithoutDisplay(dir);
     await assertRuntimeDeath(dir, server.origin);
+    await assertDeadPageHonest();
   } catch (e) {
     problems.push(`lane 抛错：${e instanceof Error ? e.message : String(e)}`);
   } finally {
@@ -566,7 +608,7 @@ async function main(): Promise<number> {
   assert.equal(true, true);
   if (JSON_OUT) console.log(JSON.stringify({ ok: true, problems: [] }));
   else console.log("verify-walk-r1: OK — A1 不变量/四场景、A2 双柄补事实+单柄原文字节不变、A3 四操作符+~=反例、"
-    + "A4 无显示器 config_error 且会话存活+运行期 browser_dead、A5 九例形状+三键、A6 programmatic 回退+page 合成、B15 at_bottom 全部对上");
+    + "A4 无显示器 config_error 且会话存活+运行期 browser_dead、A5 九例形状+三键、A6 programmatic 回退+page 合成、B15 at_bottom、A7 死页不吞成空结果 全部对上");
   return 0;
 }
 

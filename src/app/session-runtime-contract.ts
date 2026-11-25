@@ -258,6 +258,41 @@ export function errMsg(e: unknown): string {
 }
 
 /** 浏览器/页面已不可复用（唯一的会话级升级判据；其余失败都只是单行失败）。 */
+/**
+ * 会话当前页**已经关掉**时的判别（`null` = 还活着）。
+ *
+ * 为什么要前置判：页面被关闭后 `observe` / `snapshot` / `read` 这些面在底层会**静默拿到空**——
+ * `observe` 返回 `ok:true` + `counts` 全 0、`snapshot` 写出全空的文件、`read` 返回 `value:null`，
+ * 调用方无法区分「页面真的没内容」与「页面/上下文已经没了」。只有 `goto`/`act` 才会抛
+ * `Target page... closed`。死页信号被吞成空结果是诚实性缺口，所以在这里统一收口成
+ * `browser_dead`（与运行期死亡的既有码一致，不新增码）。
+ *
+ * `isClosed()` 不可用或抛错的页面按关闭处理（绝不对关掉的页做读数）。
+ */
+export function pageClosedReason(session: { page?: unknown } | null): string | null {
+  if (session === null || session === undefined) return null;
+  const page = session.page as { isClosed?: () => boolean } | undefined;
+  if (page === undefined || page === null) return null;
+  try {
+    return page.isClosed?.() === true ? "the session page has been closed (no tab left to read)" : null;
+  } catch {
+    return "the session page is no longer reachable (isClosed() threw)";
+  }
+}
+
+/**
+ * 死页前置守卫：会话当前页已关闭时，除 `close` 外的请求一律按既有 `browser_dead` 收口。
+ *
+ * 抛出的消息**刻意**包含 `Target page, context or browser has been closed`——它是
+ * `isDeadPageError` 的判据串，于是 `handleLine` 的既有分支会同时发出 `browser_dead` 响应与
+ * `session_end`（与运行期死亡的收口路径完全一致，不新增码、不新增分支）。
+ */
+export function assertPageAlive(session: { page?: unknown } | null, reqType: unknown): void {
+  if (reqType === "close") return;
+  const reason = pageClosedReason(session);
+  if (reason !== null) throw new Error(`Target page, context or browser has been closed — ${reason}`);
+}
+
 export function isDeadPageError(msg: string): boolean {
   return /Target page, context or browser has been closed|Target closed|browser has been closed|Browser has been closed|Session closed|Page closed|has been disconnected/i.test(msg);
 }

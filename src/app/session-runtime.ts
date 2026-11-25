@@ -46,7 +46,7 @@ import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
 
 import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, closedSetReasonSuffix, displayHow, doRead, doSignal, doWaitFor, executionStateResponse, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, rowsSettled, rowsSettledDual, shapeProblemResponse } from "./session-runtime-evidence.ts";
-import { browserStartupProblem, FLAP_HEAL_SETTLE_MS, landedNavigationFacts, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
+import { assertPageAlive, browserStartupProblem, FLAP_HEAL_SETTLE_MS, landedNavigationFacts, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
 export * from "./session-runtime-contract.ts";
 export { runSession } from "./session-runtime-entry.ts";
 
@@ -349,6 +349,7 @@ export class SessionRuntime {
   }
 
   private async dispatch(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    assertPageAlive(this.holder.session, req["type"]);
     switch (req["type"]) {
       case "open": return this.doOpen(req);
       case "goto": return this.doGoto(req);
