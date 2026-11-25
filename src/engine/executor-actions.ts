@@ -487,6 +487,8 @@ export async function _scrollWithLoc(_mw: BrowserMiddleware, _page: AnyPage, loc
       // A6：非标准滚动器（overflow:hidden + JS 驱动 scrollTop）的回退策略事实——标准路径
       // 不带这个键（键集逐字节不变）。B15/at_bottom 只在真的到底时出现。
       ...(box["programmatic"] === true ? { strategy: "programmatic" as const } : {}),
+      // 文档自身不可滚、回退到内部容器时如实带回用了哪个容器（标准路径不出现该键）。
+      ...(typeof box["container"] === "string" ? { container: String(box["container"]) } : {}),
       ...scrollAtBottom(scrollTop, scrollHeight, clientHeight),
     };
   }
@@ -529,7 +531,10 @@ export async function scrollDocument(_mw: BrowserMiddleware, page: AnyPage, to: 
             scrollingElement?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
             documentElement?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
             body?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
+            /** 回退路径要遍历文档（页内执行，类型只需够用）。 */
+            querySelectorAll?: (sel: string) => ArrayLike<unknown>;
           } | null;
+          getComputedStyle?: (el: any) => { overflowY?: string; overflowX?: string };
         };
         const doc = g.document;
         if (!doc) return { ok: false, reason: "no document" };
@@ -545,8 +550,43 @@ export async function scrollDocument(_mw: BrowserMiddleware, page: AnyPage, to: 
         const maxY = Math.max(0, scrollHeight - clientHeight);
         const maxX = Math.max(0, scrollWidth - clientWidth);
         if (maxY <= 2 && maxX <= 2) {
-          return { ok: false, moved: false, scrollTop: before, scrollHeight, clientHeight,
-            reason: `document is not scrollable (scrollHeight=${scrollHeight} <= clientHeight=${clientHeight})` };
+          // 页面自身不可滚（`scrollHeight<=clientHeight`）但内容可能装在内部滚动容器里（常见于
+          // 「整页固定 + 主面板 JS 滚动」的布局）。这里**回退**到页面上内容量最大的可滚容器，
+          // 并如实带回用了哪一个——否则调用方只能靠"恰好在该容器里的某个元素"做锚点。
+          // 判据零站点知识：文档内 `scrollHeight-clientHeight` 最大的那个可滚元素。
+          const all = doc.querySelectorAll ? Array.prototype.slice.call(doc.querySelectorAll("*"), 0, 4000) : [];
+          let best = null;
+          let bestOverflow = 2;
+          for (const el of all) {
+            const cs = g.getComputedStyle ? g.getComputedStyle(el) : null;
+            if (!cs) continue;
+            const oy = String(cs.overflowY || "");
+            if (oy !== "auto" && oy !== "scroll" && oy !== "overlay" && oy !== "hidden") continue;
+            const over = (Number(el.scrollHeight) || 0) - (Number(el.clientHeight) || 0);
+            if (over > bestOverflow) { best = el; bestOverflow = over; }
+          }
+          if (best === null) {
+            return { ok: false, moved: false, scrollTop: before, scrollHeight, clientHeight,
+              reason: `document is not scrollable (scrollHeight=${scrollHeight} <= clientHeight=${clientHeight}) `
+                + "and no inner scroll container with overflowing content was found "
+                + "(checked overflow:auto/scroll/overlay/hidden descendants)" };
+          }
+          const cBefore = Number(best.scrollTop) || 0;
+          const cMax = Math.max(0, (Number(best.scrollHeight) || 0) - (Number(best.clientHeight) || 0));
+          let cNext = cBefore;
+          if (typeof arg.by === "number") cNext = cBefore + arg.by;
+          else if (arg.to === "bottom") cNext = cMax;
+          else if (arg.to === "top") cNext = 0;
+          else cNext = Math.min(cMax, cBefore + Math.max(1, Math.round((Number(best.clientHeight) || 0) * 0.9)));
+          best.scrollTop = Math.max(0, Math.min(cMax, cNext));
+          const tag = String(best.tagName || "").toLowerCase();
+          const id = String(best.id || "");
+          const cls = String(best.className || "").split(/\s+/).filter(Boolean).slice(0, 3).join(".");
+          return {
+            ok: true, before: cBefore, scrollTop: Number(best.scrollTop) || 0,
+            scrollHeight: Number(best.scrollHeight) || 0, clientHeight: Number(best.clientHeight) || 0,
+            container: id !== "" ? `${tag}#${id}` : `${tag}${cls === "" ? "" : "." + cls}`, fallback: true,
+          };
         }
         let next = before;
         if (typeof arg.by === "number") next = before + arg.by;
@@ -583,6 +623,8 @@ export async function scrollDocument(_mw: BrowserMiddleware, page: AnyPage, to: 
       // A6：非标准滚动器（overflow:hidden + JS 驱动 scrollTop）的回退策略事实——标准路径
       // 不带这个键（键集逐字节不变）。B15/at_bottom 只在真的到底时出现。
       ...(box["programmatic"] === true ? { strategy: "programmatic" as const } : {}),
+      // 文档自身不可滚、回退到内部容器时如实带回用了哪个容器（标准路径不出现该键）。
+      ...(typeof box["container"] === "string" ? { container: String(box["container"]) } : {}),
       ...scrollAtBottom(scrollTop, scrollHeight, clientHeight),
     };
   }

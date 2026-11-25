@@ -44,6 +44,13 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `ctx.scrollList("page")` 语义不动）；`not_scrollable` 的建议也改成会话面可执行的
   `act scroll target=document`（此前推荐 `ctx.scrollList`，会话面没有 ctx）。
 
+- **文档不可滚时回退到内部滚动容器**：整页固定、内容装在内部 `overflow` 容器里的布局
+  （「主面板 JS 滚动」的常见实现）此前 `scroll target=document/page` 直接报
+  `not_scrollable (scrollHeight <= clientHeight)`——调用方只能靠"恰好在该容器里的某个元素"
+  做锚点。现在文档自身不可滚时回退到**文档内内容溢出最大的可滚容器**
+  （`overflow:auto/scroll/overlay/hidden` 且 `scrollHeight-clientHeight>2`，零站点知识），
+  并 additive 回传 `container:"tag#id"`（标准路径不带该键），`moved`/`delta` 仍实测。
+
 - **`headful:true` 在桥下可用了**：桥起引擎子进程时 env 走白名单（`ENV_BASE`），
   `DISPLAY`/`XAUTHORITY`/`WAYLAND_DISPLAY` 不在其中 → 有头请求永远报
   `no usable XServer/DISPLAY`，且用户在外层 `export DISPLAY` 也无效（那是桥自己的环境，

@@ -80,6 +80,10 @@ ${PAGE_TAIL}`;
 /** A6：会话面 `target=page` 合成目标（整页可滚）。 */
 const TALL_DOC = `${PAGE_HEAD}<div style="height:3000px">tall</div>${PAGE_TAIL}`;
 
+
+/** A8/R2-SCROLL：文档自身不可滚，内容装在内层滚动容器里（`overflow:hidden` 的 body + 内层 auto）。 */
+const INNER_SCROLL = `${PAGE_HEAD}<style>html,body{height:100%;margin:0;overflow:hidden}#panel{height:600px;overflow:auto}#deep{height:3000px}</style><div id="panel"><div id="deep">tall</div></div>${PAGE_TAIL}`;
+
 const ROUTES: Record<string, { body?: string; redirect?: string }> = {
   "/strong": { body: STRONG_WEAK },
   "/dup": { body: DUP_SAME },
@@ -90,6 +94,7 @@ const ROUTES: Record<string, { body?: string; redirect?: string }> = {
   "/hidden": { body: HIDDEN_SCROLL },
   "/std": { body: STD_SCROLL },
   "/tall": { body: TALL_DOC },
+  "/inner-scroll": { body: INNER_SCROLL },
   // A5：丢段（实体段清空）与"追加 query 的合法重定向"两条对照夹具。
   "/place/X/data=!4m8": { redirect: "/place//@1.3,103.8,11z" },
   "/place//@1.3,103.8,11z": { body: SINGLE_BUTTON },
@@ -247,6 +252,9 @@ function script(origin: string): { steps: Step[]; index: Record<string, number> 
   add("b15-std-again", { type: "act", op: "scroll", target: "#std", to: "bottom" });
   add("a6-open-tall", { type: "open", url: `${origin}/tall` });
   add("a6-page", { type: "act", op: "scroll", target: "page", to: "bottom" });
+  // ---- A8：文档不可滚时回退到内部滚动容器 ---------------------------------
+  add("a8-open", { type: "open", url: `${origin}/inner-scroll` });
+  add("a8-doc", { type: "act", op: "scroll", target: "document", to: "bottom" });
 
   add("close", { type: "close" });
   return { steps, index };
@@ -385,6 +393,14 @@ function assertSession(run: SessionRun, index: Record<string, number>): void {
     const keys = Object.keys(okNav).sort().join(",");
     check(keys === "hosts,id,ok,title,type,url", `A5 形状保留的合法重定向键集应逐字节不变（拿到 ${keys}）`);
     check(!("reason" in okNav), "A5 形状保留时不得追加 reason");
+  }
+
+  /* A8：文档不可滚 → 回退内部容器，并如实带回用了哪个容器（标准路径不带 container） */
+  const a8 = resp(run, index["a8-doc"]!, "a8-doc");
+  if (a8 !== undefined) {
+    check(a8["ok"] === true, `A8 文档不可滚时应回退内部容器（code=${JSON.stringify(a8["code"])} reason=${JSON.stringify(String(a8["reason"] ?? "").slice(0, 200))}）`);
+    check(a8["moved"] === true, `A8 回退滚动应真的移动（moved=${JSON.stringify(a8["moved"])}）`);
+    check(a8["container"] === "div#panel", `A8 应如实带回回退用的容器（拿到 ${JSON.stringify(a8["container"])}）`);
   }
 
   /* A6：programmatic 回退 / 标准滚动器不带 strategy / page 是合成目标 */
@@ -608,7 +624,7 @@ async function main(): Promise<number> {
   assert.equal(true, true);
   if (JSON_OUT) console.log(JSON.stringify({ ok: true, problems: [] }));
   else console.log("verify-walk-r1: OK — A1 不变量/四场景、A2 双柄补事实+单柄原文字节不变、A3 四操作符+~=反例、"
-    + "A4 无显示器 config_error 且会话存活+运行期 browser_dead、A5 九例形状+三键、A6 programmatic 回退+page 合成、B15 at_bottom、A7 死页不吞成空结果 全部对上");
+    + "A4 无显示器 config_error 且会话存活+运行期 browser_dead、A5 九例形状+三键、A6 programmatic 回退+page 合成、B15 at_bottom、A7 死页不吞成空结果、A8 文档不可滚回退内部容器 全部对上");
   return 0;
 }
 

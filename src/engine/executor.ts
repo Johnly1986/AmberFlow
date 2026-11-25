@@ -268,6 +268,11 @@ export interface ScrollEvidence {
    * scrollHeight - 2`）。几何可读且到底才出现；"没动"与"到底了"因此可区分。
    */
   at_bottom?: true;
+  /**
+   * 文档自身不可滚时**回退到内部滚动容器**的事实：用了哪个容器（`tag.class`，≤3 类）。
+   * 只在回退路径出现——标准路径（文档自身可滚）不带该键，键集逐字节不变。
+   */
+  container?: string;
   stopCode?: string;
   reason?: string;
 }

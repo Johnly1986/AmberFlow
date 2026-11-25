@@ -93,10 +93,14 @@ export function ambiguityResponse(amb: AmbiguityView | undefined): Record<string
  * 祖先上写 scrollTop（那类面板自己的滚动机制）；`at_bottom:true` = 已到底，用来把
  * `moved:false` 的两种含义（没动 / 到底了）分开。标准滚动路径两者都不出现 ⇒ 键集不变。
  */
-export function scrollStrategyFacts(out: { strategy?: "programmatic"; at_bottom?: true }): Record<string, unknown> {
+export function scrollStrategyFacts(
+  out: { strategy?: "programmatic"; at_bottom?: true; container?: string },
+): Record<string, unknown> {
   return {
     ...(out.strategy === "programmatic" ? { strategy: "programmatic" as const } : {}),
     ...(out.at_bottom === true ? { at_bottom: true as const } : {}),
+    // 文档自身不可滚、回退到内部容器时用的是哪个容器（标准路径不出现该键）。
+    ...(typeof out.container === "string" && out.container !== "" ? { container: out.container } : {}),
   };
 }
 
