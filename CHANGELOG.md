@@ -4,6 +4,52 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 真实站点走查批（act 歧义口径 / 双柄 range 事实 / CSS 属性形状 / 启动失败分类 / 落地丢段 / 程序化滚动）
+
+> 用引擎 session 面走查一个真实站点任务时暴露的六条卡点。全部是通用能力缺口
+> （无站点知识），逐条都有本地可复现的 fixture 与反证。
+
+- **`act` 的 `ambiguous` 与 `ok` 不再可能同时为真**（**对外响应形状变化**）：此前强档唯一命中、
+  动作已执行时仍可能带 `ambiguous:true`（弱档旁路另有候选），调用方按"没动作"理解却已产生
+  副作用。现在 `ambiguous` 由结果码派生，恒等式 `ambiguous === (code === "target_ambiguous")`。
+  `matched_others` 仍是 advisory（`ok:true` 时照旧回显"池里还有撞词候选"）。
+  桥的人读摘要同步把 advisory 的渲染开关从 `ambiguous` 改成"有没有 `matched_others`"，
+  否则这条提示会从摘要里彻底消失。
+- **耦合双柄滑杆的越界拒绝补事实**：`set_range {value}` 命中多个同形 range 时，reason 现在
+  带 `handles` / `handle_index` 与**各手柄自己的 min/max**（此前只用被命中那一个的 min/max
+  判越界，把"指错了柄"报成"值不合法"）。`readState` 在同一 evaluate 内顺手读兄弟手柄，
+  无额外页面往返。**单柄控件 reason 逐字节不变**。
+- **CSS 属性操作符不再是静默落空**：`[attr*=v]` / `^=` / `$=` / `|=` 的词法把操作符并进
+  属性名（`href*`），永不命中且没有形态诊断。`hintShapeProblem` 新增 `css-attr-operator`
+  类别，reason 说明闭集只有等值与子串两种属性形状，suggestion 给可照抄的改写
+  （`href*=x` → `href~x`）。**`~=` 是闭集合法操作符，不误报**；同时补上 `a[href~="v"]`
+  这种带引号子串形状的去引号（此前值带 `="` 前缀，同样永不命中）。
+- **headful 启动失败归 `config_error` 而不是 `browser_dead`**：无 `DISPLAY` 时 Playwright 抛
+  `browserType.launch: Target page, context or browser has been closed`，此前命中
+  `isDeadPageError` 的正则 → 会话被判定死亡并终结。现在启动期失败（XServer 缺失 / 可执行
+  文件缺失）结构化归 `config_error` + 可行动建议（换 headless 或 `xvfb-run -a`），
+  **会话保持存活**，后续请求仍可换档；运行期浏览器死亡仍是 `browser_dead`。
+- **`goto` 的落地路径形状变化有事实**：站点重定向可能把目标实体丢掉（请求
+  `.../place/X/data=...` → 落地 `.../place//@...`）而 `goto` 仍返回 ok。现在只在**路径形状
+  真的变了**时 additive 回传 `requested_url` / `landed_url` / `landed_path_shape_changed:true`
+  并追加一行复核提示。判据零站点知识：①请求某位非空、落地同位置变空；②请求非空段数多于
+  落地。查询参数变化、尾斜杠、同段数换实体都**不报**（不把合法重定向判成失败）。
+- **程序化滚动容器可滚了**：`overflow:hidden` + `scrollHeight > clientHeight` 的自定义滚动
+  面板此前被判 `not_scrollable`（错误里已标 `programmatically scrollable` 却不给路径）。
+  现在回退到 `scrollTop += delta` 并标 `strategy:"programmatic"`（标准路径不出现该键）。
+- **`scroll` 的 `at_bottom` 事实**：`moved=false` 此前既表"这次没动"也表"到底了"；现在
+  满足 `scrollTop + clientHeight >= scrollHeight - 2` 时 additive 带 `at_bottom:true`。
+- **会话面 `act scroll` 的合成目标加 `page`**：`page` 不是元素池里的名字，此前当 hint 解析会
+  撞出某个 `.page` 容器并报 `not_scrollable`。会话面闭集扩一个 `page`（flow 面
+  `ctx.scrollList("page")` 语义不动）；`not_scrollable` 的建议也改成会话面可执行的
+  `act scroll target=document`（此前推荐 `ctx.scrollList`，会话面没有 ctx）。
+
+测试：新增 lane `verify:walk-r1`（七项断言 + 各自的回退反证），已进 `verify:lanes` 聚合与
+`AGENTS.md` / `docs/MAINLINE.md` 的 lane 清单。文档同批同步：`docs/INTERACTIVE_SESSION.md`
+的歧义回显表（`ambiguous` 只在歧义停时出现、`ok:true` 时 `matched_others` 是 advisory）、
+`act scroll` 的程序化回退/`at_bottom`/会话面 `page` 合成目标、`set_range` 的
+`handle_index`/`peers`/`row_index` 多柄事实。
+
 ## [Unreleased] — 帧门禁同主域免检（iframe 解析面）
 
 > `hosts` 此前在帧解析面是"逐条声明制"：子帧 origin 必须被 `meta.hosts` 的子域包含

@@ -1420,6 +1420,11 @@ function renderSessionResult(value: Record<string, unknown>): string {
       + missLine
       + wideLine
   }
+  /** `matched_others` 的人读形式（歧义停与 advisory 两条渲染共用一份）。 */
+  const otherCandidateLabels = (list: unknown[]): string => list.map((raw) => {
+    const c = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+    return `${String(c.tag ?? '')}${typeof c.class === 'string' && c.class !== '' ? `.${c.class}` : ''} "${String(c.label ?? '')}"`
+  }).join(' | ')
   switch (op) {
     case 'open':
       return `${tag}: ${String(value.url ?? '')}${value.title === undefined ? '' : ` — ${String(value.title)}`}`
@@ -1496,12 +1501,13 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + `\nurl: ${String(value.url ?? '')}`
         + (value.ambiguous === true
           ? `\nambiguous: yes${Array.isArray(value.matched_others) && value.matched_others.length > 0
-            ? ` — other candidates: ${value.matched_others.map((raw) => {
-              const c = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
-              return `${String(c.tag ?? '')}${typeof c.class === 'string' && c.class !== '' ? `.${c.class}` : ''} "${String(c.label ?? '')}"`
-            }).join(' | ')}`
-            : ''}; re-observe and retry with a narrower hint`
-          : '')
+            ? ` — other candidates: ${otherCandidateLabels(value.matched_others)}`
+            : ''}; nothing was executed — re-observe and retry with a narrower hint`
+          // advisory：引擎已执行但池里另有撞词候选（弱档旁路提示，与歧义判决无关）。
+          // 渲染开关是"有没有 matched_others"，不是 ambiguous——后者现在只在零动作歧义停时出现。
+          : (Array.isArray(value.matched_others) && value.matched_others.length > 0
+            ? `\nadvisory: action executed, but other candidates matched too: ${otherCandidateLabels(value.matched_others)} — verify the effect (read back url/title or the done signal)`
+            : ''))
         + (value.hint_suspicious === true
           ? `\nweak-tier hit (${String(value.hint_kind ?? '?')} tier ${String(value.hint_tier ?? '?')}) — the element may be a container/same-prefix node, not the intended target`
           : '')

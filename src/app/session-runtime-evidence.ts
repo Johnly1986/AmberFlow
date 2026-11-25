@@ -18,14 +18,32 @@ import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { Ctx } from "./ctx.ts";
 import { errMsg, intIn, nonEmpty, type SessionActOp } from "./session-runtime-contract.ts";
 
-export function actAmbiguity(target: string, chosenRef: string | null | undefined): Record<string, unknown> {
+/**
+ * 弱档旁路命中事实 → act 响应的歧义/撞词字段（只读回显，不改解析与执行）。
+ *
+ * `ambiguous` 由**本次动作的结果码**派生（`stopCode === "target_ambiguous"`），不读任何
+ * 解析旁路：歧义是"零动作的判决"，已执行的动作不可能是歧义，两者必须由同一个事实回答。
+ * 弱档旁路的 `decided` 不能当判据——它是 `firstIfSame` 的"可互换"结果（同签名重复组返回
+ * 第一个），与 `describeAmbiguity` 的 `decided === null && refs > 1` 是两套语义。
+ * 于是不变量是恒等式：`ambiguous === (code === "target_ambiguous")`，
+ * `ok === true && ambiguous === true` 结构上不可能成立。
+ *
+ * `matched_others`/`hint_suspicious` 只是「池里还有相似候选」的提示，与歧义判决无关，
+ * 照旧回显（仅当旁路记录的 hint 与本次 target 同一串）。旁路有记录时 `ambiguous` 照旧
+ * **恒出现**（false = 不歧义），保持成功响应的键集不因本判据而变。
+ */
+export function actAmbiguity(
+  target: string, chosenRef: string | null | undefined, stopCode: string | undefined,
+): Record<string, unknown> {
+  const ambiguous = stopCode === "target_ambiguous";
   const diag = takeHintMatchOthers();
-  if (diag === null || diag.hint !== target) return {};
+  // 旁路没有本次 target 的记录（如 `#id`/`tag` 形状不写旁路）时，歧义判决仍要如实回显。
+  if (diag === null || diag.hint !== target) return ambiguous ? { ambiguous: true } : {};
   const others = diag.candidates
     .filter((c) => c.ref !== diag.decided && c.ref !== chosenRef)
     .slice(0, 3);
   return {
-    ambiguous: diag.candidates.length > 1,
+    ambiguous,
     ...(others.length === 0
       ? {}
       : {
@@ -66,6 +84,20 @@ export function ambiguityRecord(amb: AmbiguityView | undefined): Record<string, 
 /** A2：失败响应上的 `ambiguity` 证据（只有引擎真的给了才出现；成功响应键集不变）。 */
 export function ambiguityResponse(amb: AmbiguityView | undefined): Record<string, unknown> {
   return amb === undefined ? {} : { ambiguity: amb };
+}
+
+/**
+ * A6/B15：滚动策略与到底事实的 additive 回显（引擎给才有）。
+ *
+ * `strategy:"programmatic"` = 目标没有标准滚动器、引擎回退到"内容溢出但 overflow:hidden"的
+ * 祖先上写 scrollTop（那类面板自己的滚动机制）；`at_bottom:true` = 已到底，用来把
+ * `moved:false` 的两种含义（没动 / 到底了）分开。标准滚动路径两者都不出现 ⇒ 键集不变。
+ */
+export function scrollStrategyFacts(out: { strategy?: "programmatic"; at_bottom?: true }): Record<string, unknown> {
+  return {
+    ...(out.strategy === "programmatic" ? { strategy: "programmatic" as const } : {}),
+    ...(out.at_bottom === true ? { at_bottom: true as const } : {}),
+  };
 }
 
 /**

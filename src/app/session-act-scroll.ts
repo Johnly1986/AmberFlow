@@ -13,7 +13,7 @@ import { sleepMs } from "../support/sleep.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { BrowserMiddleware, AnyPage } from "../engine/executor.ts";
 import { type SessionActOp, type SessionScrollOut } from "./session-runtime-contract.ts";
-import { actAmbiguity, ambiguityRecord, ambiguityResponse, failureScreenshot, missDiagnosticsResponse, observeAfter } from "./session-runtime-evidence.ts";
+import { actAmbiguity, ambiguityRecord, ambiguityResponse, failureScreenshot, missDiagnosticsResponse, observeAfter, scrollStrategyFacts } from "./session-runtime-evidence.ts";
 import type { Ctx } from "./ctx.ts";
 
 /** scroll 分支的会话侧依赖（会话类的窄接口投影，不把整个类拖进模块）。 */
@@ -87,7 +87,7 @@ export async function doActScroll(
   const { page, hosts } = deps;
   const started = deps.startedAt;
   const wantRowsScroll = rowsSel !== undefined;
-  const synthetic = !wantRowsScroll && (!nonEmpty(targetRaw) || isSyntheticScrollTarget(String(targetRaw)));
+  const synthetic = !wantRowsScroll && (!nonEmpty(targetRaw) || isSessionSyntheticScrollTarget(String(targetRaw)));
   // B2：to/by 是**容器滚动**语义（元素自身或最近可滚动祖先，与 ctx.scrollList 同一条实现
   // `_scrollWithLoc`；找不到可滚动容器 = not_scrollable，不静默无操作）。不给 to/by =
   // 滚入视口语义，moved/delta 由引擎实测。
@@ -164,7 +164,7 @@ export async function doActScroll(
     : await deps.mw().actOnce(page, String(targetRaw), "scroll", null, ambiguousMode,
       wantsContainer ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) } : undefined,
       { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
-  const scrollAmb = synthetic ? {} : actAmbiguity(String(targetRaw), out.ref ?? null);
+  const scrollAmb = synthetic ? {} : actAmbiguity(String(targetRaw), out.ref ?? null, out.stopCode);
   // A2：只有元素 scroll（actOnce 分支）可能带歧义证据；合成目标走 scrollDocument，没有该键。
   const scrollAmbiguity: AmbiguityView | undefined = out.ambiguity;
   const scrollTarget = nonEmpty(targetRaw) ? String(targetRaw) : "document";
@@ -174,6 +174,7 @@ export async function doActScroll(
   const moved = typeof out.moved === "boolean" ? out.moved : undefined;
   const delta = typeof out.delta === "number" ? out.delta : undefined;
   const scrollTop = typeof out.scrollTop === "number" ? out.scrollTop : undefined;
+  const scrollFacts = scrollStrategyFacts(out);
   deps.recordAction({
     op: "scroll", target: scrollTarget,
     // B2：只记**实际发生的事实**——没走通的滚动不记方向/语义；没请求 to/by 的元素滚动
@@ -189,6 +190,7 @@ export async function doActScroll(
     ...(moved === undefined ? {} : { moved }),
     ...(delta === undefined ? {} : { delta }),
     ...(scrollTop === undefined ? {} : { scrollTop }),
+    ...scrollFacts,
     url: urlOf(page),
     ...ambiguityRecord(scrollAmbiguity),
     ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
@@ -214,10 +216,25 @@ export async function doActScroll(
     ...(moved === undefined ? {} : { moved }),
     ...(delta === undefined ? {} : { delta }),
     ...(scroll === undefined ? {} : { scroll }),
+    ...scrollFacts,
     url: urlOf(page), elapsed_ms: Date.now() - started,
     ...scrollAmb,
     ...(await observeAfter(deps.ctx(), req)),
   };
+}
+
+/**
+ * 会话面的合成滚动目标 = `ctx.scrollList` 的闭集 **加上 `page`**。
+ *
+ * 为什么只加在会话面：authoring 会话里"滚整页"是最常见的请求，而 `page` 不是元素池里的
+ * 名字；把它当 hint 解析只会撞出某个不相干的 `.page` 容器并在其祖先上找滚动器（实测报告
+ * `not_scrollable` 的能力墙）。flow 面的 `ctx.scrollList("page")` 语义**不动**——那里
+ * 有 `document`/`body`/`html`/`window` 就够，改它会让既有脚本的目标变义。
+ * 代价：会话面无法再用裸词 `page` 点名一个 label 恰为 "page" 的元素——那类元素用
+ * `#id`/`[data-test=…]`/完整 label 形状寻址（与合成名的取舍在所有合成目标上一致）。
+ */
+function isSessionSyntheticScrollTarget(target: string): boolean {
+  return target.trim().toLowerCase() === "page" || isSyntheticScrollTarget(target);
 }
 
 /** 与会话契约同判的非空字符串（局部复刻，避免循环依赖；语义与 nonEmpty 逐字节一致）。 */

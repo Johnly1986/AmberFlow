@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { SessionRuntime } from "./session-runtime.ts";
+import { StopError } from "./ctx.ts";
 import {
   SESSION_DEFAULT_IDLE_TIMEOUT_MS, errMsg, intIn, sessionExitCode,
   type SessionExit, type SessionOptions, type SessionSink,
@@ -27,7 +28,14 @@ export async function runSession(opts: SessionOptions, sink: SessionSink): Promi
   process.once("SIGINT", onInterrupt);
   process.once("SIGTERM", onInterrupt);
   try {
-    await rt.start();
+    try {
+      await rt.start();
+    } catch (e) {
+      // 启动期环境错误（如 headed 但没有 XServer）：本次自动 open 失败，**会话不终结**——
+      // 后续请求仍可换档（headless）或用其它方式继续；只有非启动期的错误才是会话级死亡。
+      if (!(e instanceof StopError) || e.diagnostics?.["browser_startup"] !== true) throw e;
+      sink.respond({ id: null, type: "open", ok: false, code: e.code, reason: e.message });
+    }
     const input = opts.inputFile !== null && opts.inputFile !== undefined
       ? fs.createReadStream(path.resolve(opts.inputFile), { encoding: "utf8" })
       : process.stdin;

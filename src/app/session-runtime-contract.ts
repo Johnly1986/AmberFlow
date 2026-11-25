@@ -71,6 +71,10 @@ export interface SessionScrollOut {
   ambiguity?: AmbiguityView;
   /** A4：落空（`target_not_found`）判别证据；引擎给才有。 */
   diagnostics?: ActMissDiagnostics;
+  /** A6：非标准滚动器回退策略（`"programmatic"`）；标准滚动路径不出现。 */
+  strategy?: "programmatic";
+  /** B15：`moved:false` 且容器已在底部（几何可读时出现）。 */
+  at_bottom?: true;
 }
 
 /**
@@ -258,10 +262,92 @@ export function isDeadPageError(msg: string): boolean {
   return /Target page, context or browser has been closed|Target closed|browser has been closed|Browser has been closed|Session closed|Page closed|has been disconnected/i.test(msg);
 }
 
+/**
+ * 浏览器**启动期**失败的归类（`ensureSession()` 抛错时用；运行期死亡归 `browser_dead`）。
+ *
+ * 为什么必须与"运行期死亡"分开：Playwright 的 headed 启动在无 XServer 时抛的正是
+ * `browserType.launch: Target page, context or browser has been closed`（**首行**就是这个
+ * 串，XServer 提示在后面几行）——它命中 `isDeadPageError` 的正则，于是"缺显示器"这条
+ * **配置错误**被报成"浏览器死了"并终结会话（本可改 headless 继续）。判据只认启动期错误串
+ * 与 headful 旗标里的环境事实，不含站点或调用面知识。返回 null = 不是启动期环境问题。
+ *
+ * `raw` 必须是**完整**错误文本（不是 `errMsg` 的首行截断）——XServer 提示不在首行。
+ */
+export function browserStartupProblem(
+  raw: string, headful: boolean,
+): { code: "config_error"; reason: string; suggestion: string } | null {
+  const xserver = /XServer|Missing X server|\$DISPLAY/i.test(raw);
+  const launch = /browserType\.launch|Failed to launch|Chromium distribution|Executable doesn't exist/i.test(raw);
+  if (!xserver && !launch) return null;
+  const headlessAdvice = headful
+    ? "retry without --headful (headless) or run under `xvfb-run -a`"
+    : "reinstall the pinned build (`npx playwright install chromium`) and retry; if it still fails, run under `xvfb-run -a`";
+  return {
+    code: "config_error",
+    reason: `browser start-up failed (the browser process never became usable): ${errMsg(raw)}`,
+    suggestion: xserver
+      ? `the environment has no usable XServer/DISPLAY for a headed browser — ${headlessAdvice}; the session is still alive`
+      : `the browser could not start (missing executable or system dependency?) — ${headlessAdvice}; the session is still alive`,
+  };
+}
+
 export function intIn(v: unknown, lo: number, hi: number): number | undefined {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   if (!Number.isFinite(n)) return undefined;
   return Math.max(lo, Math.min(hi, Math.floor(n)));
+}
+
+/**
+ * A5：导航**落地后路径形状**是否被站点改写（纯 URL 形状比较，零站点知识）。
+ *
+ * 为什么需要：`goto` 的 `ok:true` 只代表"导航命令已发出并 load 完成"，不代表"停在目标"。
+ * 站点重定向/规范化可以把实体段清空（`/place/<实体>/data=…` 落地成 `/place//@…`），
+ * 页面随即渲染空态，而调用方只看 `ok` 会以为到了。判定"是不是同一实体"需要站点知识
+ * （不可做），能做的是**形状**事实：请求的非空路径段是否被落地 URL 按序保留。
+ *
+ * 只认两种形状信号（不做实体识别，也不把正常重定向判成失败）：
+ *   ① 请求里某位非空、落地同位置变空（`/place/X` → `/place//`）；
+ *   ② 请求的非空段数多于落地（丢段）。
+ * query/fragment/trailing-slash 的追加与 SPA 重写不在判据里（`sameNavTarget` 式的严格比较
+ * 会把 `?entry=ttu` 这类正常追加误判）。URL 不可解析 = 不判（null）。
+ */
+export function landedPathShapeChanged(requested: string, landed: string): { changed: boolean; why: string } | null {
+  /** URL 的路径段。绝对 URL 取 `pathname`；解析不了的串按"裸路径"处理（去掉 query/fragment），
+   *  仍解析不出 = null（不判）。落地 URL 来自活页面，通常是绝对的；请求侧允许写相对路径。 */
+  const segs = (u: string): string[] | null => {
+    const raw = u.trim();
+    if (raw === "") return null;
+    try { return new URL(raw).pathname.split("/"); } catch { /* 相对路径/裸串：按字面路径处理 */ }
+    const bare = raw.replace(/[?#].*$/, "");
+    if (!bare.startsWith("/")) return null;
+    return bare.split("/");
+  };
+  const req = segs(requested), got = segs(landed);
+  if (req === null || got === null) return null;
+  for (let i = 1; i < Math.min(req.length, got.length); i += 1) {
+    if (req[i] !== "" && got[i] === "") {
+      return { changed: true, why: `the landing path has an empty segment where the requested one had ${JSON.stringify(req[i])} (segment ${i})` };
+    }
+  }
+  const reqN = req.filter((x) => x !== "").length;
+  const gotN = got.filter((x) => x !== "").length;
+  if (reqN > gotN) return { changed: true, why: `the landing path dropped segments: requested ${reqN} non-empty segment(s), landed ${gotN}` };
+  return { changed: false, why: "" };
+}
+
+/**
+ * A5：`open`/`goto` 响应上的落地形状事实（additive；形状未变 = 零新键、零 reason）。
+ *
+ * 只陈述事实、不改 `ok` 语义——合法重定向不能被判成失败；但风险要可见：站点重定向可能已经
+ * 换掉了目标实体，落地后应读回 URL/title 复核。
+ */
+export function landedNavigationFacts(requested: string, landed: string): { facts: Record<string, unknown>; reason: string } {
+  const shape = landedPathShapeChanged(requested, landed);
+  if (shape === null || !shape.changed) return { facts: {}, reason: "" };
+  return {
+    facts: { requested_url: requested, landed_url: landed, landed_path_shape_changed: true },
+    reason: `landed path shape changed from the request (${shape.why}) — the site may have redirected/normalised the target entity away; read back url/title before acting on the landed page`,
+  };
 }
 
 /**

@@ -137,10 +137,10 @@ export const BRIDGE_HANDOFF_CAPS = {
 } as const;
 
 /** scroll 证据块白名单（引擎给了才出现）。 */
-export const BRIDGE_EVIDENCE_SCROLL_FIELDS = ["moved", "delta", "scroll"] as const;
+export const BRIDGE_EVIDENCE_SCROLL_FIELDS = ["moved", "delta", "scroll", "strategy", "at_bottom"] as const;
 
 /** range 证据块白名单（引擎给了才出现）。 */
-export const BRIDGE_EVIDENCE_RANGE_FIELDS = ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "snapped_to", "handles", "valuetext", "probe"] as const;
+export const BRIDGE_EVIDENCE_RANGE_FIELDS = ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "snapped_to", "handles", "handle_index", "peers", "row_index", "valuetext", "probe"] as const;
 
 /** ambiguity 证据块白名单（引擎给了才出现）。 */
 export const BRIDGE_EVIDENCE_AMBIGUITY_FIELDS = ["ambiguous", "matched_others", "hint_kind", "hint_tier", "hint_suspicious"] as const;

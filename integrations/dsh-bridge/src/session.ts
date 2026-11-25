@@ -896,6 +896,10 @@ export class SessionManager {
     if (typeof response['delta'] === 'number' && Number.isFinite(response['delta'])) {
       out['delta'] = Math.round(response['delta'])
     }
+    // 滚动策略与到底事实（引擎给才有）：策略是闭集 `programmatic`（非标准滚动器回退），
+    // at_bottom 只增不减的解释力——它们回答"为什么没动"与"用的是哪条路径"。
+    if (response['strategy'] === 'programmatic') out['strategy'] = 'programmatic'
+    if (response['at_bottom'] === true) out['at_bottom'] = true
     const raw = response['scroll']
     if (isObj(raw)) {
       const geo: Record<string, number> = {}
@@ -923,9 +927,24 @@ export class SessionManager {
     for (const strategy of ['fill', 'keyboard', 'pointer'] as const) {
       if (response['strategy'] === strategy) out['strategy'] = strategy
     }
-    for (const key of ['achieved', 'requested', 'target_value', 'clamped_from', 'snapped_to', 'handles'] as const) {
+    for (const key of ['achieved', 'requested', 'target_value', 'clamped_from', 'snapped_to', 'handles', 'handle_index', 'row_index'] as const) {
       const v = response[key]
       if (typeof v === 'number' && Number.isFinite(v)) out[key] = v
+    }
+    // 多柄各柄自己的值域（≤8 行；引擎给才有）。越界拒绝时"这个值对另一柄合法"只有它说得清。
+    if (Array.isArray(response['peers'])) {
+      const peers = (response['peers'] as unknown[]).slice(0, 8)
+        .filter((raw): raw is Record<string, unknown> => typeof raw === 'object' && raw !== null)
+        .map((raw) => {
+          const row: Record<string, unknown> = {}
+          for (const key of ['handle', 'min', 'max', 'value'] as const) {
+            const v = raw[key]
+            if (typeof v === 'number' && Number.isFinite(v)) row[key] = v
+          }
+          if (typeof raw['valuetext'] === 'string' && raw['valuetext'] !== '') row['valuetext'] = clip(raw['valuetext'], 60)
+          return row
+        })
+      if (peers.length > 0) out['peers'] = peers
     }
     // 档位人读文本（页面给才有；只透传，不重算）。
     if (typeof response['valuetext'] === 'string' && response['valuetext'] !== '') {

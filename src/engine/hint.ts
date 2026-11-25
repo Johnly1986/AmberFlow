@@ -306,7 +306,11 @@ export function parseHint(hint: string): ParsedHint {
     const tag = rest.slice(0, rest.indexOf("["));
     const body = rest.slice(rest.indexOf("[") + 1).replace(/\]$/, "");
     const tilde = body.indexOf("~");
-    return withSuffix({ kind: "attrSubstr", tag, attr: DOM_ATTR[body.slice(0, tilde)] ?? body.slice(0, tilde), value: body.slice(tilde + 1) });
+    // 与 attrEq 同口径去引号（CSS 的 `[attr~="x"]` 里引号不是值的一部分），并吃掉 `~=`
+    // 里的 `=`：CSS 操作符 `~=` 与闭集操作符 `~` 表达同一件事，写成前者不该变成永不命中。
+    // 无引号无 `=` 的既有写法（`a[href~Alan_Turing]`）逐字节不变。
+    const value = body.slice(tilde + 1).replace(/^=/, "").replace(/^['"]|['"]$/g, "");
+    return withSuffix({ kind: "attrSubstr", tag, attr: DOM_ATTR[body.slice(0, tilde)] ?? body.slice(0, tilde), value });
   }
   if (rest.split("[").pop()!.includes("~")) {
     // 04-E：无括号的 `tag~token` 是文档声明的合法形状（:40），不能走
@@ -690,7 +694,13 @@ export type HintShapeProblemKind =
   /** 出现选择器语法（`>`/`[`/`]`/组合），闭集不接受任意 CSS。 */
   | "selector-syntax"
   /** 角色词 + 额外词（`button 搜索`）——与 tag-plus-text 同一类，措辞区分"枚举词"误读。 */
-  | "role-word-plus-text";
+  | "role-word-plus-text"
+  /**
+   * CSS 属性操作符被当成属性名的一部分（`[href*=x]`/`^=`/`$=`/`|=`）：闭集只认等值
+   * `tag[attr=value]` 与子串 `tag[attr~substr]`，这四种写法解析出的属性名带操作符字符，
+   * 在池字段模型与 DOM 属性名上都**永不命中**（静默落空比报错更难自查）。
+   */
+  | "css-attr-operator";
 
 export interface HintShapeProblem {
   kind: HintShapeProblemKind;
@@ -721,6 +731,24 @@ export function hintShapeProblem(hint: string): HintShapeProblem | null {
   // 另有 describe*Rejection 通道）。
   if (parsed.within !== undefined || parsed.frameChain !== undefined
       || parsed.inRow !== undefined || parsed.rowIndex !== undefined) return null;
+  // CSS 属性操作符（`*=`/`^=`/`$=`/`|=`）：parseHint 的词法把操作符并进属性名（`href*`），
+  // 于是池字段模型与 DOM 属性名都对不上——这是**永不命中**的写法，必须点出来。
+  // 判据只看属性名末尾的操作符字符：`~` 不在其中（`tag[attr~substr]` 是闭集合法形状，
+  // parseHint 已把它解析成 attr 与 value 两段，属性名不带 `~`）。
+  if ((parsed.kind === "attrEq" || parsed.kind === "attrSubstr") && /[*^$|]$/.test(parsed.attr)) {
+    const op = parsed.attr.slice(-1);
+    const attr = parsed.attr.slice(0, -1);
+    return {
+      kind: "css-attr-operator",
+      reason: `属性名 ${JSON.stringify(parsed.attr)} 末尾的 \`${op}\` 是 **CSS 选择器操作符**（\`[${attr}${op}=…]\`），`
+        + "不是属性名的一部分——闭集只认 `tag[attr=value]`（等值）与 `tag[attr~substr]`（子串）两种属性形状，"
+        + "带操作符的属性名在池字段与 DOM 属性上都永不命中",
+      suggestion: `改用闭集形状：等值写 \`${parsed.tag === "" ? "" : parsed.tag}[${attr}=${parsed.value}]\`，`
+        + `子串写 \`${parsed.tag === "" ? "" : parsed.tag}[${attr}~${parsed.value}]\``
+        + `（即把 \`${attr}${op}="…"\` 改写成 \`${attr}~…\`）；`
+        + "属性名只认 test、type、aria-label、href、name、id、role、near",
+    };
+  }
   // `#id` 形态里塞了空格/选择器（`#outer input`、`#a > #b`）：闭集的 id 形状只认单个 id 词元。
   if (parsed.kind === "id" && /[\s>+~]/.test(parsed.value)) {
     return {

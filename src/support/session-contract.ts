@@ -197,13 +197,14 @@ export const SESSION_HANDOFF_CAP_TABLE = [
 export const SESSION_EVIDENCE_CAP_TABLE = {
   scroll: {
     bridgeKey: "scroll",
-    fields: ["moved", "delta", "scroll"],
-    note: "滚动实测读数（三件套全在才出现；像素取整非负，无字符界）",
+    fields: ["moved", "delta", "scroll", "strategy", "at_bottom"],
+    strategies: ["programmatic"],
+    note: "滚动实测读数（三件套全在才出现；像素取整非负，无字符界）；strategy 只在非标准滚动器回退时出现，at_bottom 只在已到底时出现",
   },
   range: {
     bridgeKey: "range",
     fields: ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from",
-      "snapped_to", "handles", "valuetext", "probe"],
+      "snapped_to", "handles", "handle_index", "peers", "row_index", "valuetext", "probe"],
     strategies: ["fill", "keyboard", "pointer"],
     probes: ["value_unreadable", "home_ignored", "lattice_unreachable"],
     note: "范围控件实测（strategy/probe 是引擎闭集；数值字段无字符界）",

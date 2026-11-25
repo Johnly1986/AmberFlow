@@ -47,6 +47,11 @@ function rangeEvidence(r: RangeOutcome): Record<string, unknown> {
   if (typeof r.snapped_to === "number" && Number.isFinite(r.snapped_to)) out["snapped_to"] = r.snapped_to;
   // 多柄/耦合控件的事实（仅 >1 柄时出现）：percent 被拒或值域瞬变的判别依据。
   if (typeof r.handles === "number" && Number.isFinite(r.handles)) out["handles"] = r.handles;
+  // 本次作用的是耦合组内第几个手柄 + 各柄自己的值域（多柄才有）——"请求值对另一柄合法"的判据。
+  if (typeof r.handle_index === "number" && Number.isFinite(r.handle_index)) out["handle_index"] = r.handle_index;
+  if (Array.isArray(r.peers) && r.peers.length > 1) out["peers"] = r.peers;
+  // 池侧 `row_index`（dup 组内序；与 handle_index 是两条不同的序，两个都带出）。
+  if (typeof r.pool_row_index === "number" && Number.isFinite(r.pool_row_index)) out["row_index"] = r.pool_row_index;
   // 页面提供的档位人读文本（只有页面给才有）。
   if (typeof r.valuetext === "string" && r.valuetext !== "") out["valuetext"] = r.valuetext;
   // 键盘策略收敛失败的可判别原因（仅键盘路径失败时出现）。

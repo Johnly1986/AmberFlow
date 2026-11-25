@@ -46,7 +46,7 @@ import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
 
 import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, closedSetReasonSuffix, displayHow, doRead, doSignal, doWaitFor, executionStateResponse, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, rowsSettled, rowsSettledDual, shapeProblemResponse } from "./session-runtime-evidence.ts";
-import { FLAP_HEAL_SETTLE_MS, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
+import { browserStartupProblem, FLAP_HEAL_SETTLE_MS, landedNavigationFacts, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
 export * from "./session-runtime-contract.ts";
 export { runSession } from "./session-runtime-entry.ts";
 
@@ -108,9 +108,21 @@ export class SessionRuntime {
   private async ensureSession(): Promise<BrowserSession> {
     if (this.holder.session === null) {
       this.log(`starting ${this.opts.headful === true ? "headful" : "headless"} browser${this.opts.window !== undefined && this.opts.window !== null ? ` (${this.opts.window})` : ""}`);
-      this.holder.session = await browserSession(
-        this.opts.headful !== true, null, null, this.opts.window ?? null,
-      );
+      try {
+        this.holder.session = await browserSession(
+          this.opts.headful !== true, null, null, this.opts.window ?? null,
+        );
+      } catch (e) {
+        // 启动期失败 = 环境/配置问题（如 headed 但没有 XServer），不是"页面已死"：归
+        // config_error 并给出可行动建议，会话保持存活（下一次请求可换 headless 重试）。
+        // 判据吃**完整**错误文本：XServer 提示不在 errMsg 的首行截断里。`browser_startup`
+        // 标记让入口把这条错误当成"本次 open 失败"，而不是会话级死亡（会话仍可换档重试）。
+        const startup = browserStartupProblem(e instanceof Error ? e.message : String(e), this.opts.headful === true);
+        if (startup !== null) {
+          throw new StopError(startup.code, `${startup.reason} — ${startup.suggestion}`, { browser_startup: true });
+        }
+        throw e;
+      }
     }
     return this.holder.session;
   }
@@ -412,6 +424,9 @@ export class SessionRuntime {
       let heal: FlapHealResult | null = null;
       if (flap !== null) heal = await this.healFlap(page, flap, navs);
       const landed = urlOf(page) || ctx.url() || String(url);
+      // A5：落地路径形状事实（additive；形状保留 = 零新键）。只陈述、不改 ok 语义。
+      const landing = landedNavigationFacts(String(url), landed);
+      const landingFacts = landing.reason === "" ? landing.facts : { ...landing.facts, reason: landing.reason };
       this.urls.push(landed);
       const title = await this.titleOf();
       this.log(`${op} ${landed}${title === undefined ? "" : ` — ${title}`}`);
@@ -422,7 +437,7 @@ export class SessionRuntime {
       });
       // 正常页（未判定 flap）：响应与改动前**逐字节一致**——零新字段、除静默早退窗口外零额外等待。
       if (flap === null) {
-        return { ok: true, url: landed, ...(title === undefined ? {} : { title }), hosts: this.hosts ?? [] };
+        return { ok: true, url: landed, ...(title === undefined ? {} : { title }), hosts: this.hosts ?? [], ...landingFacts };
       }
       // 判定 flap → 只增诊断字段（healed:false → ok:false 如实报；有界自愈只试一次，不再重试）。
       const healed = heal?.healed === true;
@@ -626,7 +641,7 @@ export class SessionRuntime {
           ? { occlusionProbe: true, diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) }
           : { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
     // 解析证据在 take 后立刻读取（observeAfter 会再次触发 hintMatch，不能放在它之后）。
-    const amb = actAmbiguity(target, out.ref);
+    const amb = actAmbiguity(target, out.ref, out.stopCode);
     this.recordAction({
       op: actOp, target,
       ...(actOp === "fill" || actOp === "select"

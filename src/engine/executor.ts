@@ -257,6 +257,17 @@ export interface ScrollEvidence {
   moved?: boolean;
   /** B2：after - before（正 = 向下滚），与 moved 同一对读数。 */
   delta?: number;
+  /**
+   * A6：滚动**策略**（只在非标准滚动器回退时出现）。`"programmatic"` = 目标或其祖先没有
+   * 标准滚动器（overflow:auto/scroll/overlay），但存在"内容溢出 + overflow:hidden"的祖先，
+   * 引擎对其实施 `scrollTop` 写入——那是这类面板自己的滚动机制。标准路径不带这个键。
+   */
+  strategy?: "programmatic";
+  /**
+   * B15：`moved:false` 的第二种含义——容器已在底部（`scrollTop + clientHeight >=
+   * scrollHeight - 2`）。几何可读且到底才出现；"没动"与"到底了"因此可区分。
+   */
+  at_bottom?: true;
   stopCode?: string;
   reason?: string;
 }

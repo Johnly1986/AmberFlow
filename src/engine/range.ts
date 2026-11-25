@@ -68,6 +68,20 @@ export interface RangeOutcome {
   snapped_to?: number;
   /** 该目标所在的**手柄数**（1 = 单柄；>1 = 多柄/耦合范围控件）。仅按到多柄时出现。 */
   handles?: number;
+  /** 本次作用的是耦合组内第几个手柄（1-based；单柄不出现）。 */
+  handle_index?: number;
+  /**
+   * 耦合组内各柄的值域事实（≤8；多柄才出现）：`[{handle, min, max, value, valuetext?}]`。
+   * 越界拒绝时用来回答"这个值是哪一个柄的值域"——多柄控件里请求值对另一柄合法是常态，
+   * 引擎只按本次命中的那一柄判越界，事实必须一起带出，否则"指错柄"会被读成"值不合法"。
+   */
+  peers?: Array<{ handle: number; min: number; max: number; value: number | null; valuetext: string | null }>;
+  /**
+   * 池侧 `row_index`（同 tag+label 的 dup 组内 DOM 先序位次；池行携带才算）。与 `handle_index`
+   * 是两条不同的序：滑杆 label 常为空串，会和页面其它空 label 输入同组，所以"第几个手柄"
+   * 与"同名组第几个"不能互相推导——两个事实都带出，寻址仍由作者选定。
+   */
+  pool_row_index?: number;
   /**
    * 控件的人读档位文本（`aria-valuetext`，如 "HK$200"）——只在页面提供时出现。
    * 为什么带上它：数值读回只能证明"数字是多少"，页面真正展示给用户的是档位文案；
@@ -97,6 +111,19 @@ interface SliderState {
   handles: number;
   /** 页面提供的档位文本（`aria-valuetext`）；未提供 = null（不编造）。 */
   valuetext: string | null;
+  /**
+   * 耦合组内**本柄**的 1-based 位次（1 = 组内 DOM 先序第一个）；单柄恒 1。
+   * 与 `row_index` 不是一回事：`row_index` 是"同 tag+label 的 dup 组内序"（两个滑杆 label
+   * 常常都是空串，会和页面其它空 label 输入同组），耦合组位次才是"第几个手柄"。两条事实都
+   * 只在诊断里出现，寻址仍走作者选定的 hint 形状。
+   */
+  handleIndex: number;
+  /**
+   * 耦合组内各柄的**值域事实**（≤8；同一次 evaluate 读，零额外往返）。多柄控件里"请求值对
+   * 第二柄合法、对第一柄越界"是常态——只拿本柄 min/max 判越界会把"指错了柄"说成"值不合法"，
+   * 所以把各柄的 min/max/当前值一并带出（单柄 = 长度 1，不呈现）。
+   */
+  peers: Array<{ handle: number; min: number; max: number; value: number | null; valuetext: string | null }>;
 }
 
 const num = (v: unknown): number | null => {
@@ -130,6 +157,7 @@ async function readState(loc: any): Promise<SliderState | null> {
       //     就说明这是普通表单而不是一对耦合手柄，停止上溯按单柄处理（多柄事实只陈述，
       //     不靠猜测把无关控件绑定成区间）。
       let handles = 1;
+      let peerNodes: any[] = [];
       let boxHost = node.parentElement;
       for (let k = 0; k < 8 && boxHost; k++, boxHost = boxHost.parentElement) {
         const hostTag = String(boxHost.tagName || '').toLowerCase();
@@ -139,9 +167,18 @@ async function readState(loc: any): Promise<SliderState | null> {
           if (peers.length < 2) continue;
           const others = boxHost.querySelectorAll('input:not([type=range]), select, textarea, button');
           handles = others.length > 0 ? 1 : Math.min(peers.length, 8);
+          if (handles > 1) peerNodes = Array.prototype.slice.call(peers, 0, 8);
           break;
         } catch (err) { break; /* 选择器失败：按单柄处理（不猜多柄） */ }
       }
+      const selfIdx = peerNodes.indexOf(node);
+      const peerFacts = (peerNodes.length > 1 ? peerNodes : []).map((pe: any, i: number) => ({
+        handle: i + 1,
+        min: toNum(pe.getAttribute('aria-valuemin') ?? pe.getAttribute('min')) ?? (toNum(pe.value) ?? 0),
+        max: toNum(pe.getAttribute('aria-valuemax') ?? pe.getAttribute('max')) ?? (toNum(pe.value) ?? 100),
+        value: toNum(pe.value) ?? toNum(pe.getAttribute('aria-valuenow')),
+        valuetext: pe.getAttribute('aria-valuetext'),
+      }));
       return {
         tag,
         inputType: String(attr("type") || "").toLowerCase(),
@@ -152,6 +189,8 @@ async function readState(loc: any): Promise<SliderState | null> {
         ariaStep: toNum(attr("step") ?? attr("aria-valuestep")),
         valuetext: attr("aria-valuetext"),
         handles,
+        selfHandle: peerFacts.length > 1 && selfIdx >= 0 ? selfIdx + 1 : 1,
+        peers: peerFacts,
         bbox: rectOf(node),
         ancestorBox,
       };
@@ -174,6 +213,16 @@ async function readState(loc: any): Promise<SliderState | null> {
       ancestorBox: (r["ancestorBox"] ?? null) as SliderState["ancestorBox"],
       handles: Math.max(1, num(r["handles"]) ?? 1),
       valuetext: typeof r["valuetext"] === "string" && r["valuetext"] !== "" ? r["valuetext"] : null,
+      handleIndex: Math.max(1, num(r["selfHandle"]) ?? 1),
+      peers: Array.isArray(r["peers"])
+        ? (r["peers"] as Array<Record<string, unknown>>).map((pe, i) => ({
+          handle: num(pe["handle"]) ?? i + 1,
+          min: num(pe["min"]) ?? 0,
+          max: num(pe["max"]) ?? 100,
+          value: num(pe["value"]),
+          valuetext: typeof pe["valuetext"] === "string" && pe["valuetext"] !== "" ? pe["valuetext"] : null,
+        }))
+        : [],
     };
   } catch {
     return null;
@@ -333,6 +382,24 @@ async function pointerSet(
 }
 
 /**
+ * 多柄控件的值域事实句（越界/percent 拒绝的 reason 尾巴）：命中 N 个同形手柄时，把各柄的
+ * min/max 摊开并点名本次作用于哪一个——单柄温差（`[0,10]` vs `[1,11]`）下，"请求值对第二柄
+ * 合法"是对上号才有意义的信息，只报本柄越界会把"指错柄"伪装成"值不合法"。
+ * 单柄 = 空串（reason 逐字节不变）。
+ */
+function peerFactsNote(state: SliderState, handles: number): string {
+  if (handles <= 1 || state.peers.length <= 1) return "";
+  const fmt = state.peers
+    .map((p) => `#${p.handle} min=${p.min} max=${p.max}`
+      + (p.value === null ? "" : ` value=${p.value}`)
+      + (p.valuetext === null ? "" : ` (${p.valuetext})`))
+    .join(", ");
+  return ` — this target matched ${handles} same-shaped range handles and resolves to handle `
+    + `#${state.handleIndex} [${fmt}]; the requested value may be in range for another handle — `
+    + "address a specific handle with a row-index:N (dup-group order) or #id suffix on the target";
+}
+
+/**
  * 对已定位的范围控件设置目标值。三道策略按 fill → keyboard → pointer 依次尝试，
  * 每次都用页面值事实校验；全部失败返回 `slider_not_settable`（含已试策略/bbox/当前值）。
  */
@@ -350,7 +417,10 @@ export async function applyRange(
   const state0 = state0Ref;
   const handles = state0.handles;
   // 多柄控件的事实（只在 >1 时出现）：单柄读法解释不了"区间瞬变"，必须让调用方看见。
-  const handleFacts = handles > 1 ? { handles } : {};
+  // peers 是各柄自己的 min/max——"请求值对另一柄合法"只有它说得清（同一次 readState 读出）。
+  const handleFacts = handles > 1
+    ? { handles, handle_index: state0.handleIndex, ...(state0.peers.length > 1 ? { peers: state0.peers } : {}) }
+    : {};
   const valueFacts = state0.valuetext === null ? {} : { valuetext: state0.valuetext };
   // task-21/1a：tolerance 缺省 **max(0.5, step/2)**（步长感知——步长 50 的滑杆 0.5 容差没有
   // 判定意义）；显式声明仍优先。
@@ -367,7 +437,8 @@ export async function applyRange(
       stopCode: "config_error",
       reason: `percent is not applicable: this control has ${handles} handles (a coupled range), so `
         + "a single percentage has no unique target — send {value: <number>} for the specific handle "
-        + "instead (each handle keeps its own min/max and the pair's bounds move as you drag)",
+        + "instead (each handle keeps its own min/max and the pair's bounds move as you drag)"
+        + peerFactsNote(state0, handles),
     };
   }
   const tv = targetRangeValue(state0, value);
@@ -393,7 +464,8 @@ export async function applyRange(
       stopCode: "value_out_of_range",
       reason: `requested value ${requested} is outside the slider range [${state0.min}, ${state0.max}] `
         + `(would clamp to ${target}) — refused without any interaction (never pretend success; `
-        + "narrow the request or pick a control whose range covers the target)",
+        + "narrow the request or pick a control whose range covers the target)"
+        + peerFactsNote(state0, handles),
     };
   }
   const strategies: string[] = [];

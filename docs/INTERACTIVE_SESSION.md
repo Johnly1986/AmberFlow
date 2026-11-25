@@ -58,9 +58,9 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 
 | type | 请求（额外字段） | 成功响应（额外字段） | 失败 code |
 |---|---|---|---|
-| `open` | `url`, `timeoutMs?` | `url, title?, hosts` | `host_not_allowed` / `unreachable` / `config_error` |
+| `open` | `url`, `timeoutMs?` | `url, title?, hosts`；落地路径形状被站点改写时另有 `requested_url`/`landed_url`/`landed_path_shape_changed:true` + `reason`（`ok` 语义不变） | `host_not_allowed` / `unreachable` / `config_error`（含浏览器启动期环境错误：headed 但没有可用的 XServer/DISPLAY — 会话**不终结**，可改 headless 重试） |
 | `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；元素行的字段全集见 [AGENT_INTERFACE §3.2](AGENT_INTERFACE.md) 的唯一权威表——本文只记信封：`frame` 下标、多 frame 时的 `frame_counts`） | `bad_selector` |
-| `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
+| `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；`ambiguous` **只在歧义停时出现**（恒等式 `ambiguous === (code === "target_ambiguous")`，`ok:true` 不可能带它），`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` 是弱档旁路 advisory（成功也回显）；scroll 成功另可带 `strategy:"programmatic"`（非标准滚动器回退）与 `at_bottom:true`（已到底）；set_range 多柄另带 `handles`/`handle_index`/`peers`/`row_index`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
 | `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
 | `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms` | `config_error`（坏信号形状） |
@@ -160,17 +160,21 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 
 | 字段 | 含义 |
 |---|---|
-| `ambiguous: boolean` | 这一条 hint 命中**多个**候选（`true` = 选择是在多个里挑的，动手前建议再 observe 一下） |
-| `matched_others?: [{ref,tag,class,label}]` | 除实际选中者外的撞词候选（≤3；label ≤40 字符） |
+| `ambiguous?: true` | **只在歧义停时出现**，且与结果码是同一个事实：`ambiguous === (code === "target_ambiguous")`。已执行的动作（`ok:true`）**不可能**带它 |
+| `matched_others?: [{ref,tag,class,label}]` | 除实际选中者外的撞词候选（≤3；label ≤40 字符）。它是"池里还有相似候选"的 **advisory**，与歧义判决无关——`ok:true` 时也照旧回显 |
 | `hint_kind?: "bare" \| "attrSubstr"` / `hint_tier?: number` / `hint_suspicious?: true` | 只在**弱档**胜出（词前缀/词包含、loose 子串）时出现——这形状最容易命中容器/同缀元素 |
 
-- 成功与失败（`target_not_found`）都回显：失败但 `ambiguous:true` 说明"目标存在多个、引擎不猜"。
+- `ambiguous` 是**零动作判决**的字段，不是诊断：`ok:false + code:"target_ambiguous"` 才带它。
+  `ok` 与 `ambiguous` 同时为真在协议上不可出现（调用方可以据此二选一，不必再交叉核对）。
+- 成功响应仍可带 `matched_others`（"强档唯一命中，但池里还有撞词候选"）——这时动作已经发生，
+  该字段是提醒而不是歧义：想确认点对了就 `observe` 或读回 URL/done 信号。
 - 精确形状（`#id`/`tag[attr=value]`/角色词/`tag~token`）不产生这些字段（没有旁路诊断 = 无需回显）。
 - 池外回退（0×0 手柄这类）时 `ref` 可能是合成 ref（`pN`），`matched_others[].ref` 同源，如实不映射。
-- 例：三个 `Edit` 链接的页面上 `act click "Edit"` → `{"ok":true,"ref":"e0","ambiguous":true,
-  "matched_others":[{"ref":"e1",…},{"ref":"e2",…}]}`；想精确点第二个就先 `observe` 抄 `a[href=#b1]`。
-- A2 起：**真正的多候选歧义默认先停**（见下节）；本节字段是与 `run` 同一份的弱档旁路 advisory，
-  只在动作实际发生或非歧义失败时有意义，**不作判定**。
+- 例（歧义停）：三个 `Edit` 链接的页面上 `act click "Edit"` →
+  `{"ok":false,"code":"target_ambiguous","executed":false,"ambiguous":true,"ambiguity":{…}}`；
+  想精确点第二个就先 `observe` 抄 `a[href=#b1]`。
+- 例（已执行 + 另有相似候选）：`{"ok":true,"ref":"e1","how":"clicked","matched_others":[{"ref":"e0",…}]}`
+  ——没有 `ambiguous` 键，动作确实发生了。
 
 ### act 的歧义停因（A2，缺省零动作）
 
@@ -298,7 +302,9 @@ SPA 的失败路径补偿：声明 hint 真落空（`hintMatch` 零命中）**�
 |---|---|
 | 滑块 label 曾是**活值**（`value` 属性） | 提取期对 `input[type=range]` **不读 value**（`LABEL_HELPERS_JS` 的 `isRangeLike`，四处标签口径同步：池/observe/回捞/A3）；身份只来自 `#id`/`name`/`data-test`/aria-label/label 包裹——同一 hint 连续 `11 → 8 → 11` 都能命中 |
 | 值域是**格点**（`step=N`），请求值可能不存在 | 先吸附到最近格点再动：`applied:true` + `accurate:false` + `snapped_to:<落地值>`（不再"三策略全试 + 满 10s 白等 + slider_not_settable"） |
-| **多柄**耦合控件（双滑块价格区间等） | `readState` 数出同容器内的手柄个数（只数"只装滑块"的最近一层容器）：`handles>1` 时 `percent` **结构化拒绝**（`config_error`，零动作，指名用 `{value}` 打具体手柄），其它失败也附 `handles` |
+| **多柄**耦合控件（双滑块价格区间等） | `readState` 数出同容器内的手柄个数（只数"只装滑块"的最近一层容器）并把**各柄自己的** `min/max/value/valuetext` 一并读出（≤8，同一次 evaluate，零额外往返）：`handles>1` 时 `percent` **结构化拒绝**（`config_error`，零动作，指名用 `{value}` 打具体手柄），其它失败也附 `handles` |
+| **指错了柄**被说成"值不合法" | 越界拒绝的 `reason` 补**候选事实**：`命中 N 个同形 range 元素`、各柄 `min/max`、本次作用于第几柄；结构化字段另给 `handle_index`（耦合组内 1-based 位次）与 `peers`（各柄值域）。单柄控件 `reason` 逐字节不变、无这两个键 |
+| 手柄序 ≠ 行锚序 | `handle_index` 是**耦合组内**位次；`row_index` 是"同 tag+label dup 组内"位次（滑杆 label 常为空串，会与页面其它空 label 输入同组）。两条序不能互相推导，两个事实都回显；寻址仍由作者选形状（`row-index:N` 或 `#id`） |
 | 页面提供档位人读文本 | `aria-valuetext` 原样回显为 `valuetext`（只在页面给才有） |
 | `--record` 缺这一行 | 执行体自己记轨迹（成功/失败都记，含 `applied/accurate/achieved/requested/target_value/strategy/snapped_to/handles/valuetext`），`session export` 还原成 `await ctx.setRange(<hint>, { value: <requested> })` |
 
@@ -310,14 +316,25 @@ SPA 的失败路径补偿：声明 hint 真落空（`hintMatch` 零命中）**�
 |---|---|---|---|
 | `target` + `to`（或 `by`） | **容器滚动**：目标元素自身或**最近可滚动祖先**滚到方向/像素（`by` 优先于 `to`，settle 150ms；纯 `scrollTop`，不模拟滚轮） | `_scrollContainerForElement` → `_scrollWithLoc`（与 `ctx.scrollList`、run 的 `scroll` 命令**同一条实现**） | `moved`、`delta`、`scroll:{scrollTop,scrollHeight,clientHeight}` |
 | `target`，无 `to`/`by` | **滚入视口**：把元素滚到视口中央（旧语义，`scrollIntoViewIfNeeded`） | `mw.scrollIntoView` → 同一次 evaluate 里量 scrollTop 前后差 | `moved`、`delta`、`scroll`（同上） |
-| 合成目标（`document/body/html/window`，或省略 target） | **文档滚动**：滚主滚动器 | `mw.scrollDocument` | `moved`、`delta`、`scroll` |
+| 合成目标（`document/body/html/window`、**会话面另加 `page`**，或省略 target） | **文档滚动**：滚主滚动器 | `mw.scrollDocument` | `moved`、`delta`、`scroll` |
 
 - **`changed === moved`（实测）**：B2 之前元素目标的 `changed` 硬编码 `true`——`scrollIntoView`
   在元素已在视口时不移动任何像素，响应仍说"变了"。现在 `moved` 是滚动容器 `scrollTop` 的
   前后差非零，没有 `moved` 证据就是 `false`，不假装滚过。
-- **找不到可滚动容器 = 结构化失败**：带 `to/by` 但元素自身与祖先都没有可滚动容器 →
-  `{ok:false, code:"not_scrollable"}`（旧行为是静默无操作还报成功）。**无 `to/by` 不适用**——
-  元素本来就在视口里是 `moved:false` 的成功事实，不是错误。
+- **程序化滚动面板（overflow:hidden + JS 驱动 scrollTop）**：标准滚动器（`overflow:auto/scroll/overlay`
+  + 内容溢出）找不到、但祖先是"内容溢出且 `overflow` 非 `clip`"时，引擎**回退**到对那个祖先写
+  `scrollTop`（那正是这类面板自己的滚动机制），成功响应标 `strategy:"programmatic"`——标准滚动器
+  路径**不带这个键**。`moved`/`delta`/`scroll` 仍是 before/after 实测，不假成功。
+- **`at_bottom: true`**：`moved:false` 有两种含义（"这次没动"与"已经到底了"），容器几何可读且
+  `scrollTop + clientHeight >= scrollHeight - 2` 时补这个键（容差 2px 吸收亚像素/滚动条取整）。
+- **找不到可滚动容器 = 结构化失败**：带 `to/by` 但元素自身与祖先都没有可滚动容器（也不存在
+  上面那种程序化面板）→ `{ok:false, code:"not_scrollable"}`；`reason` 里的建议是**在调用面可执行**
+  的（会话面 `act scroll target=document`，flow 面 `ctx.scrollList("document")`）。**无 `to/by`
+  不适用**——元素本来就在视口里是 `moved:false` 的成功事实，不是错误。
+- **`target=page` 只在会话面是合成目标**：authoring 会话里"滚整页"最常用，`page` 因此按
+  `document` 处理（不进池、不做 hint 匹配）。flow 面的 `ctx.scrollList` 合成名集合**不变**
+  （`document/body/html/window`）——代价是会话面无法再用裸词 `page` 点名 label 恰为 "page"
+  的元素，那类元素用 `#id`/`[data-test=…]`/完整 label 寻址。
 - **错误码沿用既有闭集**：`config_error`（`to` 非法值）/ `target_not_found` / `not_scrollable` /
   `stale_ref` / `action_failed`；A2 歧义仍先停（`target_ambiguous` + `ambiguity`），**不新增 stopCode**。
 - **`--record` 只记事实**：滚动没走通不记 `to`/`by`；没请求 `to/by` 的元素滚动不再伪记

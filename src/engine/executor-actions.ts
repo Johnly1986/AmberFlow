@@ -16,6 +16,15 @@ import { type RangeOptions, type RangeOutcome, type RangeValue, applyRange } fro
 import type { BrowserMiddleware } from "./executor.ts";
 import type { ScrollEvidence } from "./executor.ts";
 
+/**
+ * B15：`moved=false` 有两种含义（"这次没动"/"已经到底了"），调用方分不开。容器几何三件套
+ * 都在且 `scrollTop + clientHeight >= scrollHeight - 2` 时补 `at_bottom: true`（容差 2px 吸收
+ * 亚像素与滚动条取整）；几何缺失 = 不判、键不出现（不拿默认值假装量到了）。
+ */
+function scrollAtBottom(scrollTop: number, scrollHeight: number, clientHeight: number): { at_bottom?: true } {
+  return scrollTop + clientHeight >= scrollHeight - 2 ? { at_bottom: true } : {};
+}
+
 /** B1 探针失败的结构化结果（`classifyProbeOutcome` 的返回形状；`actionOnce` 直接消费）。 */
 interface ProbeStop {
   code: string;
@@ -114,6 +123,10 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean; lock?: ActLock },): Promise<{
     ok: boolean; how?: string; ref?: string; changed?: boolean;
     moved?: boolean; delta?: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number;
+    /** A6：`"programmatic"` = 非标准滚动器回退（标准路径不出现）。 */
+    strategy?: "programmatic";
+    /** B15：`moved:false` 且容器已在底部（几何可读时出现）。 */
+    at_bottom?: true;
     stopCode?: string; reason?: string; ambiguity?: AmbiguityView;
     /** A4：落空（`target_not_found`）判别证据；只有 `opts.diagnostics` 才出现。 */
     diagnostics?: ActMissDiagnostics;
@@ -151,7 +164,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     const pre = op === "scroll" ? null : await mw.snapshot(page);
     let how: string | null = null;
     let arg: unknown = null;
-    let scrollFact: { moved: boolean; delta: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number } | null = null;
+    let scrollFact: { moved: boolean; delta: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number; strategy?: "programmatic"; at_bottom?: true } | null = null;
     let scrollStop: { stopCode: string; reason: string } | null = null;
     /** B1：被遮挡/超时的结构化失败（只有 `opts.occlusionProbe` 会产生）。 */
     let probeStop: ProbeStop | null = null;
@@ -183,6 +196,8 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
             moved: sr.moved === true,
             delta: typeof sr.delta === "number" ? sr.delta : 0,
             ...scrollGeoOf(sr),
+            ...(sr.strategy === undefined ? {} : { strategy: sr.strategy }),
+            ...(sr.at_bottom === undefined ? {} : { at_bottom: sr.at_bottom }),
           };
         }
       } else if (el === null) {
@@ -236,6 +251,8 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
       return {
         ok: true, how: String(how), ref, changed: moved, moved, delta,
         ...scrollGeoOf(scrollFact ?? {}),
+        ...(scrollFact?.strategy === undefined ? {} : { strategy: scrollFact.strategy }),
+        ...(scrollFact?.at_bottom === undefined ? {} : { at_bottom: scrollFact.at_bottom }),
         ...viaField,
       };
     }
@@ -386,9 +403,14 @@ export async function _scrollWithLoc(_mw: BrowserMiddleware, _page: AnyPage, loc
         if (!t || !scrollable(t)) {
           // F49 风格的能力提示：not_scrollable 不是沉默失败——把祖先的 overflow 事实带出来，
           // 让 Agent 能区分「没有可滚动祖先」/「最近 overflow 祖先内容不溢出」/「页面用
-          // overflow:hidden 程序化 scrollTop 的自定义滚动面板」。判据与 stopCode 语义不变
-          // （标准滚动器只认 overflow:auto/scroll/overlay + 内容溢出）。
+          // overflow:hidden 程序化 scrollTop 的自定义滚动面板」。
+          //
+          // A6：识别到"内容溢出但 overflow 不是标准滚动器"的祖先（`prog`）时**不再只给建议**——
+          // 这类面板（overflow:hidden + JS 驱动 scrollTop）是常见实现，DOM 写 scrollTop 就是
+          // 它自己的滚动机制，直接回退执行并如实标 `strategy:"programmatic"`（标准滚动器路径
+          // 不打这个键，产物逐字节不变）。moved/delta 仍是 before/after 实测，不假成功。
           const diag: Array<{ tag: string; cls: string; oy: string; sh: number; ch: number; prog: boolean }> = [];
+          const progEls: any[] = [];
           let p2: any = node.parentElement;
           for (let k = 0; k < 32 && p2 && diag.length < 3; k++, p2 = p2.parentElement) {
             if (p2 === doc.body || p2 === doc.documentElement) break;
@@ -396,23 +418,41 @@ export async function _scrollWithLoc(_mw: BrowserMiddleware, _page: AnyPage, loc
             if (cs2.overflowY === "visible") continue;
             const sh2 = Number(p2.scrollHeight) || 0;
             const ch2 = Number(p2.clientHeight) || 0;
+            const prog = sh2 > ch2 + 2 && cs2.overflowY !== "clip";
             diag.push({
               tag: String(p2.tagName || "").toLowerCase(),
               cls: String(p2.className || "").split(/\s+/)[0] || "",
               oy: cs2.overflowY, sh: sh2, ch: ch2,
-              prog: sh2 > ch2 + 2 && cs2.overflowY !== "clip",
+              prog,
             });
+            if (prog) progEls.push(p2);
+          }
+          if (progEls.length > 0) {
+            const t2 = progEls[0];
+            const before2 = Number(t2.scrollTop) || 0;
+            const max2 = Math.max(0, (Number(t2.scrollHeight) || 0) - (Number(t2.clientHeight) || 0));
+            let next2 = before2;
+            if (typeof arg.by === "number") next2 = before2 + arg.by;
+            else if (arg.to === "bottom") next2 = max2;
+            else if (arg.to === "top") next2 = 0;
+            else if (arg.to === "page") next2 = Math.min(max2, before2 + Math.max(1, Math.round((Number(t2.clientHeight) || 0) * 0.9)));
+            next2 = Math.max(0, Math.min(max2, next2));
+            t2.scrollTop = next2;
+            return {
+              ok: true, programmatic: true,
+              before: before2, scrollTop: Number(t2.scrollTop) || 0,
+              scrollHeight: Number(t2.scrollHeight) || 0,
+              clientHeight: Number(t2.clientHeight) || 0,
+            };
           }
           const fmt = diag.map((d) =>
-            `${d.tag}${d.cls ? "." + d.cls : ""} overflow:${d.oy} ${d.sh}/${d.ch}`
-            + (d.prog ? " (programmatically scrollable, not a standard scroller)" : "")).join("; ");
-          const prog = diag.some((d) => d.prog);
+            `${d.tag}${d.cls ? "." + d.cls : ""} overflow:${d.oy} ${d.sh}/${d.ch}`).join("; ");
           const why = diag.length === 0
             ? "no overflow ancestor (every ancestor is overflow:visible)"
             : `ancestors: ${fmt}`;
-          const hint = prog
-            ? " — the page likely uses a custom overflow:hidden scroll panel; the engine scrolls standard overflow:auto/scroll containers only (scroll a target inside one, or use ctx.scrollList(\"document\"))"
-            : "";
+          // 建议必须**在调用面可执行**：会话面没有 ctx，flow 面没有 act；两个名字都给。
+          const hint = " — scroll a target inside that panel, or scroll the document itself"
+            + " (session: `act scroll target=document`; flow: `ctx.scrollList(\"document\")`)";
           return {
             ok: false,
             reason: `no standard scrollable container found on the element or its ancestors — ${why}${hint}`,
@@ -438,12 +478,16 @@ export async function _scrollWithLoc(_mw: BrowserMiddleware, _page: AnyPage, loc
     if (settleMs > 0) await sleep(settleMs);
     const scrollTop = Number(box["scrollTop"] ?? 0);
     const before = Number(box["before"] ?? 0);
+    const scrollHeight = Number(box["scrollHeight"] ?? 0);
+    const clientHeight = Number(box["clientHeight"] ?? 0);
     return {
-      ok: true, scrollTop,
-      scrollHeight: Number(box["scrollHeight"] ?? 0),
-      clientHeight: Number(box["clientHeight"] ?? 0),
+      ok: true, scrollTop, scrollHeight, clientHeight,
       moved: scrollTop !== before,
       delta: scrollTop - before,
+      // A6：非标准滚动器（overflow:hidden + JS 驱动 scrollTop）的回退策略事实——标准路径
+      // 不带这个键（键集逐字节不变）。B15/at_bottom 只在真的到底时出现。
+      ...(box["programmatic"] === true ? { strategy: "programmatic" as const } : {}),
+      ...scrollAtBottom(scrollTop, scrollHeight, clientHeight),
     };
   }
 
@@ -530,12 +574,16 @@ export async function scrollDocument(_mw: BrowserMiddleware, page: AnyPage, to: 
     if (settleMs > 0) await sleep(settleMs);
     const scrollTop = Number(box["scrollTop"] ?? 0);
     const before = Number(box["before"] ?? 0);
+    const scrollHeight = Number(box["scrollHeight"] ?? 0);
+    const clientHeight = Number(box["clientHeight"] ?? 0);
     return {
-      ok: true, scrollTop,
-      scrollHeight: Number(box["scrollHeight"] ?? 0),
-      clientHeight: Number(box["clientHeight"] ?? 0),
+      ok: true, scrollTop, scrollHeight, clientHeight,
       moved: scrollTop !== before,
       delta: scrollTop - before,
+      // A6：非标准滚动器（overflow:hidden + JS 驱动 scrollTop）的回退策略事实——标准路径
+      // 不带这个键（键集逐字节不变）。B15/at_bottom 只在真的到底时出现。
+      ...(box["programmatic"] === true ? { strategy: "programmatic" as const } : {}),
+      ...scrollAtBottom(scrollTop, scrollHeight, clientHeight),
     };
   }
 
@@ -562,8 +610,12 @@ export async function setRange(mw: BrowserMiddleware, page: AnyPage, target: str
       }
       try {
         const r = await applyRange(page, resolved.loc, value, opts);
-        if (r.ok || !/cannot read the slider state/i.test(String(r.reason ?? ""))) return r;
-        last = r;
+        // 池侧身份事实（additive）：`row_index` 是"同 tag+label dup 组内序"，与耦合组内的
+        // `handle_index` 不是一回事——两个都带出，作者才分得清"第几个手柄"与"同名组第几个"。
+        // 池外回退解析（el === null）没有池行 = 键不出现。
+        const withPoolId = resolved.el?.row_index === undefined ? r : { ...r, pool_row_index: resolved.el.row_index };
+        if (withPoolId.ok || !/cannot read the slider state/i.test(String(withPoolId.reason ?? ""))) return withPoolId;
+        last = withPoolId;
       } finally {
         if (resolved.cleanup !== undefined) await resolved.cleanup();
       }
