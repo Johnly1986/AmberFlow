@@ -1,11 +1,8 @@
 /**
- * 生成物（勿手改）：由 tools/session-contract-gen.ts 从 src/support/session-contract.ts 的
- * SESSION_ELEMENT_VIEW_LIMITS 生成（check in）。
- * 重新生成：node --experimental-strip-types tools/session-contract-gen.ts --write
- * 校验：node --experimental-strip-types tools/session-contract-gen.ts --check
- *
- * 桥包自带 tsconfig（rootDir=src）不能 import 仓库 src，所以 ElementView 行的上限以常量
- * 投影到这里；引擎侧同界由生成器逐项交叉校验。
+ * 生成物（勿手改）：tools/session-contract-gen.ts 从 src/support/session-contract.ts 的
+ * SESSION_ELEMENT_VIEW_LIMITS 与 SESSION_ELEMENT_VIEW_FIELDS 生成（check in）。
+ * 重新生成 / 校验：session-contract-gen --write | --check。
+ * 桥包 tsconfig（rootDir=src）不能 import 仓库 src，故上限与字段合同以常量投影到这里。
  */
 
 /** 元素行数缺省（inspect/observe 两面一致；CLI inspect 缺省同为 60） */
@@ -52,3 +49,62 @@ export const rowTextsMaxLines = 6;
 
 /** row_texts 单行上限（与引擎的 ≤40 字符行过滤同界） */
 export const rowTextsLineMaxChars = 40;
+
+/* ----------------------------------------------------- 字段合同（生成） */
+
+/**
+ * 元素行字段的出现面闭集（与仓库表 `SESSION_ELEMENT_VIEW_FIELDS.faces` 同值域）。
+ * `both` = inspect 与 session `observe` 两面都带；另两值表示只有该面带。
+ */
+export const ELEMENT_VIEW_FACES = ["both", "observe", "inspect"] as const;
+export type ElementViewFace = (typeof ELEMENT_VIEW_FACES)[number];
+
+/** 一个元素行字段的桥侧合同事实（键名以桥面为准）。 */
+export interface ElementViewFieldSpec {
+  field: string;
+  faces: ElementViewFace;
+  /** 能否直接作为 act/read 的动作地址（全表有且只有 `hint_candidates`）。 */
+  address: boolean;
+  /** 关联的上限键（`null` = 无字符/条数界）。 */
+  caps: readonly string[] | null;
+}
+
+/**
+ * 元素行字段合同（唯一出处 = src/support/session-contract.ts 的 SESSION_ELEMENT_VIEW_FIELDS）。
+ *
+ * **地址只来自 `hint_candidates`**：`address` 字段在整张表里恰好一条为 `true`，生成器断言。
+ * `ref` 是展示/对账锚，`structure_path` 是诊断证据，`label`/`bbox`/`class_names` 是人读信息——
+ * 它们都不可当 target；act/read/extract 的 target 只认 hint 字符串或 CSS。
+ */
+export const ELEMENT_VIEW_FIELDS: readonly ElementViewFieldSpec[] = [
+  { field: "ref", faces: "both", address: false, caps: null },
+  { field: "hint_candidates", faces: "both", address: true, caps: ["hintsPerElement", "hintMaxChars"] },
+  { field: "tag", faces: "both", address: false, caps: null },
+  { field: "role", faces: "both", address: false, caps: ["identityMaxChars"] },
+  { field: "label", faces: "both", address: false, caps: ["labelMaxChars"] },
+  { field: "label_truncated", faces: "both", address: false, caps: null },
+  { field: "hints_truncated", faces: "both", address: false, caps: null },
+  { field: "href", faces: "both", address: false, caps: ["hrefMaxChars"] },
+  { field: "href_full", faces: "inspect", address: false, caps: ["hrefMaxChars"] },
+  { field: "class_names", faces: "both", address: false, caps: ["classNamesPerElement", "classNameMaxChars"] },
+  { field: "id", faces: "both", address: false, caps: ["identityMaxChars"] },
+  { field: "name", faces: "both", address: false, caps: ["identityMaxChars"] },
+  { field: "data_test", faces: "both", address: false, caps: ["identityMaxChars"] },
+  { field: "input_type", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+  { field: "bbox", faces: "observe", address: false, caps: null },
+  { field: "visible", faces: "observe", address: false, caps: null },
+  { field: "admitted", faces: "observe", address: false, caps: null },
+  { field: "why_not_admitted", faces: "observe", address: false, caps: ["whyNotAdmittedMaxChars"] },
+  { field: "frame", faces: "observe", address: false, caps: null },
+  { field: "frame_origin", faces: "both", address: false, caps: ["identityMaxChars"] },
+  { field: "frame_path", faces: "both", address: false, caps: ["framePathMaxItems", "framePathSegmentMaxChars"] },
+  { field: "row_texts", faces: "observe", address: false, caps: ["rowTextsMaxLines", "rowTextsLineMaxChars"] },
+  { field: "row_index", faces: "observe", address: false, caps: null },
+  { field: "structure_path", faces: "both", address: false, caps: ["structurePathMaxChars"] },
+  { field: "structure_unstable", faces: "both", address: false, caps: null },
+  { field: "action_family", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+  { field: "action_capabilities", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+  { field: "near", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+  { field: "surface", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+  { field: "heuristic", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+];

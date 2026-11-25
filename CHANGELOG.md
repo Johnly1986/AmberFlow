@@ -4,6 +4,136 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-25 元素字段合同单源（引擎 ObserveElement ↔ 桥 ElementView）
+
+> 元素行是 Agent 看页面的唯一入口，但它的结构化描述此前只有桥面 `ElementView` 一处；
+> 引擎侧 `ObserveElement` 与 `inspect` 元素行没有可断言的对照物，三面各自加减字段时
+> "桥给了引擎没给""引擎给了桥不给""某字段被当成地址用"都只能靠读代码发现。
+
+- **新表 `SESSION_ELEMENT_VIEW_FIELDS`**（`src/support/session-contract.ts`）：30 行 × 七维
+  （桥面字段名 / 引擎 observe 键 / 引擎 inspect 键 / 桥键 / 出现面 / cap / 可否作动作地址 /
+  语义与差异说明），与既有的 `SESSION_ELEMENT_VIEW_LIMITS`（只答"多少"）互补。
+  两张表同属一份合同，改其一必须同步另一。
+- **生成器新增 `checkElementViewFields()`**（`tools/session-contract-gen.ts`）：表 ↔ 三面源码
+  **双向**交叉校验——登记的键必须在源码里（接口声明 / inspect 行字面量 + `PoolElemView.extras` /
+  桥投影赋值点），三面源码里的每个键也必须在表里有行；另断言出现面自洽、`engineOnly` 登记与桥
+  实际读取一致、cap 键无死引用。**核心不变量机制化**：全表 `address:true` 有且只有
+  `hint_candidates`（把 `label` 改成 `address:true` 即 `session-contract:check` 红）。
+- **桥侧生成物**新增 `ELEMENT_VIEW_FACES` / `ELEMENT_VIEW_FIELDS`（字段名 + 出现面 + 可否作地址 + cap 键），
+  桥包仍不 import 仓库 `src`。
+- **文档整合**：`docs/AGENT_INTERFACE.md` §3.2 升级为**元素字段唯一权威表**（引擎↔桥两列 +
+  出现面 + 可否作地址 + cap），其余文档改指针不重复字段清单——
+  `APP_SCRIPT_AUTHORING.md`（observe 行只留 3-4 个作者相关字段的用法）、
+  `INTERACTIVE_SESSION.md`（observe 行只留信封字段）、`ROW_ANCHOR_HINT_PLAN.md` /
+  `ROW_INDEX_HINT_PLAN.md`（历史方案文档只加头部指针，不逐处改写）、`docs/MAINLINE.md`（cap 单源表述补字段合同）。
+- **如实记录的引擎↔桥差异**（不改运行时输出）：`input_type` 在引擎 observe 面叫 `type`、inspect 面叫
+  `input_type`，桥投影只读 `input_type` 所以 observe 面桥结果不带该键；`row_texts`/`row_index` 引擎两面都
+  采集但只有 observe 元素行投影；`href_full`/`action_family`/`action_capabilities`/`near`/`surface`/
+  `heuristic` 是 inspect 独有；`bbox`/`visible`/`admitted`/`why_not_admitted`/`frame` 是 observe 独有。
+
+## [Unreleased] — 2026-11-25 元素视图批（模型面正确性 + 敏感值不进标签）
+
+> 从"元素接口缺少结构化文档"的调研里查出的三个**模型面**缺陷（`criteriaView` 的输出直接喂给
+> 决策模型选点，选错不会产生任何信号）。三条都不是本次提案引入，而是既有实现里的洞。
+
+- **`criteriaView` 的对齐判据从「数量相等」改为「逐项身份」**：原判据
+  `ariaLines.length === 池大小` 只证明两边数量巧合相等——页面一有 `aria-hidden` 子树、嵌套控件、
+  被窗口挤出的元素，位置就会错配，模型看到的是**另一个元素的 role/name**。
+  新判据（`src/engine/aria-view.ts` 的 `ariaLinesAligned`）是 **role 硬 + name 软**：
+  能映射出 role 的行必须同 role；name 只在两种情况下判错配（role 映射不出、或该 aria name
+  恰好是**另一个**池行的 label）。无法逐项确认时**刻意降级**到 `tag "label"`——宁可少给 role
+  语义，也不给错的身份。实测：30 个夹具页与 14 个真实站点样本上**零退化**（原本对齐的仍对齐）。
+- **ARIA 行解析不再丢行**：名字含 `": "` 时 Playwright 会把 YAML 键用单引号包起来
+  （`- 'button "Save: draft"': S1`），原正则整行丢弃（4 行只解析出 1 行）。新解析器
+  `parseAriaInteractiveLine`（同模块）还原 YAML 单引号标量与 `''` 双写、用 `JSON.parse` 逆运算
+  拆 name，转义还原失败时退化为**空 name** 而不是截断的错误值（截断的名字会拼进模型提示词）。
+  `ARIA_INTERACTIVE_ROLES` 闭集一个字没加。
+- **敏感输入的活值不再当标签**：`input[type=password|file|hidden]` 的 `value` 会经 label 兜底链
+  进池行 → 模型面 / observe 行 / 池快照 / trace。现在与既有的 range 排除同形态（`isSecretInput`），
+  只读稳定面（aria-label / label 包裹 / placeholder）。**六面同口径**：池（`LABEL_HELPERS_JS`）、
+  DOM 回捞（`pool-js.ts` 的 `labelOf`）、dup 分组键（`ROW_CLIMB_JS`）、候选扫描兜底
+  （`candidate-scan.ts`）、FW8 候选摘要（`identity.ts`）、A3 池外回退合成行（`executor.ts`）。
+  **未覆盖**（如实）：`type=text` 里的明文凭据（按 type 不可区分，做形态启发会误伤真 label，
+  需要作者用 `meta.secretSlots` 或页面自身的 label/placeholder 表达语义）。
+- **新增 lane `verify:element-views`**（`tools/verify-element-views.ts`，零浏览器/零网络/零模型）：
+  parse 14+6 行表驱动 + align 12 组判据 + label 13×2 + 6 镜像组。**已进 `npm run check`**。
+- 夹具与 golden：新增 `fixtures/engine/secret-input.html` 与对应 `tools/golden/offline/secret-input.json`
+  （golden 内零明文，已验证 `hunter2`/`hidden-fixture-value`/`upload.txt` 命中数为 0）。
+
+## [Unreleased] — 2026-11-25 导航失败 vs 信封 / 改道语境 / 交接证据保现场
+
+> 走查复盘三项：改道后旧 `resume{hint}` 在新页执行（P0）、落在 Chrome 错误页被谎报成越界
+> （P0，pilot 与 run 两面各一处）、交接 evidence 超限截断把越界落地页切掉（P1）。
+
+- **P0 改道即换语境（补全）**：`PilotRuntime.redirectReset()` 此前清步史/禁选/账本/值需求/
+  落空 hint/键漂移现场，**唯独没清未消费的 `resumeHint`**。序列「越界停 → Agent 发
+  `resume{hint}`（轮首守卫在 hint 消费之前命中，hint 留在队列）→ `redirect` 到新页」会让旧语境
+  的点名在**新页面**上被确定性执行。修法：`redirectReset()` 一并清 `resumeHint`（与「新页面的
+  目标不是同一目标」同一纪律）。
+- **P0 导航失败不是越界（pilot 面与 run 面）**：Chrome 把导航失败落成内部错误页
+  `chrome-error://chromewebdata/`，其 URL host 是 `chromewebdata`——直接拿去判 hosts 信封，
+  「网络不通」就变成安全类停因（pilot `host_not_allowed`、run popup 扫描
+  `popup_not_allowed`），兜底方会去改 hosts 而不是验证可达性。
+  - 新增 `src/engine/nav-error.ts`（单一出处）：`isChromeErrorPage` / `NAV_ERROR_PATTERN`
+    （`ctx-runtime` 的 navigate 改为 import 同一条，不再内联手抄）/ `classifyNavError` /
+    `NAV_CONFIG_ERROR_PATTERN`（`ERR_UNSAFE_PORT` = 端口被浏览器拒绝，归 config 侧）/
+    `pageNavError`（`reload()` 有界 3s 还原浏览器原文——错误页 `body.innerText` 为空、
+    `content()` 是空壳，事后读不到原文）/ `contextNavError`（同 context 扫描，popup 面）。
+  - **pilot 面**：`envelopeEscapeNow` → `envelopeStopNow/Of`，错误页先归还原文再归类；
+    `PILOT_STOP_CODES` **10 → 12 码**（`unreachable` = 连接/DNS/超时类，解锁建议验证可达/放宽
+    超时；`config_error` = 端口/URL/原文不可得，解锁建议改声明）。三处判定（轮首/步尾/finish）
+    同一实现；交接证据新增 `nav_error`（仅这两个码且原文可得）。
+  - **run 面**：`runPostAction` 的 post-action 信封判定、done 轮询后的 popup 复扫、`runSetup`
+    的起跑 popup 扫描，三处都在信封判定**之前**判错误页，命中停 `config_error` + 原文
+    （run 面 `StopCode` 不新增 `unreachable`——不在联合里、且被纯搬移 manifest 钉住）。
+    **两面建议不打架**：分类结果照常算（`navFailure.code`），run 面经 `navErrorStopReason`
+    把对应处置建议（「站点此刻不可达：先验证可达再重试」/「改声明，重试同一地址无效」）写进
+    reason——码不动、口径与 pilot 面一致（同一张 `NAV_ERROR_DIRECTIVE` 表）。
+  - **正常语义不变**：真正跨 host 的跳转仍停 `host_not_allowed`（`host-envelope.ts` 零改动）。
+  - 证据：新增 `verify:nav-error` lane（5 场景：纯函数分类表 / pilot 面 / run 面 / run 起跑面 /
+    context 扫描），
+    `verify:pilot` 27 → 30 场景（新增「改道丢弃旧 resume 点名」「导航失败≠越界
+    （unreachable/config_error 带原文）」「交接 evidence 超限保现场」）。
+- **P1 交接 evidence 超限保现场**：`projectHandoff` 的 900 字符退化清单原为
+  `Object.keys(evidence).slice(0, 8)`——`off_envelope` 恰是第 9 个键，真实停驶现场（40 条
+  forbidden + 6 个 excluded frame，914–961 字符）的「是哪一步走出信封」事实被切掉。改为
+  **定位键优先**（`off_envelope` / `expect_url` / `needs_value` / `resume_hint` 存在就留），
+  其余按原插入序补足到 8 条；`truncated:true` 语义不变，**未超限的投影逐字节不变**。
+  断言两处且都可失败：`session-contract:check` 的 `checkEvidenceKeyPriority`（换回
+  `slice(0, 8)` 立即红两条）与 `verify:pilot` 的纯函数场景（同一实现下红一条）。
+
+## [Unreleased] — 2026-11-25 驾驶面信封（hosts 中途生效）
+
+> 真实站点走查（Google→Maps 三阶段任务）发现：pilot 的 `hosts` 信封只在起步校验，
+> 驾驶中途走出信封（点登录入口、第三方重定向）继续烧模型票。与 run 面 `hostGate`、
+> session 的 `open`/`goto`/`tab` 判定不一致。
+
+- **`host_not_allowed` 进 pilot 停因闭集**：`PILOT_STOP_CODES` 新增一码（与 run/session 同词），
+  `unblockHintsFor` 给两条确定性解锁建议（redirect 回信封内 / 确需就把目标加进 hosts）。
+- **三处判定**（共用 `pilot-evidence.envelopeEscape`，与 `disallowedHost` 单一出处）：
+  - 轮首：先判信封再判最终信号——不拿漂走后的候选问模型，**越界页上的信号成立也不算完成**
+    （原序是「信号 → 信封」，越界页恰好满足 `final-signal` 会直接 `final_signal_held / ok:true`）；
+  - 步尾：动作把页面带出信封时立即停——这样交接证据里能写清"是哪一步走出的"
+    （`why_stuck.evidence.off_envelope` = 落地 URL）；
+  - `finish`：在越界页同样判，回 `command_result{ok:false, code:"host_not_allowed"}` 单行拒绝，
+    **交接保持打开**（先 `redirect` 回信封内再收尾）；终态与 `stop_code` 不变。
+- **信封只来自声明（行为变更，两条口径分开读）**：
+  - **引擎库面**：`PilotRuntime` 不再按入口 URL 推断信封。`hosts` 未声明 / `null` / `[]` /
+    全空串条目 = `null` = **不设防**（与 `envelopeEscape` 的 `null → 放行` 一致）。空串条目在
+    构造期归一并剔除——此前 `new URL("about:blank").hostname === ""` 会造出 `[""]`，而该信封把
+    **一切** http(s) 页判成越界（attach 形态下不可恢复死锁）。
+  - **CLI/桥面默认路径不变、且信封照常中途生效**：`amber session --url` 不带 `--host` 时由 CLI
+    `inferHosts(--url)` 推断入口 host 并**显式**传给 pilot（`SessionPilotDriver` → `PilotOptions.hosts`），
+    桥面 `session open` 不传 hosts 走同一条 CLI 推断。所以「不传 hosts」在 CLI/桥面**不是**零变化——
+    驾驶中途走出入口 host 现在停 `host_not_allowed`（HEAD 是继续驾驶），这正是本批要修的行为。
+- 证据：`verify:pilot` 27/27（新增四条：信封只来自声明（含 null/[]/空串归一到不设防）、
+  导航信封：走出 hosts→host_not_allowed、信封优先于完成裁决（越界页信号成立≠完成 + finish 被拒）、
+  attach：about:blank 起步不造空串信封），用 127.0.0.1 / 127.0.0.2 造同机不同 host
+  （信封按 hostname 判）；`frame 排除` 场景改为显式声明 hosts（此前靠入口 host 隐式推断）。
+- **站点事实入库**：`site-facts/google-maps.json` + `docs/SITE_FACTS.md` 增一条
+  `reviews-hidden-when-headless`——地点详情页评论列表在 headless（HeadlessChrome UA）下不下发，
+  同路径换 headful 即正常（A/B 各 2 轮：0/0 vs 35/35）。**不是登录墙**，采集评论面必须 headful。
+
 ## [Unreleased] — 2026-11-24 会话诚实性批（P0/P1：超时对账 / 滑块身份 / 轨迹 / 形状判别 / observe 收窄）
 
 > 用户「按顺序实施，完成后逐项测试」：按会话实录复盘的四条 P0 + 四条 P1 逐项落地并各自验收。

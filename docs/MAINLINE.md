@@ -83,7 +83,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 
 > **会话面闭集单源**（session 请求 op / act op / drive 的 cmd·driver / max_steps 与 idle 界）：唯一数据表 = `src/support/session-contract.ts`，桥侧唯一投影 = 生成物 `integrations/dsh-bridge/src/session-contract.generated.ts`（`tools/session-contract-gen.ts --check` 校验过期，并与引擎契约 `src/app/session-runtime-contract.ts` 逐值交叉校验；桥不手抄闭集）。
 >
-> **会话面 cap 单源**（handoff 三层投影 cap / 会话响应证据块白名单与 cap / ElementView 行上限）：同一份表 `src/support/session-contract.ts` 的 `SESSION_HANDOFF_CAP_TABLE`（字段 × producer·engine·bridge 三列）、`SESSION_EVIDENCE_CAP_TABLE`（scroll/range/ambiguity/miss/wide 五块）与 `SESSION_ELEMENT_VIEW_LIMITS`；桥侧投影 = 生成物 `session-contract.generated.ts` 的 `BRIDGE_HANDOFF_CAPS`/`BRIDGE_EVIDENCE_*` 与 `integrations/dsh-bridge/src/element-view.constants.generated.ts`（同一 `--check` 判过期，生成器按引擎实测行为与引擎常量/内嵌 JS 静态 pin 逐项交叉校验）。桥 `element-view.ts`/`session.ts` 只读生成常量，不写数值字面量。
+> **会话面 cap 单源**（handoff 三层投影 cap / 会话响应证据块白名单与 cap / ElementView 行上限）：同一份表 `src/support/session-contract.ts` 的 `SESSION_HANDOFF_CAP_TABLE`（字段 × producer·engine·bridge 三列）、`SESSION_EVIDENCE_CAP_TABLE`（scroll/range/ambiguity/miss/wide 五块）、`SESSION_ELEMENT_VIEW_LIMITS`（上限）与 `SESSION_ELEMENT_VIEW_FIELDS`（字段合同：字段 × 引擎两面键名 × 桥面键名 × 出现面 × cap × 可否作动作地址）；桥侧投影 = 生成物 `session-contract.generated.ts` 的 `BRIDGE_HANDOFF_CAPS`/`BRIDGE_EVIDENCE_*` 与 `integrations/dsh-bridge/src/element-view.constants.generated.ts`（同一 `--check` 判过期，生成器按引擎实测行为与引擎常量/内嵌 JS 静态 pin 逐项交叉校验；字段合同另做表 ↔ 三面源码的双向交叉校验，并断言「动作地址只来自 `hint_candidates`」）。桥 `element-view.ts`/`session.ts` 只读生成常量，不写数值字面量。
 
 **进程内化**（handler 不再 spawn）：**延后**，不在 P0/P1 承诺。任何内进程化必须保持退出码矩阵与 JSON envelope 逐字节一致，并先解决 provider 装配的 run-scoped 注入（禁模块级全局）。
 

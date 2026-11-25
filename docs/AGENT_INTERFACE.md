@@ -575,28 +575,78 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   `/systemone`，升级时按该文档 §7.1 显式填完整端点，并**重启已加载的 DSH 宿主**。
   `verify:decision-endpoint-parity` 是这条的 tripwire（同一值两面有效端点必须相同）。
 
-### 3.2 观察面元素投影合同（ElementView）与证据上限
+### 3.2 观察面元素投影合同（ElementView）：字段唯一权威表
+
+> **本文是元素字段的唯一权威表。** 其它文档（`APP_SCRIPT_AUTHORING.md`、`INTERACTIVE_SESSION.md`、
+> `ROW_ANCHOR_HINT_PLAN.md`、`ROW_INDEX_HINT_PLAN.md` 等）只写**性质**与**用法**，不重复字段清单；
+> 需要字段全集时回到本节。表的机器可读真源是 `src/support/session-contract.ts` 的
+> `SESSION_ELEMENT_VIEW_FIELDS`（字段 × 引擎两面键名 × 桥面键名 × 出现面 × cap × 可否作地址），
+> 桥侧常量 `ELEMENT_VIEW_FIELDS` 由 `tools/session-contract-gen.ts` 生成；`npm run session-contract:check`
+> 对它做**双向交叉校验**（表里的键必须在源码里，三面源码里的键也必须在表里），任何一面加减字段
+> 而表没跟上都判红。
 
 `amberflow_inspect` 与 `amberflow_session op:"observe"` 的元素行共用
-`integrations/dsh-bridge/src/element-view.ts` 的**同一份投影合同**（单一出处，schema F54）：同形同义，
-只有信封不同——inspect 是一次性无状态面（`url` 入参、顶层 `element_count`/`ax`/`advisories`/`window`），
+`integrations/dsh-bridge/src/element-view.ts` 的**同一份投影合同**（同形同义）：只有信封不同——
+inspect 是一次性无状态面（`url` 入参、顶层 `element_count`/`ax`/`advisories`/`window`），
 observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,omitted}`，多帧另有 `frame_counts`，
 顶层另有 `ax` 证据块，见下）。
 
-| 字段 | 上限 / 口径 | 说明 |
-|---|---|---|
-| `ref` | — | 展示/对账锚：inspect=`eN`（池 ref），observe=`oN`（观察序号）。**不是动作地址**；act/read 只认 hint 字符串 / CSS。 |
-| `hint_candidates` | ≤6 条 × ≤200 字符 | 每条经同一个 `hintMatch` 自证「恰好唯一命中」，可照抄；跨帧同名时可能是 `<label> frame:<origin>` 或 ≤4 段链候选，同名组可能是 `<label> within:#id`（单层/链），**同文案重复组可能是 `<label> in-row:<token>`（F82 行锚，token 来自该元素 `row_texts` 行词元，仅小写折叠）或 `<label> row-index:N`（F83 顺序行锚——仅内容不可分网格产出：行内容词元全被生成期护栏拒绝时，序号即语义的候选出口）**。 |
-| `row_texts`（F82） | ≤6 行 × 每行 ≤40 字符 | 行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**（引擎 observe/inspect 面 dup 门控采集；与 `near` 同触发）。**不进模型面**。F84 批 3：桥 ElementView 投影已收编（`element-view.ts` 白名单两键 + ≤6×≤40 上限）；观察面 dup 判定只对"观察集合内可见同文案计数"执行（max 截断边界）。 |
-| `row_index`（F83） | 1-based 正整数 | dup 组内 DOM 先序位次（row-index 匹配底座 + 第 6 档候选序号来源）——**仅同文案重复组元素携带**（帧内同组；无 dup 页不出字段）。**不进模型面**；序号即语义的序漂移责任在作者（组合守卫 `row-index:N in-row:<token>` = fail-safe 主推）。F84 批 3：桥 ElementView 投影已收编（number 透传）。**跨面可移植的前提 = 同名组成员在两个收集面都在场**（池面 `POOL_SEL`+heuristic / 回捞·observe 面 `ADMIT_SEL` 两个元素宇宙不同；照抄 inspect 候选前用 `ctx.observe`/run 复核）。 |
-| `label` / `label_truncated` | ≤200（匹配口径 `full_label`） | `href`/`href_full` ≤160；`class_names` ≤8×40；`why_not_admitted` ≤400（词边界截断）；role/id 等短标识 ≤60。 |
-| `frame` | 0 = 主 frame | 对应 `frames[]` 下标；observe 多帧另有 `frame_counts:[{index,url,elements}]`（单帧不出现）。 |
-| `frame_origin` / `frame_path` | origin 桥 ≤60（引擎歧义证据 ≤120）；path ≤4 段×64 | 帧链底座：`frame_path` 省略 = 主帧；两字段都缺 = 未知 origin 帧（about:blank/srcdoc，不可被 `frame:` 命中）。 |
-| `structure_path` / `structure_unstable` | ≤160 | **仅诊断**：inspect 面默认输出（本来就是诊断面）；`ctx.observe({includeStructure:true})` / 桥 `include_structure:true` 时出现。动态页面会失效，**不是 hint、不可照抄**，不进模型面/歧义证据。 |
-| `admitted` / `why_not_admitted` | ≤400（词边界截断） | observe 面的准入诊断；截断点落在空白/标点处，`#id` / `[data-test=…]` / `[name=…]` / `role=…` 寻址 token 不从中间切断（token 自身越限时保 token 完整、截其余叙述——唯一可超 400 的情形，仍 ≤ 引擎原文长度）；inspect 面不出现（元素本来就来自池）。 |
+**核心不变量（机制保证）**：**地址只来自 `hint_candidates`。** `ref` 是**展示/对账锚，不是动作地址**；
+`structure_path` 是诊断证据（动态页面会失效）；`label` / `bbox` / `class_names` / `row_texts` 都是
+人读信息。`act` / `read` / `extract` 的 `target` 只认 **hint 字符串**（六形状闭集 + 尾缀）或 CSS。
+把 `ref`、`structure_path` 或快照文本照抄进 target 只会得到 `target_not_found`——这条由
+`npm run session-contract:check` 的字段合同断言钉住：`address:true` 的行**有且只有** `hint_candidates`。
+
+列说明：**引擎 observe** = `src/engine/observe.ts` 的 `ObserveElement` 键（`—` = 该面不产）；
+**引擎 inspect** = `amber inspect --json` 元素行的键（`—` = 该面不产）；**出现面** 是桥输出面
+（两面 / 仅 observe / 仅 inspect）；**可作地址** = 能否直接作为 act/read 的 target；
+**上限** = 桥 `ElementView` 投影的界（`src/support/session-contract.ts` 的
+`SESSION_ELEMENT_VIEW_LIMITS`）。缺键 = 该面引擎未提供，桥**透传不补算**。
+
+| 字段 | 引擎 observe | 引擎 inspect | 出现面 | 可作地址 | 上限 | 语义 / 契约事实 |
+|---|---|---|---|---|---|---|
+| `ref` | `ref` | `ref` | 两面 | 否 | — | 展示/对账锚：observe 面是观察序号 `oN`，inspect 面是池 ref `eN`；不是动作地址：act/read/extract 的 target 只认 hint 字符串或 CSS |
+| `hint_candidates` | `hint_candidates` | `hint_candidates` | 两面 | **✅ 地址** | ≤6 条 × ≤200 字符 | 自证 hint 候选：每条经同一个 `hintMatch` 在对应集合上验证「恰好唯一命中该元素」；**唯一可作动作地址的字段**；跨帧为 `<label> frame:<origin链>`，同名组为 `within:`，同文案重复组为 `in-row:`/`row-index:` |
+| `tag` | `tag` | `tag` | 两面 | 否 | — | 元素标签名（小写） |
+| `role` | `role` | `role` | 两面 | 否 | ≤60 字符 | 显式 ARIA 角色（`role` 属性，小写）；没有角色时缺键 |
+| `label` | `label` | `label` | 两面 | 否 | ≤200 | 可见标签（匹配口径是引擎 `full_label` 的 ≤200 前缀）；人读信息：可读、不可当地址；照抄进 target 不构成寻址 |
+| `label_truncated` | — | `label_truncated` | 两面 | 否 | — | `label` 被截断过（引擎匹配口径 200，或桥层按 `labelMaxChars` 再裁）；inspect 面由引擎置位；observe 面引擎不产此键，桥在裁剪时自己置位 |
+| `hints_truncated` | — | — | 两面 | 否 | — | 引擎给的候选条数多于桥收集上限（桥侧独立置位）；兼容位：当前两侧候选生成上限都低于收集上限，实际不会出现 |
+| `href` | `href` | `href` | 两面 | 否 | ≤160 字符 | 链接地址（inspect 面是去 origin/query 的展示投影，observe 面是 DOM 原始属性） |
+| `href_full` | — | `href_full` | 仅 inspect | 否 | ≤160 字符 | 原始 `getAttribute('href')`（query/fragment/origin 都在）；observe 面的 `href` 本身就是原始属性；此键只在 inspect 面出现 |
+| `class_names` | `class_names` | `class_names` | 两面 | 否 | ≤8 条 × ≤40 字符 | 有界类名清单 |
+| `id` | `id` | `id` | 两面 | 否 | ≤60 字符 | `id` 属性（空值缺键） |
+| `name` | `name` | `name` | 两面 | 否 | ≤60 字符 | `name` 属性（空值缺键） |
+| `data_test` | `data_test` | `data_test` | 两面 | 否 | ≤60 字符 | `data-test` 属性（空值缺键） |
+| `input_type` | `type` | `input_type` | 仅 inspect | 否 | ≤60 字符 | `type` 属性（input 族语义）；同一事实三面两个键名：引擎 observe 面叫 `type`、inspect 面叫 `input_type`；桥的投影只读 `input_type`，所以 observe 面桥不收这个引擎键（引擎有、桥面不给）——如实的现状，不改运行时输出 |
+| `bbox` | `bbox` | — | 仅 observe | 否 | — | 视口坐标盒 `{x,y,w,h}`（人读几何，不可寻址） |
+| `visible` | `visible` | — | 仅 observe | 否 | — | 可见性（`includeHidden:true` 时不可见行也会出现） |
+| `admitted` | `admitted` | — | 仅 observe | 否 | — | 当前准入面（准入选择器 + 可见 + 至少一条自证 hint）可解析 |
+| `why_not_admitted` | `why_not_admitted` | — | 仅 observe | 否 | ≤400 字符 | 不满足 `admitted` 的可行动原因（不是错误码堆叠）；桥按词边界截断：`#id` / `[data-test=…]` / `[name=…]` / `role=…` 寻址 token 不从中间切断 |
+| `frame` | `frame` | — | 仅 observe | 否 | — | 元素所在帧下标（0 = 主 frame，对应 `frames[]`） |
+| `frame_origin` | `frame_origin` | `frame_origin` | 两面 | 否 | ≤60 字符 | 元素所在帧的 origin；未知 origin 帧（about:blank/srcdoc）两面都不出此键——这类帧不可被任何 `frame:` 命中 |
+| `frame_path` | `frame_path` | `frame_path` | 两面 | 否 | ≤4 段 × ≤64 字符 | 帧 origin 祖先链（外→内；主帧省略） |
+| `row_texts` | `row_texts` | — | 仅 observe | 否 | ≤6 行 × ≤40 字符 | 行上下文文本（`in-row:` 匹配底座与词元来源）；引擎两面都采集，但 inspect 的元素行不投影此键；仅同文案重复组元素携带，不进模型面 |
+| `row_index` | `row_index` | — | 仅 observe | 否 | — | 同文案重复组内的 DOM 先序位次（1-based；`row-index:` 匹配底座）；与 `row_texts` 同采集面，同样只在 observe 元素行投影；序漂移责任在作者 |
+| `structure_path` | `structure_path` | `structure_path` | 两面 | 否 | ≤160 字符 | 结构证据：祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀；**诊断证据，不可照抄**：动态页面（重排/虚拟列表/插入广告）随时失效，不是 hint |
+| `structure_unstable` | `structure_unstable` | `structure_unstable` | 两面 | 否 | — | 结构证据的不稳定标记（与 `structure_path` 同出现，一眼看出不是 hint） |
+| `action_family` | — | `action_family` | 仅 inspect | 否 | ≤60 字符 | 动作族（池投影 `elemFamily`：click/fill/select/check/upload） |
+| `action_capabilities` | — | `action_capabilities` | 仅 inspect | 否 | ≤60 字符 | 动作能力面（含 slider/scroll/drag/hover/upload 等特殊控件能力）；条数由桥投影按字面量 8 收集（`ACTION_ADAPTERS` 共 10 种，单元素同时具备 >8 种能力的页面上会被裁到 8）——该条数界没有进 `SESSION_ELEMENT_VIEW_LIMITS`，故「上限」列只记单项字符界 |
+| `near` | — | `near` | 仅 inspect | 否 | ≤60 字符 | 近邻上下文锚（既有 `near~` 属性词匹配的池字段） |
+| `surface` | — | `surface` | 仅 inspect | 否 | ≤60 字符 | 准入类目标记（native-control / aria-role / …，只进 inspect 与类目计数） |
+| `heuristic` | — | `heuristic` | 仅 inspect | 否 | ≤60 字符 | 启发式伪按钮标记（宽扫通道专属，审计可辨） |
+
+**引擎 ↔ 桥的差异（如实记录，不是缺陷）**：`label_truncated` / `hints_truncated` 是桥侧派生位
+（引擎不产，桥在裁剪时置位）；`input_type` 是同一事实的**两个引擎键名**——引擎 observe 面叫 `type`，
+inspect 面叫 `input_type`，桥投影只读 `input_type`，所以 observe 面的桥结果**不带**这个键；
+`row_texts` / `row_index` 引擎两面都采集，但只有 observe 元素行投影（inspect 元素行不带）；
+`href_full` / `action_family` / `action_capabilities` / `near` / `surface` / `heuristic` 是 inspect 面
+独有（池投影与宽扫标记），observe 面不带；`bbox` / `visible` / `admitted` / `why_not_admitted` /
+`frame` 是 observe 面独有（准入诊断与几何），inspect 面不带。差异本身是各面的职责分工，
+改它属可见的契约变化，需单独成批。
 
 - 行数 cap：缺省 60、硬上限 200（inspect 参数 `max_elements`，observe 参数 `max`）；observe 元素硬上限
-  200、帧上限 ≤6。缺键 = 该面引擎未提供，桥**透传不补算**。
+  200、帧上限 ≤6。
 - `ambiguity`（会话 `act` 歧义停，A2/F55）：`target ≤120`、`source`、`tier`、`would_act_ref`、
   `candidates_total`/`truncated`，候选 ≤5 行（`ref`/`tag`/`role` ≤16、`label`/`class`/`near` ≤40、
   `frame`、`frame_origin`（引擎 ≤120，桥 clip ≤60）、`same_label`、`suggested_hint` ≤200——B 批后
@@ -639,6 +689,18 @@ JSON 对象（`drive` 行在值键漂移回放步另带 `value_target_drift:{fro
 信封排除的跨源子 frame）——桥面把它们投影给 Agent，`what_would_unblock` 第一条给出
 "把 origin 加入 hosts 后重试"的确定性建议。
 
+`hosts` 信封（声明才生效）：判定的唯一来源是发起方声明，`null`/`[]`/全空串 = **不设防**（不按
+入口 URL 推断）。声明后信封在驾驶中途生效，与 run 面 `hostGate` 同一谓词（`disallowedHost`，
+主页面 URL 判定；popup/新标签不在该判定内，run 面另有 `popup_not_allowed`）：
+- 轮首：当前页 URL 越界 = 确定性停 `host_not_allowed`——在抽池/问模型**之前**，且在最终信号判定
+  **之前**（越界页上的信号成立不算完成）；
+- 步尾：动作把主页面带出信封即停，交接 `why_stuck.evidence.off_envelope`（= 落地 URL，区别于
+  `handoff.url` 的停驶页锚点）写明是哪一步走出的；
+- `finish` 在越界页 = `code:"host_not_allowed"` 单行拒绝（既有码），交接保持打开，先 `redirect` 回内。
+`started` 不新增字段；生效信封在会话 `open`/`goto` 响应的 `hosts` 与 `drive_status` 的
+`stop_code` 上可见。CLI `amber session --url` 不带 `--host` 时由 CLI 从 `--url` 推断入口 host
+并显式传给 pilot——所以**那条默认路径的信封是生效的**（与"引擎库面未声明 = 不设防"是两层口径）。
+
 stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 session 同源——坏 JSON/未知/被拒
 指令只回执一条错误、继续等下一条，不杀会话）：
 
@@ -668,10 +730,10 @@ lane 直接驱动）。交互式常驻驾驶（跨调用同现场、逐交接喂
 
 | 字段 | 口径 | 说明 |
 |---|---|---|
-| `stop_code` | 闭集 9 码 | `final_signal_held` / `budget_exceeded` / `off_task_page` / `low_confidence` / `target_ambiguous` / `needs_value` / `stuck_inert` / `no_model_runtime` / `browser_dead` |
+| `stop_code` | 闭集 12 码 | `final_signal_held` / `budget_exceeded` / `off_task_page` / `host_not_allowed` / `unreachable` / `config_error` / `low_confidence` / `target_ambiguous` / `needs_value` / `stuck_inert` / `no_model_runtime` / `browser_dead` |
 | `step_id` | 0-based 驾驶步号 | `budget_exceeded` 时 = `max_steps` |
 | `goal_digest` | ≤200 字符 | 总目标有界投影 |
-| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40；`frames_excluded` ≤6；声明时 `expect_url`；`needs_value:{target,key,ref}` = 哪个目标/键要值（仅 `needs_value` 且已知）；`resume_hint:{hint,missed:true}` = 上次 resume hint 落空（仅落空后第一次交接，不含值）） |
+| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40；`frames_excluded` ≤6；声明时 `expect_url`；`off_envelope` = 越出 hosts 的落地 URL（仅 `host_not_allowed` 且越界时出现）；`needs_value:{target,key,ref}` = 哪个目标/键要值（仅 `needs_value` 且已知）；`resume_hint:{hint,missed:true}` = 上次 resume hint 落空（仅落空后第一次交接，不含值）；`nav_error` = 落在 Chrome 错误页时还原的浏览器原文 `net::ERR_*`（仅 `unreachable`/`config_error` 且原文可得）） |
 | `what_would_unblock` | ≤3 条 | 按停因查表确定性生成，不是模型建议 |
 | `evidence_refs` | 四件套落盘路径 | 截图 `.png` / DOM `.dom.html`（>2MB 截断）/ 池快照 `.pool.json` / observe `.observe.json`；各自独立失败、独立缺字段 |
 | `url` | — | 停驶页现场锚点 |
@@ -720,3 +782,6 @@ Agent 不能自己确认危险动作；确认必须来自部署配置或人类�
 - 完整运行用真实站点（`online/` 或临时应用），证据写仓库外。
 - 桥验证：重建 `integrations/dsh-bridge`，由子代理只通过 `amberflow_*` 工具完成
   “inspect → app_create → 编辑 app.mjs → app_check → run” 的端到端流程。
+- 元素字段合同（§3.2）由 `npm run session-contract:check` 守卫：表 ↔ 三面源码双向交叉校验 +
+  「动作地址只来自 `hint_candidates`」不变量。改 observe/ElementView 的字段先改
+  `src/support/session-contract.ts` 的 `SESSION_ELEMENT_VIEW_FIELDS`，再 `--write` 重生成桥侧常量。

@@ -90,7 +90,7 @@ online/cases/probe/*.json
 
 非门禁证据 lane（本地 fixtures / 静态源码，不是完成裁决；单条 script = `verify:<lane>`，脚本清单唯一出处是 `package.json`）：
 
-- 抽取/运行期：`verify:offline`（14 个夹具页的抽取面，比较按元素身份归一、ref 编号漂移不算差异）、`verify:runtime:offline`（唯一执行循环 8 场景）
+- 抽取/运行期：`verify:offline`（15 个夹具页的抽取面，比较按元素身份归一、ref 编号漂移不算差异）、`verify:runtime:offline`（唯一执行循环 8 场景）
 - 编排/话术：`verify:run-execution`（四源归一化产物 vs golden；池构成/排序/容量变更后须重录基线）、`golden-manual`（六条人工路径话术基线；静态源码扫描，毫秒级）
 - 会话/动作面：`verify:act-lock`、`verify:session-range`、`verify:session-drive`、`verify:poolless-actions`、`verify:dedup-controls`、`verify:frame-budget`
 - 决策/结果面：`verify:app-stop-context`、`verify:decision-accounting`、`verify:decision-ask-parity`、`verify:decision-endpoint-parity`（端点归一化差异白名单）、`verify:run-view-parity`（agent/桥 run 视图差异白名单）

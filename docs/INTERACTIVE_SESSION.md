@@ -59,7 +59,7 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 | type | 请求（额外字段） | 成功响应（额外字段） | 失败 code |
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts` | `host_not_allowed` / `unreachable` / `config_error` |
-| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `frame` 下标、`frame_origin?`/`frame_path?`（帧链）与 `hint_candidates`（含 `frame:` 候选）；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`；多 frame 时另有 `frame_counts`） | `bad_selector` |
+| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；元素行的字段全集见 [AGENT_INTERFACE §3.2](AGENT_INTERFACE.md) 的唯一权威表——本文只记信封：`frame` 下标、多 frame 时的 `frame_counts`） | `bad_selector` |
 | `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
 | `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
@@ -129,6 +129,11 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 - `observe` **不提供 offset**：元素序随水合/动画变化，没有稳定锚（用 offset 续页会悄悄错位）。
   行数太多时用 `selector` 收窄、`max` 放宽（硬上限 200），要全量元素快照就用 `snapshot`
   （`pool-<n>.json`）。
+
+- **元素行的字段口径不在本文重复**：`observe` 每元素的字段、cap 与「哪一面有」见
+  [`docs/AGENT_INTERFACE.md` §3.2](AGENT_INTERFACE.md) 的**唯一权威字段表**。会话面只需记住两条：
+  **地址只来自 `hint_candidates`**（`ref` 是展示锚，`structure_path` 是诊断证据，都不能当 target），
+  以及 `admitted === false` 时 `why_not_admitted` 会点名"为什么没有可解析地址"。
 
 ### 示例（books.toscrape.com 全链）
 

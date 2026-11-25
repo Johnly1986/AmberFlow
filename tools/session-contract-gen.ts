@@ -43,6 +43,8 @@ import {
   SESSION_TAB_ACTIONS,
   SESSION_TIMEOUTS,
   SESSION_WINDOW_MODES,
+  SESSION_ELEMENT_VIEW_FACES,
+  SESSION_ELEMENT_VIEW_FIELDS,
   SESSION_ELEMENT_VIEW_LIMITS,
   SESSION_EVIDENCE_CAP_TABLE,
   SESSION_HANDOFF_CAP_TABLE,
@@ -67,6 +69,12 @@ const GENERATED_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "ses
 const ELEMENT_VIEW_GENERATED_PATH = path.join(
   REPO, "integrations", "dsh-bridge", "src", "element-view.constants.generated.ts",
 );
+/** 字段合同的三个对端源码（双向交叉校验的数据源；只做源码文本扫描，不求值类型）。 */
+const OBSERVE_SRC_PATH = path.join(REPO, "src", "engine", "observe.ts");
+const INSPECT_SRC_PATH = path.join(REPO, "src", "cli", "commands", "inspect.ts");
+const POOL_VIEW_SRC_PATH = path.join(REPO, "src", "engine", "pool-view.ts");
+const ELEMENT_VIEW_SRC_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "element-view.ts");
+const AGENT_INTERFACE_PATH = path.join(REPO, "docs", "AGENT_INTERFACE.md");
 
 type Value = string | number;
 type Entries = ReadonlyArray<readonly [string, Value]>;
@@ -335,6 +343,7 @@ function checkHandoffCaps(): string[] {
     problems.push("handoff why_stuck.evidence.keys：超限退化清单必须 ≤ 表列（8 条）");
   }
   if (bounded["truncated"] !== true) problems.push("handoff why_stuck.evidence：整块超表列时必须退化为 truncated 清单");
+  problems.push(...checkEvidenceKeyPriority());
   const unblock = view["what_would_unblock"] as string[];
   const rowUnblock = capRow("what_would_unblock");
   if (rowUnblock === undefined || rowUnblock.engine !== unblock.length) problems.push("handoff what_would_unblock：引擎列与投影条数不等");
@@ -369,6 +378,61 @@ function checkHandoffCaps(): string[] {
   const unblockCount = Math.max(...PILOT_STOP_CODES.map((stop) => unblockHintsFor(stop, widest).length));
   if (rowUnblockProducer === undefined || rowUnblockProducer.producer !== unblockCount || unblockCount > 3) {
     problems.push("handoff what_would_unblock：producer 列必须等于闭集生成上限（≤3）");
+  }
+  return problems;
+}
+
+/**
+ * 超限退化清单的**保现场**断言（可失败回归）：定位键优先保留，其余按原序补足到 8 条；
+ * 未超限时投影逐字节等于原 evidence（`truncated` 键不出现）。
+ *
+ * `off_envelope` 在 evidence 里恰是第 9 个键（inert_run/forbidden/ledger/... 之后），纯按插入序
+ * 截前 8 键会把它切掉——那正是真实停驶现场最需要的「是哪一步走出信封」的事实。
+ */
+function checkEvidenceKeyPriority(): string[] {
+  const problems: string[] = [];
+  const pad = "x".repeat(200);
+  const longText = "x".repeat(1200);
+  const project = (evidence: Record<string, unknown>): Record<string, unknown> => {
+    const view = projectHandoff({
+      stop_code: "host_not_allowed", step_id: 1, goal_digest: "g",
+      why_stuck: { summary: "s", evidence }, what_would_unblock: [], evidence_refs: {}, url: "u",
+    });
+    return ((view["why_stuck"] as Record<string, unknown>)["evidence"] ?? {}) as Record<string, unknown>;
+  };
+  const padded = (keys: string[]): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const k of keys) out[k] = pad;
+    return out;
+  };
+  // ① 真实停驶现场量级（9 键，off_envelope 第 9）：定位键必须在退化清单里。
+  const scene = project({
+    inert_run: 3, forbidden: Array.from({ length: 40 }, (_, i) => `e${String(i)}`),
+    ledger: [{ key: "k", tries: 3, last_outcome: longText }],
+    loop_stop: { desc: longText, tries: 3 },
+    frames_excluded: Array.from({ length: 6 }, (_, i) => ({ origin: `http://f${String(i)}.test`, index: i })),
+    expect_url: "/maps", needs_value: { target: longText, key: "k", ref: "e1" },
+    resume_hint: { hint: longText, missed: true }, off_envelope: "http://away.invalid/x",
+  });
+  if (scene["truncated"] !== true) problems.push("evidence 键优先级：9 键超限必须退化为 truncated 清单");
+  const sceneKeys = Array.isArray(scene["keys"]) ? scene["keys"] as string[] : [];
+  if (!sceneKeys.includes("off_envelope")) {
+    problems.push("evidence 键优先级：真实停驶现场量级下 off_envelope 被截掉（截断须保定位键）");
+  }
+  for (const required of ["expect_url", "needs_value", "resume_hint"]) {
+    if (!sceneKeys.includes(required)) problems.push(`evidence 键优先级：定位键 ${required} 被截掉`);
+  }
+  if (sceneKeys.length > 8) problems.push(`evidence 键优先级：退化清单 ${String(sceneKeys.length)} 条 > 8`);
+  // ② 10 键且 off_envelope 在末尾：仍 ≤8 且保留它。
+  const tail = project(padded([...Array.from({ length: 9 }, (_, i) => `k${String(i)}`), "off_envelope"]));
+  const tailKeys = Array.isArray(tail["keys"]) ? tail["keys"] as string[] : [];
+  if (tailKeys.length !== 8) problems.push(`evidence 键优先级：10 键退化清单应恰 8 条（实际 ${String(tailKeys.length)}）`);
+  if (!tailKeys.includes("off_envelope")) problems.push("evidence 键优先级：off_envelope 在末尾时被截掉");
+  // ③ 未超限：投影逐字节等于原 evidence，且不出现 truncated 键。
+  const small = { inert_run: 0, forbidden: ["a"], off_envelope: "http://away.invalid/x" };
+  const smallView = project(small);
+  if (JSON.stringify(smallView) !== JSON.stringify(small)) {
+    problems.push("evidence 键优先级：未超限时投影必须逐字节等于原 evidence");
   }
   return problems;
 }
@@ -427,6 +491,166 @@ function checkElementViewLimits(): string[] {
   return problems;
 }
 
+/**
+ * 字段合同的**双向交叉校验**：表 ↔ 三面源码（引擎 observe / inspect 元素行 / 桥投影）。
+ *
+ * 用源码文本扫描而不是类型：桥包 tsconfig（rootDir=src）不能 import 仓库 `src`，inspect 的元素
+ * 行又是命令内的局部类型。表要钉的事实正是"某个键在那一面的源码里到底在不在"——漏登记/多登记
+ * 一律红，键名漂移（引擎 `type` ↔ 桥 `input_type`）必须在表里显式写成不同列。
+ */
+function sourceFieldNames(text: string, iface: string): string[] {
+  const body = new RegExp(`export interface ${iface} \\{([\\s\\S]*?)\\n\\}`).exec(text)?.[1];
+  if (body === undefined) return [];
+  return [...body.matchAll(/^\s{2}([A-Za-z_][A-Za-z0-9_]*)\??:/gm)].map((m) => m[1]!);
+}
+
+/** 对象字面量里出现的键（`{ k: …` / `, k: …` / `{ k }` 简写）。 */
+function objectKeysIn(text: string): string[] {
+  return [...new Set([...text.matchAll(/(?:^|[{,]\s*)([a-z][a-z0-9_]*)\s*[:,}]/gm)].map((m) => m[1]!))];
+}
+
+/**
+ * inspect 元素行的键：行字面量本身的键 + `PoolView.extras` 的键。
+ *
+ * extras 的键名唯一出处是 `PoolElemView.extras` 的类型声明（`Partial<Record<…>>`）——行里用
+ * `...e.extras` 整块展开，字面量扫描看不见这些键。
+ */
+function inspectRowKeys(inspectText: string, poolViewText: string): string[] {
+  const start = inspectText.indexOf("const elements: InspectElement[] = view.elements.map((e) => {");
+  const end = start < 0 ? -1 : inspectText.indexOf("const text = wantText", start);
+  if (start < 0 || end < 0) return [];
+  const extras = /extras: Partial<Record<([\s\S]*?)>>/.exec(poolViewText)?.[1] ?? "";
+  const extrasKeys = [...extras.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+  return [...new Set([...objectKeysIn(inspectText.slice(start, end)), ...extrasKeys])];
+}
+
+/** 桥 `projectElementView` 的函数体（读引擎键 + 组装桥行的唯一写点）。 */
+function bridgeProjectionBody(elementViewText: string): string {
+  const start = elementViewText.indexOf("export function projectElementView(raw: unknown): ElementView | null {");
+  const end = start < 0 ? -1 : elementViewText.indexOf("\nexport function projectElementViews", start);
+  return start < 0 || end < 0 ? "" : elementViewText.slice(start, end);
+}
+
+function checkElementViewFields(): string[] {
+  const problems: string[] = [];
+  const read = (file: string): string => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "");
+  const observeText = read(OBSERVE_SRC_PATH);
+  const inspectKeys = inspectRowKeys(read(INSPECT_SRC_PATH), read(POOL_VIEW_SRC_PATH));
+  const elementViewText = read(ELEMENT_VIEW_SRC_PATH);
+  const projection = bridgeProjectionBody(elementViewText);
+
+  const engineObserve = sourceFieldNames(observeText, "ObserveElement");
+  const bridgeFields = sourceFieldNames(elementViewText, "ElementView");
+  if (engineObserve.length === 0) problems.push("字段合同：src/engine/observe.ts 的 ObserveElement 接口扫不到字段（源码形状变了，断言空转）");
+  if (bridgeFields.length === 0) problems.push("字段合同：element-view.ts 的 ElementView 接口扫不到字段（源码形状变了，断言空转）");
+  if (inspectKeys.length === 0) problems.push("字段合同：inspect 元素行扫不到键（源码形状变了，断言空转）");
+  if (projection === "") problems.push("字段合同：element-view.ts 的 projectElementView 函数体扫不到（源码形状变了，断言空转）");
+
+  const tableFields = SESSION_ELEMENT_VIEW_FIELDS.map((row) => row.field);
+  const dups = tableFields.filter((f, i) => tableFields.indexOf(f) !== i);
+  if (dups.length > 0) problems.push(`字段合同：字段重复登记 ${[...new Set(dups)].join(", ")}`);
+
+  const engineObserveInTable = new Set(SESSION_ELEMENT_VIEW_FIELDS.map((row) => row.engineObserve).filter((v): v is string => v !== null));
+  const engineInspectInTable = new Set(SESSION_ELEMENT_VIEW_FIELDS.map((row) => row.engineInspect).filter((v): v is string => v !== null));
+  const bridgeInTable = new Set(SESSION_ELEMENT_VIEW_FIELDS.map((row) => row.bridge).filter((v): v is string => v !== null));
+
+  // ① 表 → 源码：每个登记的键必须真的在那一面存在。
+  for (const row of SESSION_ELEMENT_VIEW_FIELDS) {
+    if (row.engineObserve !== null && !engineObserve.includes(row.engineObserve)) {
+      problems.push(`字段合同：${row.field}.engineObserve=${row.engineObserve} 不在 ObserveElement`);
+    }
+    if (row.engineInspect !== null && !inspectKeys.includes(row.engineInspect)) {
+      problems.push(`字段合同：${row.field}.engineInspect=${row.engineInspect} 不在 inspect 元素行`);
+    }
+    if (row.bridge !== null && !bridgeFields.includes(row.bridge)) {
+      problems.push(`字段合同：${row.field}.bridge=${row.bridge} 不在 ElementView`);
+    }
+  }
+  // ② 源码 → 表：三面里的每个键都必须在表里有行（任一方向漏登记 = 红）。
+  for (const name of engineObserve) {
+    if (!engineObserveInTable.has(name)) problems.push(`字段合同：ObserveElement.${name} 未登记进 SESSION_ELEMENT_VIEW_FIELDS`);
+  }
+  for (const name of inspectKeys) {
+    if (!engineInspectInTable.has(name)) problems.push(`字段合同：inspect 元素行 ${name} 未登记进 SESSION_ELEMENT_VIEW_FIELDS`);
+  }
+  for (const name of bridgeFields) {
+    if (!bridgeInTable.has(name)) problems.push(`字段合同：ElementView.${name} 未登记进 SESSION_ELEMENT_VIEW_FIELDS`);
+  }
+
+  // ③ 核心不变量：地址只来自 hint_candidates（全表 address:true 有且只有它）。
+  const addressFields = SESSION_ELEMENT_VIEW_FIELDS.filter((row) => row.address).map((row) => row.field);
+  if (addressFields.length !== 1 || addressFields[0] !== "hint_candidates") {
+    problems.push(`字段合同：address:true 必须恰好是 hint_candidates（实际 ${JSON.stringify(addressFields)}）——地址只来自自证 hint 候选`);
+  }
+
+  // ④ 出现面自洽：只有一面产出的键不能声称另一面有；桥侧派生位（截断标记等）要显式登记。
+  for (const row of SESSION_ELEMENT_VIEW_FIELDS) {
+    const only = row.engineOnly ?? [];
+    const derived = row.derived ?? [];
+    const bridgedObserve = (row.engineObserve !== null && !only.includes("observe")) || derived.includes("observe");
+    const bridgedInspect = (row.engineInspect !== null && !only.includes("inspect")) || derived.includes("inspect");
+    const expected = bridgedObserve && bridgedInspect ? "both" : bridgedObserve ? "observe" : bridgedInspect ? "inspect" : null;
+    if (expected === null) {
+      problems.push(`字段合同：${row.field} 在两面桥输出里都不会出现（登记它没有意义）`);
+    } else if (row.faces !== expected) {
+      problems.push(`字段合同：${row.field} 的 faces=${row.faces}，按键名与派生位推导应为 ${expected}`);
+    }
+    for (const face of [row.faces, ...derived]) {
+      if (!(SESSION_ELEMENT_VIEW_FACES as readonly string[]).includes(face)) {
+        problems.push(`字段合同：${row.field} 的出现面 ${face} 不在闭集`);
+      }
+    }
+  }
+
+  // ⑤ 桥投影赋值点：每个引擎键都要么被桥读、要么在表里显式登记为「引擎有桥不给」。
+  for (const row of SESSION_ELEMENT_VIEW_FIELDS) {
+    const only = row.engineOnly ?? [];
+    for (const [face, key] of [["observe", row.engineObserve], ["inspect", row.engineInspect]] as const) {
+      if (key === null) continue;
+      const readByBridge = projection.includes(`raw['${key}']`);
+      if (only.includes(face) && readByBridge) {
+        problems.push(`字段合同：${row.field} 登记了 engineOnly:${face}（引擎有桥不给），但桥投影确实读了 raw['${key}']`);
+      }
+      if (!only.includes(face) && !readByBridge) {
+        problems.push(`字段合同：${row.field} 在 ${face} 面有引擎键 ${key}，但桥投影没有读它（要么接线，要么登记 engineOnly:${face}）`);
+      }
+    }
+    if (row.bridge !== null && !new RegExp(`(?:^|[{,]\\s*)${row.field}\\s*[:,}]`, "m").test(projection)) {
+      problems.push(`字段合同：${row.field} 在 ElementView 合同里，但 projectElementView 没有赋值点（字段名出现性检查）`);
+    }
+  }
+
+  // ⑥ caps 必须指向真实上限键，且每个上限键至少被一处引用（不留死引用；行数上限键除外）。
+  const limitKeys = Object.keys(SESSION_ELEMENT_VIEW_LIMITS);
+  const usedCaps = new Set(SESSION_ELEMENT_VIEW_FIELDS.flatMap((row) => [...(row.caps ?? [])]));
+  for (const cap of usedCaps) {
+    if (!limitKeys.includes(cap)) problems.push(`字段合同：caps 引用了不存在的上限键 ${cap}`);
+  }
+  for (const key of limitKeys) {
+    if (!usedCaps.has(key) && key !== "elementDefaultMax" && key !== "elementMax") {
+      problems.push(`字段合同：上限键 ${key} 没有被任何字段行引用（行数上限键除外）`);
+    }
+  }
+
+  // ⑦ 文档表 = 本表的渲染，不许手写漂移：§3.2 的行集合与地址标记必须逐行一致。
+  const section = read(AGENT_INTERFACE_PATH).split("### 3.2 观察面元素投影合同")[1]?.split("\n### ")[0] ?? "";
+  if (section === "") problems.push("字段合同：docs/AGENT_INTERFACE.md §3.2 锚点丢失（文档表断言失去锚点）");
+  else {
+    const rows = new Map([...section.matchAll(/^\| `([a-z_]+)` \|([^\n]*)$/gm)].map((m) => [m[1]!, m[2]!]));
+    for (const row of SESSION_ELEMENT_VIEW_FIELDS) {
+      const cells = rows.get(row.field);
+      if (cells === undefined) { problems.push(`字段合同：§3.2 表缺 ${row.field} 行`); continue; }
+      if ((cells.split("|")[3] ?? "").includes("✅") !== row.address) {
+        problems.push(`字段合同：§3.2 表 ${row.field} 的「可作地址」标记与表不一致`);
+      }
+    }
+    for (const name of rows.keys()) {
+      if (!SESSION_ELEMENT_VIEW_FIELDS.some((r) => r.field === name)) problems.push(`字段合同：§3.2 表多出未登记字段 ${name}`);
+    }
+  }
+  return problems;
+}
+
 /** handoff 三层 cap 表的桥侧投影：只取有 `bridgeKey` 的行（桥透出条目的桥列为准）。 */
 function handoffCapsSource(): string {
   const rows = SESSION_HANDOFF_CAP_TABLE.filter((row) => "bridgeKey" in row);
@@ -466,13 +690,10 @@ function evidenceCapsSource(): string {
 function renderElementViewConstants(): string {
   const lines: string[] = [
     "/**",
-    " * 生成物（勿手改）：由 tools/session-contract-gen.ts 从 src/support/session-contract.ts 的",
-    " * SESSION_ELEMENT_VIEW_LIMITS 生成（check in）。",
-    " * 重新生成：node --experimental-strip-types tools/session-contract-gen.ts --write",
-    " * 校验：node --experimental-strip-types tools/session-contract-gen.ts --check",
-    " *",
-    " * 桥包自带 tsconfig（rootDir=src）不能 import 仓库 src，所以 ElementView 行的上限以常量",
-    " * 投影到这里；引擎侧同界由生成器逐项交叉校验。",
+    " * 生成物（勿手改）：tools/session-contract-gen.ts 从 src/support/session-contract.ts 的",
+    " * SESSION_ELEMENT_VIEW_LIMITS 与 SESSION_ELEMENT_VIEW_FIELDS 生成（check in）。",
+    " * 重新生成 / 校验：session-contract-gen --write | --check。",
+    " * 桥包 tsconfig（rootDir=src）不能 import 仓库 src，故上限与字段合同以常量投影到这里。",
     " */",
     "",
   ];
@@ -482,7 +703,52 @@ function renderElementViewConstants(): string {
     lines.push(`export const ${key} = ${value};`);
     lines.push("");
   }
+  lines.push(...elementViewFieldsSource());
   return lines.join("\n");
+}
+
+/**
+ * 字段合同投影：桥侧只需要「字段名 + 出现面 + 能否作地址 + cap 键」这四件事实。
+ * 语义/差异说明留在仓库表里（`src/support/session-contract.ts`），桥侧不重复一份散文——
+ * 散文一进生成物就会和权威表说法对不上。
+ */
+function elementViewFieldsSource(): string[] {
+  const lines: string[] = [
+    "/* ----------------------------------------------------- 字段合同（生成） */",
+    "",
+    "/**",
+    " * 元素行字段的出现面闭集（与仓库表 `SESSION_ELEMENT_VIEW_FIELDS.faces` 同值域）。",
+    " * `both` = inspect 与 session `observe` 两面都带；另两值表示只有该面带。",
+    " */",
+    `export const ELEMENT_VIEW_FACES = [${SESSION_ELEMENT_VIEW_FACES.map((f) => JSON.stringify(f)).join(", ")}] as const;`,
+    "export type ElementViewFace = (typeof ELEMENT_VIEW_FACES)[number];",
+    "",
+    "/** 一个元素行字段的桥侧合同事实（键名以桥面为准）。 */",
+    "export interface ElementViewFieldSpec {",
+    "  field: string;",
+    "  faces: ElementViewFace;",
+    "  /** 能否直接作为 act/read 的动作地址（全表有且只有 `hint_candidates`）。 */",
+    "  address: boolean;",
+    "  /** 关联的上限键（`null` = 无字符/条数界）。 */",
+    "  caps: readonly string[] | null;",
+    "}",
+    "",
+    "/**",
+    " * 元素行字段合同（唯一出处 = src/support/session-contract.ts 的 SESSION_ELEMENT_VIEW_FIELDS）。",
+    " *",
+    " * **地址只来自 `hint_candidates`**：`address` 字段在整张表里恰好一条为 `true`，生成器断言。",
+    " * `ref` 是展示/对账锚，`structure_path` 是诊断证据，`label`/`bbox`/`class_names` 是人读信息——",
+    " * 它们都不可当 target；act/read/extract 的 target 只认 hint 字符串或 CSS。",
+    " */",
+    "export const ELEMENT_VIEW_FIELDS: readonly ElementViewFieldSpec[] = [",
+  ];
+  for (const row of SESSION_ELEMENT_VIEW_FIELDS) {
+    const caps = row.caps === null ? "null" : `[${row.caps.map((c) => JSON.stringify(c)).join(", ")}]`;
+    lines.push(`  { field: ${JSON.stringify(row.field)}, faces: ${JSON.stringify(row.faces)}, address: ${row.address ? "true" : "false"}, caps: ${caps} },`);
+  }
+  lines.push("];");
+  lines.push("");
+  return lines;
 }
 
 function main(argv: readonly string[]): number {
@@ -494,7 +760,7 @@ function main(argv: readonly string[]): number {
   }
   const problems = [
     ...checkSets(), ...checkEngineContract(), ...checkOpMapping(), ...checkBounds(),
-    ...checkHandoffCaps(), ...checkEvidenceCaps(), ...checkElementViewLimits(),
+    ...checkHandoffCaps(), ...checkEvidenceCaps(), ...checkElementViewLimits(), ...checkElementViewFields(),
   ];
   // 生成物快照先算齐（契约自检失败时也要能报错，故 render 只在通过后调用）。
   if (problems.length > 0) {

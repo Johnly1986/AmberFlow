@@ -249,6 +249,9 @@ export const SESSION_EVIDENCE_CAP_TABLE = {
  * 桥面 ElementView 行合同的全部上限（唯一出处）。生成器把这些值投影成
  * `integrations/dsh-bridge/src/element-view.constants.generated.ts`（check in）。
  *
+ * 上限只答"多少"，字段本身（哪一面有、叫什么、能不能当动作地址）见
+ * {@link SESSION_ELEMENT_VIEW_FIELDS}——两张表是同一份合同的两个维度，改其一必须同步另一。
+ *
  * `note` 是生成物里的 JSDoc：写契约事实（与哪一层的口径同界），不是变更记录。
  * 引擎侧同界由生成器逐项交叉校验（`elementMax` ↔ `observe` 硬上限、`labelMaxChars` ↔
  * `elem-model` 的 full_label、`hintMaxChars` ↔ `ambiguity` 的 hint 界、类名/结构/行上下文
@@ -274,3 +277,227 @@ export const SESSION_ELEMENT_VIEW_LIMITS = {
   rowTextsMaxLines: { value: 6, note: "row_texts 行数上限（与引擎行上文的 ≤6 行同界）" },
   rowTextsLineMaxChars: { value: 40, note: "row_texts 单行上限（与引擎的 ≤40 字符行过滤同界）" },
 } as const;
+
+/* ------------------------------------------------------ ElementView 字段合同 */
+
+/** 元素行字段的出现面闭集：两面 / 只有 observe / 只有 inspect（桥输出面口径）。 */
+export const SESSION_ELEMENT_VIEW_FACES = ["both", "observe", "inspect"] as const;
+export type SessionElementViewFace = (typeof SESSION_ELEMENT_VIEW_FACES)[number];
+
+/** `SESSION_ELEMENT_VIEW_FIELDS` 的一行形状（表用显式类型标注，便于生成器按行遍历）。 */
+export interface SessionElementViewField {
+  /** 桥面（消费面）字段名；也是本表的唯一键。 */
+  field: string;
+  /** 引擎 observe 面（`ObserveElement`）的键名；`null` = 该面没有这一键。 */
+  engineObserve: string | null;
+  /**
+   * 引擎 inspect 面元素行的键名（inspect 命令从池投影 + `PoolView.extras` 组出的行）；
+   * `null` = 该面没有这一键。
+   */
+  engineInspect: string | null;
+  /** 桥面字段名（`ElementView`）；`null` = 桥面整体丢弃该引擎字段（当前无此情形）。 */
+  bridge: string | null;
+  /** 哪一面会带这个字段（桥输出面）。 */
+  faces: SessionElementViewFace;
+  /**
+   * 引擎有、桥面**不给**该面的键（如实记录，不是缺陷）：`observe` = 引擎 observe 面产出但
+   * 桥投影不读（键名不一致或桥不投影），`inspect` = inspect 面同理。生成器据此断言两侧的
+   * 现状：登记了 `observe` 而桥投影竟然读了该键，或桥不读却没登记，都判红。
+   */
+  engineOnly?: readonly SessionElementViewFace[];
+  /**
+   * 桥侧**派生**出现面：引擎在该面不产这个键，桥自己置位（截断标记这类投影事实）。
+   * 生成器用它校验 `faces` 不虚报引擎产出。
+   */
+  derived?: readonly SessionElementViewFace[];
+  /** 该字段的上限键（`SESSION_ELEMENT_VIEW_LIMITS` 的键名；`null` = 无字符/条数界）。 */
+  caps: readonly string[] | null;
+  /** 能否直接作为 act/read target 的**动作地址**。闭集保证：全表有且只有 `hint_candidates`。 */
+  address: boolean;
+  /** 一句话语义。 */
+  semantics: string;
+  /** 契约事实（键名差异、采集面与投影面的差异、不可照抄的原因等）。 */
+  note?: string;
+}
+
+/**
+ * 观察面**元素行字段合同**的唯一出处：字段 × 引擎两面键名 × 桥面键名 × cap × 出现面 ×
+ * 能否作动作地址。
+ *
+ * 为什么要这张表：元素行是 Agent 看页面的唯一入口，但它的描述此前只有桥面（`ElementView`）
+ * 一处结构化清单，引擎侧 `ObserveElement` 与 inspect 面元素行没有可断言的对照物；三面各自
+ * 加减字段时，"桥给了引擎没给""引擎给了桥不给""某个字段被当成地址用"都只能靠读代码发现。
+ * 本表把三面收进一张可机检的表：生成器 `checkElementViewFields` 拿它做双向交叉校验——表里
+ * 每个非 `null` 的引擎键必须真实存在于对应面的源码，两面源码里的每个键也必须在表里有行
+ * （任一方向漏登记 = 红）。
+ *
+ * **核心不变量（机制化，不靠文档自觉）**：地址只来自 `hint_candidates`。`ref` 是展示/对账锚，
+ * `structure_path` 是诊断证据，`label`/`bbox`/`class_names` 是人读信息；`act`/`read`/`extract`
+ * 的 target 只认 hint 字符串或 CSS。生成器断言 `address:true` 的行**有且只有** `hint_candidates`。
+ *
+ * 改字段 = 改本表 + `tools/session-contract-gen.ts --write`（生成桥侧常量）；引擎面新增/删除
+ * 字段时同步改表，否则 `--check` 红。
+ */
+export const SESSION_ELEMENT_VIEW_FIELDS: readonly SessionElementViewField[] = [
+  // ---- 身份与地址 ----
+  {
+    field: "ref", engineObserve: "ref", engineInspect: "ref", bridge: "ref", faces: "both", caps: null, address: false,
+    semantics: "展示/对账锚：observe 面是观察序号 `oN`，inspect 面是池 ref `eN`",
+    note: "不是动作地址：act/read/extract 的 target 只认 hint 字符串或 CSS",
+  },
+  {
+    field: "hint_candidates", engineObserve: "hint_candidates", engineInspect: "hint_candidates", bridge: "hint_candidates",
+    faces: "both", caps: ["hintsPerElement", "hintMaxChars"], address: true,
+    semantics: "自证 hint 候选：每条经同一个 `hintMatch` 在对应集合上验证「恰好唯一命中该元素」",
+    note: "**唯一可作动作地址的字段**；跨帧为 `<label> frame:<origin链>`，同名组为 `within:`，同文案重复组为 `in-row:`/`row-index:`",
+  },
+  {
+    field: "tag", engineObserve: "tag", engineInspect: "tag", bridge: "tag", faces: "both", caps: null, address: false,
+    semantics: "元素标签名（小写）",
+  },
+  {
+    field: "role", engineObserve: "role", engineInspect: "role", bridge: "role", faces: "both", caps: ["identityMaxChars"], address: false,
+    semantics: "显式 ARIA 角色（`role` 属性，小写）；没有角色时缺键",
+  },
+  {
+    field: "label", engineObserve: "label", engineInspect: "label", bridge: "label", faces: "both", caps: ["labelMaxChars"], address: false,
+    semantics: "可见标签（匹配口径是引擎 `full_label` 的 ≤200 前缀）",
+    note: "人读信息：可读、不可当地址；照抄进 target 不构成寻址",
+  },
+  {
+    field: "label_truncated", engineObserve: null, engineInspect: "label_truncated", bridge: "label_truncated",
+    faces: "both", derived: ["observe"], caps: null, address: false,
+    semantics: "`label` 被截断过（引擎匹配口径 200，或桥层按 `labelMaxChars` 再裁）",
+    note: "inspect 面由引擎置位；observe 面引擎不产此键，桥在裁剪时自己置位",
+  },
+  {
+    field: "hints_truncated", engineObserve: null, engineInspect: null, bridge: "hints_truncated",
+    faces: "both", derived: ["observe", "inspect"], caps: null, address: false,
+    semantics: "引擎给的候选条数多于桥收集上限（桥侧独立置位）",
+    note: "兼容位：当前两侧候选生成上限都低于收集上限，实际不会出现",
+  },
+  // ---- 展示与属性（人读，不可寻址） ----
+  {
+    field: "href", engineObserve: "href", engineInspect: "href", bridge: "href", faces: "both", caps: ["hrefMaxChars"], address: false,
+    semantics: "链接地址（inspect 面是去 origin/query 的展示投影，observe 面是 DOM 原始属性）",
+  },
+  {
+    field: "href_full", engineObserve: null, engineInspect: "href_full", bridge: "href_full", faces: "inspect",
+    caps: ["hrefMaxChars"], address: false,
+    semantics: "原始 `getAttribute('href')`（query/fragment/origin 都在）",
+    note: "observe 面的 `href` 本身就是原始属性；此键只在 inspect 面出现",
+  },
+  {
+    field: "class_names", engineObserve: "class_names", engineInspect: "class_names", bridge: "class_names", faces: "both",
+    caps: ["classNamesPerElement", "classNameMaxChars"], address: false,
+    semantics: "有界类名清单",
+  },
+  {
+    field: "id", engineObserve: "id", engineInspect: "id", bridge: "id", faces: "both", caps: ["identityMaxChars"], address: false,
+    semantics: "`id` 属性（空值缺键）",
+  },
+  {
+    field: "name", engineObserve: "name", engineInspect: "name", bridge: "name", faces: "both", caps: ["identityMaxChars"], address: false,
+    semantics: "`name` 属性（空值缺键）",
+  },
+  {
+    field: "data_test", engineObserve: "data_test", engineInspect: "data_test", bridge: "data_test", faces: "both",
+    caps: ["identityMaxChars"], address: false,
+    semantics: "`data-test` 属性（空值缺键）",
+  },
+  {
+    field: "input_type", engineObserve: "type", engineInspect: "input_type", bridge: "input_type", faces: "inspect",
+    engineOnly: ["observe"], caps: ["identityMaxChars"], address: false,
+    semantics: "`type` 属性（input 族语义）",
+    note: "同一事实三面两个键名：引擎 observe 面叫 `type`、inspect 面叫 `input_type`；桥的投影只读 `input_type`，"
+      + "所以 observe 面桥不收这个引擎键（引擎有、桥面不给）——如实的现状，不改运行时输出",
+  },
+  {
+    field: "bbox", engineObserve: "bbox", engineInspect: null, bridge: "bbox", faces: "observe", caps: null, address: false,
+    semantics: "视口坐标盒 `{x,y,w,h}`（人读几何，不可寻址）",
+  },
+  // ---- 观察面准入诊断 ----
+  {
+    field: "visible", engineObserve: "visible", engineInspect: null, bridge: "visible", faces: "observe", caps: null, address: false,
+    semantics: "可见性（`includeHidden:true` 时不可见行也会出现）",
+  },
+  {
+    field: "admitted", engineObserve: "admitted", engineInspect: null, bridge: "admitted", faces: "observe", caps: null, address: false,
+    semantics: "当前准入面（准入选择器 + 可见 + 至少一条自证 hint）可解析",
+  },
+  {
+    field: "why_not_admitted", engineObserve: "why_not_admitted", engineInspect: null, bridge: "why_not_admitted",
+    faces: "observe", caps: ["whyNotAdmittedMaxChars"], address: false,
+    semantics: "不满足 `admitted` 的可行动原因（不是错误码堆叠）",
+    note: "桥按词边界截断：`#id` / `[data-test=…]` / `[name=…]` / `role=…` 寻址 token 不从中间切断",
+  },
+  // ---- 帧链 ----
+  {
+    field: "frame", engineObserve: "frame", engineInspect: null, bridge: "frame", faces: "observe", caps: null, address: false,
+    semantics: "元素所在帧下标（0 = 主 frame，对应 `frames[]`）",
+  },
+  {
+    field: "frame_origin", engineObserve: "frame_origin", engineInspect: "frame_origin", bridge: "frame_origin", faces: "both",
+    caps: ["identityMaxChars"], address: false,
+    semantics: "元素所在帧的 origin",
+    note: "未知 origin 帧（about:blank/srcdoc）两面都不出此键——这类帧不可被任何 `frame:` 命中",
+  },
+  {
+    field: "frame_path", engineObserve: "frame_path", engineInspect: "frame_path", bridge: "frame_path", faces: "both",
+    caps: ["framePathMaxItems", "framePathSegmentMaxChars"], address: false,
+    semantics: "帧 origin 祖先链（外→内；主帧省略）",
+  },
+  // ---- 行锚底座 ----
+  {
+    field: "row_texts", engineObserve: "row_texts", engineInspect: null, bridge: "row_texts", faces: "observe",
+    caps: ["rowTextsMaxLines", "rowTextsLineMaxChars"], address: false,
+    semantics: "行上下文文本（`in-row:` 匹配底座与词元来源）",
+    note: "引擎两面都采集，但 inspect 的元素行不投影此键；仅同文案重复组元素携带，不进模型面",
+  },
+  {
+    field: "row_index", engineObserve: "row_index", engineInspect: null, bridge: "row_index", faces: "observe", caps: null,
+    address: false,
+    semantics: "同文案重复组内的 DOM 先序位次（1-based；`row-index:` 匹配底座）",
+    note: "与 `row_texts` 同采集面，同样只在 observe 元素行投影；序漂移责任在作者",
+  },
+  // ---- 诊断证据（不是地址） ----
+  {
+    field: "structure_path", engineObserve: "structure_path", engineInspect: "structure_path", bridge: "structure_path",
+    faces: "both", caps: ["structurePathMaxChars"], address: false,
+    semantics: "结构证据：祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀",
+    note: "**诊断证据，不可照抄**：动态页面（重排/虚拟列表/插入广告）随时失效，不是 hint",
+  },
+  {
+    field: "structure_unstable", engineObserve: "structure_unstable", engineInspect: "structure_unstable",
+    bridge: "structure_unstable", faces: "both", caps: null, address: false,
+    semantics: "结构证据的不稳定标记（与 `structure_path` 同出现，一眼看出不是 hint）",
+  },
+  // ---- 池投影附加（inspect 面的动作能力与宽扫标记） ----
+  {
+    field: "action_family", engineObserve: null, engineInspect: "action_family", bridge: "action_family", faces: "inspect",
+    caps: ["identityMaxChars"], address: false,
+    semantics: "动作族（池投影 `elemFamily`：click/fill/select/check/upload）",
+  },
+  {
+    field: "action_capabilities", engineObserve: null, engineInspect: "action_capabilities", bridge: "action_capabilities",
+    faces: "inspect", caps: ["identityMaxChars"], address: false,
+    semantics: "动作能力面（含 slider/scroll/drag/hover/upload 等特殊控件能力）",
+    note: "条数由桥投影按字面量 8 收集（`ACTION_ADAPTERS` 共 10 种，单元素同时具备 >8 种能力的页面上会被裁到 8）——"
+      + "该条数界没有进 SESSION_ELEMENT_VIEW_LIMITS，故 caps 只记单项字符界；改它先补上限键再改这里",
+  },
+  {
+    field: "near", engineObserve: null, engineInspect: "near", bridge: "near", faces: "inspect", caps: ["identityMaxChars"],
+    address: false,
+    semantics: "近邻上下文锚（既有 `near~` 属性词匹配的池字段）",
+  },
+  {
+    field: "surface", engineObserve: null, engineInspect: "surface", bridge: "surface", faces: "inspect",
+    caps: ["identityMaxChars"], address: false,
+    semantics: "准入类目标记（native-control / aria-role / …，只进 inspect 与类目计数）",
+  },
+  {
+    field: "heuristic", engineObserve: null, engineInspect: "heuristic", bridge: "heuristic", faces: "inspect",
+    caps: ["identityMaxChars"], address: false,
+    semantics: "启发式伪按钮标记（宽扫通道专属，审计可辨）",
+  },
+];

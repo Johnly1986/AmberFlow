@@ -36,6 +36,8 @@ import {
   classNameMaxChars,
   elementDefaultMax,
   elementMax,
+  ELEMENT_VIEW_FIELDS,
+  type ElementViewFieldSpec,
   framePathMaxItems,
   framePathSegmentMaxChars,
   hintMaxChars,
@@ -48,6 +50,28 @@ import {
   structurePathMaxChars,
   whyNotAdmittedMaxChars,
 } from './element-view.constants.generated.ts'
+
+/**
+ * 元素行字段合同（生成物 `ELEMENT_VIEW_FIELDS` 的再导出）：字段 × 出现面 × 能否作动作地址 × cap 键。
+ * 权威表在仓库 `src/support/session-contract.ts` 的 `SESSION_ELEMENT_VIEW_FIELDS`（人类可读的完整
+ * 版本见 `docs/AGENT_INTERFACE.md` §3.2）；桥包不能 import 仓库 `src`，只收这份确定性投影。
+ */
+export const ELEMENT_VIEW_FIELD_CONTRACT: readonly ElementViewFieldSpec[] = ELEMENT_VIEW_FIELDS
+export type { ElementViewFieldSpec }
+
+/**
+ * 合同自证（import 时一次）：**地址只来自 `hint_candidates`**。
+ *
+ * 仓库侧由生成器对权威表断言同一条；这里是**消费侧镜像**——桥看不到仓库源码，只能验自己收到的
+ * 投影。两侧同时成立，"把 `ref`/`label`/`structure_path` 当 target 用"才不可能被写成合法合同。
+ */
+const ADDRESS_FIELDS: readonly string[] = ELEMENT_VIEW_FIELDS.filter((f) => f.address).map((f) => f.field)
+if (ADDRESS_FIELDS.length !== 1 || ADDRESS_FIELDS[0] !== 'hint_candidates') {
+  throw new Error(
+    'element-view: 字段合同的 address 面必须恰好是 hint_candidates，实际 '
+    + `${JSON.stringify(ADDRESS_FIELDS)}（生成物与仓库表不一致？重跑 session-contract-gen --write）`,
+  )
+}
 
 /** 元素行数缺省（两面一致；`amber inspect` 的 CLI 缺省同为 60）。 */
 export const ELEMENT_DEFAULT_MAX = elementDefaultMax
