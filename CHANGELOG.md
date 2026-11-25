@@ -44,6 +44,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `ctx.scrollList("page")` 语义不动）；`not_scrollable` 的建议也改成会话面可执行的
   `act scroll target=document`（此前推荐 `ctx.scrollList`，会话面没有 ctx）。
 
+- **桥面 `shape_problem.kind` 闭集改由契约表生成**：桥此前硬编码三个类别，本批新增的
+  `css-attr-operator` 会被静默过滤掉（引擎说写法可疑、Agent 看不到原因）。闭集移到
+  `SESSION_EVIDENCE_CAP_TABLE.miss.shapeProblemKinds` 并生成
+  `BRIDGE_EVIDENCE_MISS_SHAPEPROBLEMKINDS`；`session-contract:check` 新增与
+  `HintShapeProblemKind` union 的**双向**一致性断言（新增类别忘登记即红）。
+
 测试：新增 lane `verify:walk-r1`（七项断言 + 各自的回退反证），已进 `verify:lanes` 聚合与
 `AGENTS.md` / `docs/MAINLINE.md` 的 lane 清单。文档同批同步：`docs/INTERACTIVE_SESSION.md`
 的歧义回显表（`ambiguous` 只在歧义停时出现、`ok:true` 时 `matched_others` 是 advisory）、
