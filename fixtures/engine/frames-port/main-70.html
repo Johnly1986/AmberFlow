@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>frames ①：主帧 70 个可交互按钮 + 同源 iframe 对话框（帧预算/跨帧饥饿测量）</title>
+<style>
+  body { margin: 0; font: 13px/1.2 system-ui, sans-serif; }
+  /* 7 列 × 10 行、全部落在首屏内且同尺寸：醒目度（可见交集面积）全等 ⇒ 桶内次序
+     退化为 scan（DOM 序），截断位置确定、跨机器可复现。 */
+  #grid { display: grid; grid-template-columns: repeat(7, 150px); gap: 8px; padding: 8px; }
+  #grid button { height: 36px; }
+  #dialog-frame { display: block; margin: 8px; width: 320px; height: 140px; border: 1px solid #999; }
+</style>
+</head>
+<body>
+<!-- 70 个可交互按钮：故意超过 act 池预算 64（POOL_CAP_ELEMENTS）。主帧先填满窗口，
+     同源 iframe 里的两个按钮就分不到名额（跨帧饥饿的确定性形态）。 -->
+<div id="grid">
+  <button id="btn-01">Row 01 Btn</button>
+  <button id="btn-02">Row 02 Btn</button>
+  <button id="btn-03">Row 03 Btn</button>
+  <button id="btn-04">Row 04 Btn</button>
+  <button id="btn-05">Row 05 Btn</button>
+  <button id="btn-06">Row 06 Btn</button>
+  <button id="btn-07">Row 07 Btn</button>
+  <button id="btn-08">Row 08 Btn</button>
+  <button id="btn-09">Row 09 Btn</button>
+  <button id="btn-10">Row 10 Btn</button>
+  <button id="btn-11">Row 11 Btn</button>
+  <button id="btn-12">Row 12 Btn</button>
+  <button id="btn-13">Row 13 Btn</button>
+  <button id="btn-14">Row 14 Btn</button>
+  <button id="btn-15">Row 15 Btn</button>
+  <button id="btn-16">Row 16 Btn</button>
+  <button id="btn-17">Row 17 Btn</button>
+  <button id="btn-18">Row 18 Btn</button>
+  <button id="btn-19">Row 19 Btn</button>
+  <button id="btn-20">Row 20 Btn</button>
+  <button id="btn-21">Row 21 Btn</button>
+  <button id="btn-22">Row 22 Btn</button>
+  <button id="btn-23">Row 23 Btn</button>
+  <button id="btn-24">Row 24 Btn</button>
+  <button id="btn-25">Row 25 Btn</button>
+  <button id="btn-26">Row 26 Btn</button>
+  <button id="btn-27">Row 27 Btn</button>
+  <button id="btn-28">Row 28 Btn</button>
+  <button id="btn-29">Row 29 Btn</button>
+  <button id="btn-30">Row 30 Btn</button>
+  <button id="btn-31">Row 31 Btn</button>
+  <button id="btn-32">Row 32 Btn</button>
+  <button id="btn-33">Row 33 Btn</button>
+  <button id="btn-34">Row 34 Btn</button>
+  <button id="btn-35">Row 35 Btn</button>
+  <button id="btn-36">Row 36 Btn</button>
+  <button id="btn-37">Row 37 Btn</button>
+  <button id="btn-38">Row 38 Btn</button>
+  <button id="btn-39">Row 39 Btn</button>
+  <button id="btn-40">Row 40 Btn</button>
+  <button id="btn-41">Row 41 Btn</button>
+  <button id="btn-42">Row 42 Btn</button>
+  <button id="btn-43">Row 43 Btn</button>
+  <button id="btn-44">Row 44 Btn</button>
+  <button id="btn-45">Row 45 Btn</button>
+  <button id="btn-46">Row 46 Btn</button>
+  <button id="btn-47">Row 47 Btn</button>
+  <button id="btn-48">Row 48 Btn</button>
+  <button id="btn-49">Row 49 Btn</button>
+  <button id="btn-50">Row 50 Btn</button>
+  <button id="btn-51">Row 51 Btn</button>
+  <button id="btn-52">Row 52 Btn</button>
+  <button id="btn-53">Row 53 Btn</button>
+  <button id="btn-54">Row 54 Btn</button>
+  <button id="btn-55">Row 55 Btn</button>
+  <button id="btn-56">Row 56 Btn</button>
+  <button id="btn-57">Row 57 Btn</button>
+  <button id="btn-58">Row 58 Btn</button>
+  <button id="btn-59">Row 59 Btn</button>
+  <button id="btn-60">Row 60 Btn</button>
+  <button id="btn-61">Row 61 Btn</button>
+  <button id="btn-62">Row 62 Btn</button>
+  <button id="btn-63">Row 63 Btn</button>
+  <button id="btn-64">Row 64 Btn</button>
+  <button id="btn-65">Row 65 Btn</button>
+  <button id="btn-66">Row 66 Btn</button>
+  <button id="btn-67">Row 67 Btn</button>
+  <button id="btn-68">Row 68 Btn</button>
+  <button id="btn-69">Row 69 Btn</button>
+  <button id="btn-70">Row 70 Btn</button>
+</div>
+<!-- 同源子帧：真站对应 = Google Maps 的对话框 iframe（pool-27.json 的 f1:e0 Cancel /
+     f1:e1 Sign In）。同源才能被 extractElements 逐帧 evaluate。 -->
+<script>
+  /* frames-port 专用：?child=<绝对 origin> 时 iframe 指到该 origin（同 hostname 异端口场景）；
+     不传 = 相对 src（同端口）。其余内容与 frames/main-70.html 逐字节一致。 */
+  const child = new URLSearchParams(location.search).get("child") || "child-dialog.html";
+</script>
+<iframe id="dialog-frame" src="child-dialog.html" title="dialog"></iframe>
+<script>
+  document.getElementById("dialog-frame").src = child;
+</script>
+</body>
+</html>

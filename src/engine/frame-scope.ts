@@ -16,7 +16,7 @@ import type { Elem } from "./extraction.ts";
 import type { FrameLike, LocLike, PageLike } from "../support/page-like.ts";
 import { framesOf, urlOf } from "./page-shapes.ts";
 import { frameChainValueProblem } from "./hint.ts";
-import { urlInHostsEnvelope } from "./host-envelope.ts";
+import { urlInHostsEnvelope, hostMatchesEnv } from "./host-envelope.ts";
 
 /** 一个 frame 的 origin（http/https 规范形）；不可解析/非 http(s)/空 = undefined。 */
 function httpOriginOf(frame: FrameLike): string | undefined {
@@ -136,9 +136,64 @@ export function frameInHostsEnvelope(frame: FrameLike, hosts: readonly string[] 
   return urlInHostsEnvelope(String(url), hosts as string[] | null | undefined);
 }
 
+/** 帧门禁用的 URL 文本（FrameLike.url 双形状；取不到 = 空串）。 */
+function frameUrlText(frame: FrameLike): string {
+  try { return typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { return ""; }
+}
+
+/** IPv4 形状（4 段全数字）。IPv4 的「最后两段」可以碰巧相等（172.16.1.1 vs 10.16.1.1 的 16.1），两段近似对它不安全 ⇒ 只认精确相等。 */
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+
+/**
+ * 「同注册域」免检近似：两边的**最后两段**相等即视为同一注册域。本仓不引入 PSL——
+ * 多段后缀域（co.uk 这类共用后缀的不同站）是**已知近似误放**（见 `frameGateExcludes`
+ * 的边界说明）。单标签（无 `.`，如 localhost）没有「两段」，返回原样（调用方退化为精确相等）。
+ */
+function lastTwoLabels(host: string): string {
+  const parts = host.split(".");
+  return parts.length < 2 ? host : parts.slice(-2).join(".");
+}
+
+/**
+ * 帧免检判定（只认 hostname；协议/端口不参与，与 `hostMatchesEnv` 同口径）：帧与任一
+ * 声明条目「同注册域」即免检。域名走**双向**两段近似——只复用 `hostMatchesEnv` 不够：
+ * 它是单向子域包含（host 端 endsWith("." + 条目)），声明 `www.google.com`、帧
+ * `ogs.google.com` 时两侧谁也不是谁的子域，但注册域都是 `google.com`，语义上同属声明站。
+ * IP（IPv4 形状 / 含冒号的 IPv6）精确相等——两段近似对 IP 是误放源。
+ */
+function frameHostnameExempt(frameHost: string, hosts: readonly string[]): boolean {
+  const h = frameHost.toLowerCase();
+  const frameIsIp = h.includes(":") || IPV4_RE.test(h);
+  return hosts.some((raw) => {
+    const entry = String(raw).toLowerCase().replace(/^\.+/, "");
+    if (!entry) return false;
+    if (frameIsIp || entry.includes(":") || IPV4_RE.test(entry)) return h === entry;
+    const frameRd = lastTwoLabels(h);
+    const entryRd = lastTwoLabels(entry);
+    return frameRd === entryRd || hostMatchesEnv(h, [entry]);
+  });
+}
+
 /**
  * P0-D **帧门禁谓词**（唯一出处）：主 frame 恒允许（导航信封已经强制过它）；只有子 frame
  * （`fi > 0`）才查 hosts 信封。短路顺序与旧手写一致——`fi === 0` 不解析 URL，不付信封开销。
+ *
+ * 解析面口径：子帧与**任一声明条目同注册域**即免检（不要求逐条声明子帧 origin；
+ * 导航信封本身只认子域包含，声明条目的注册域就是作者声明的站）。仍排除的只有
+ * 跨注册域子帧。免检只对子帧的**解析面**生效——导航信封（goto/落地/popup）不受影响，
+ * `frameGateExcludes` 是唯一出口，消费点（池/hint/回捞/done/when）自动同口径。
+ *
+ * 判定边界（`lastTwoLabels` 不引入 PSL 的已知近似）：
+ *   - IP 只认精确相等（127.0.0.1 声明 + 127.0.0.2 帧仍排除；两段近似会把
+ *     172.16.1.1 / 10.16.1.1 误判同注册域）；
+ *   - **宽域声明 = 信任其全部子域**：声明 `evil.io` + 帧 `google.com.evil.io` 免检
+ *     （该帧确是声明注册域的下挂，两段近似自洽；不想放它就别声明宽域）；
+ *   - 反向必须拦住：声明 `google.com` + 帧 `google.com.evil.io` 排除
+ *     （帧的注册域是 evil.io ≠ google.com；`hostMatchesEnv` 对它是 false，靠 rd 不等拦）；
+ *   - 同用域组合是**双向近似误放**：`blog.co.uk` 声明 + `news.co.uk` 帧，两侧最后两段
+ *     都是 co.uk 又互不为子域 → 误免检（PSL 缺失的已知代价，换回声明面零维护：
+ *     ogs.google.com 这类同站子帧天然进池）。声明 `google.com` + 帧 `google.co.uk`
+ *     不误放（两段 google.com vs co.uk 不等）。
  *
  * 消费点：extraction 池抽取/信号求值/回捞/probe、declared DRF、identity FW8、
  * executor 的 id 直查回退、ctx scrollList。改门禁口径只改这一个函数。
@@ -148,15 +203,23 @@ export function frameGateExcludes(
   frame: FrameLike,
   hosts: readonly string[] | null | undefined,
 ): boolean {
-  return fi > 0 && !frameInHostsEnvelope(frame, hosts);
+  if (fi <= 0) return false;
+  if (!hosts || hosts.length === 0) return false;
+  if (frameInHostsEnvelope(frame, hosts)) return false;
+  // 信封已先行放行不可解析 URL 与 about/data/file 协议，所以这里的解析失败只可能来自
+  // 未来信封白名单收缩——按 fail-closed 处理（判不清是否同注册域就不放行进解析面）。
+  let host = "";
+  try { host = new URL(frameUrlText(frame)).hostname; } catch { return true; }
+  return !frameHostnameExempt(host, hosts);
 }
 
 /** P0-D：frame 的 origin 证据文案已移入 frame-scope.ts（唯一出处；文件头 re-export 保持导出面）。 */
 
 /**
- * P0-D：**帧门禁**。主 frame 恒允许（导航信封已经强制过它）；子 frame 的 origin 不在
- * `meta.hosts` 内 → 进 `excluded`（不参与池/hint/identity/DRF/done/when 的解析面）。
- * 无 hosts 声明或没有任何被排除帧时 `null`（缺省路径零新行为）。
+ * P0-D：**帧门禁**。主 frame 恒允许（导航信封已经强制过它）；子帧按 `frameGateExcludes`
+ * 判——跨注册域的 origin 进 `excluded`（不参与池/hint/identity/DRF/done/when 的解析面），
+ * 与声明条目同注册域的免检进池。无 hosts 声明或没有任何被排除帧时 `null`
+ * （缺省路径零新行为）。
  *
  * 索引纪律：`frames` / `allowedIndexes` 保留**真实**下标，池行的 `frame`/`f<fi>:` ref
  * 因此逐字节不变——被排除的只是解析面，不是编号。
@@ -179,8 +242,8 @@ export function frameGateOf(page: PageLike, hosts: string[] | null | undefined):
   const excluded: Array<{ index: number; frame: FrameLike; origin: string }> = [];
   for (let i = 1; i < frames.length; i++) {
     const fr = frames[i]!;
-    if (frameInHostsEnvelope(fr, hosts)) { allowed.push(fr); allowedIndexes.push(i); }
-    else excluded.push({ index: i, frame: fr, origin: frameOriginOf(fr) });
+    if (frameGateExcludes(i, fr, hosts)) excluded.push({ index: i, frame: fr, origin: frameOriginOf(fr) });
+    else { allowed.push(fr); allowedIndexes.push(i); }
   }
   if (excluded.length === 0) return null;
   const origins = [...new Set(excluded.map((e) => e.origin || "about:blank"))];

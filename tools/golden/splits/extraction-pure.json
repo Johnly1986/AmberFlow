@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "extraction-pure",
-  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）；决策平面统一 P0：pageText 纯搬移到 state-text.ts（hash 不变，manifest 路径随迁）；stateText 同批搬移但新增 AMBERFLOW_STATE_TEXT_SCOPE=wide 的 opt-in 实现（非纯搬移，按 split-check 纪律从 manifest 移除）；ARIA 视图批（模型面元素接口三缺陷）：ARIA 行解析从 extraction.ts 的 `ARIA_LINE_RE` 常量改为 `aria-view.parseAriaInteractiveLine`（单引号 YAML 键 + name 还原），`ariaInteractiveLines`/`criteriaView` 的对齐判据改为逐项身份（`aria-view.ariaLinesAligned`）——均为**有意非纯搬移变更**，按 split-check 纪律把 `ARIA_LINE_RE`（已删除）与两个改动的函数从 manifest 删除，其余符号保持 hash 不动",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）；决策平面统一 P0：pageText 纯搬移到 state-text.ts（hash 不变，manifest 路径随迁）；stateText 同批搬移但新增 AMBERFLOW_STATE_TEXT_SCOPE=wide 的 opt-in 实现（非纯搬移，按 split-check 纪律从 manifest 移除）；ARIA 视图批（模型面元素接口三缺陷）：ARIA 行解析从 extraction.ts 的 `ARIA_LINE_RE` 常量改为 `aria-view.parseAriaInteractiveLine`（单引号 YAML 键 + name 还原），`ariaInteractiveLines`/`criteriaView` 的对齐判据改为逐项身份（`aria-view.ariaLinesAligned`）——均为**有意非纯搬移变更**，按 split-check 纪律把 `ARIA_LINE_RE`（已删除）与两个改动的函数从 manifest 删除，其余符号保持 hash 不动；帧门禁同主域免检批：`frameGateExcludes`（连同其新增私有助手）改为「子帧与任一声明条目同注册域即免检（双向两段近似；IP 精确相等）」，`frameGateOf` 的帧分类改走同一谓词（免检帧进 allowed、不再进 excluded）——均为有意非纯搬移变更，按 split-check 纪律把这两个符号从 manifest 删除，其余符号保持纯搬移 hash 不动",
   "files": {
     "src/engine/elem-model.ts": {
       "symbols": {
@@ -70,8 +70,6 @@
         "frameAt": "2ad86ea1868fca7852c4c0ebef4a560890aa39cf0e3e12ce49aa6db4f8e7fdb0",
         "frameChainOf": "2ab3801e600c4f899e45fae77aaa645080e9dd73a6e79757998ccd9dcc098cdc",
         "FrameGate": "b4e6f61b3594f2d94330f8d49daa943f16b309fba03db0986fbc1e1d51fe8000",
-        "frameGateExcludes": "c6ad6e6cb818b551957b5ed876444c5e58477169a9d320dba0c88883c80e3e22",
-        "frameGateOf": "30d7ddb4c3b176560f3290db0dcbec1d82508267365aed284f33130475cd5740",
         "frameInHostsEnvelope": "abff8f3f7154bb660c05fca7c2a5e3e5761db3748970c360b057b604577a08b0",
         "frameOriginOf": "710b9552031bd14bddad08c98f1c37958cd7f1ef2c7d2369faa599e6da66e364",
         "FrameScopeEvidence": "160fa2242f4cec074d83aaadb1bb97e1d5a1b65d337cf0ae8391656ccc331390",

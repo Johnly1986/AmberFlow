@@ -244,7 +244,7 @@ export const meta = (kit) => ({
 | 字段 | 说明 |
 |---|---|
 | `id` / `label` / `goal` | 应用标识与一句话目标；`id`、`goal` 必填，`label` 缺省 = `id` |
-| `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行。**要预判重定向落点**：链接 href 的主机变体（apex ↔ `www.`）与 301 后的真实落点都要进信封——实测 href 指 `iana.org`、实际落 `www.iana.org`，只声明 href 侧会在落地撞 `host_not_allowed`（2026-11-01）。**子 frame 不是导航信封**：信封外的第三方 iframe 默认只排除出解析面（`frames_excluded` warning），不因广告/统计 iframe 废掉正常步骤；只有声明 target / done 只存在于该 frame 时才 `frame_not_allowed`（见 §4.9 末「frame 门禁」） |
+| `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行。**要预判重定向落点**：链接 href 的主机变体（apex ↔ `www.`）与 301 后的真实落点都要进信封——实测 href 指 `iana.org`、实际落 `www.iana.org`，只声明 href 侧会在落地撞 `host_not_allowed`（2026-11-01）。**子 frame 不是导航信封**：跨注册域的第三方 iframe 默认只排除出解析面（`frames_excluded` warning），不因广告/统计 iframe 废掉正常步骤；与声明条目同注册域的子帧免检进池、不需要声明（见 §4.9 末「frame 门禁」）；只有声明 target / done 只存在于被排除 frame 时才 `frame_not_allowed`（同节） |
 | `slots` / `requiredSlots` | 数据槽与必填槽；缺值返回 `needs_value`，不猜 |
 | `secretSlots` | 敏感槽位名单（如 `password`、`otp`）：result/report/stdout/dry 输出时掩码为 `***`；值仍建议走 env/本机配置，别写进 app.mjs |
 | `sources` | 数据腿名（`ctx.source(name)` 按名字按需加载） |
@@ -747,10 +747,15 @@ const sw = await ctx.switchTab({ urlContains: "help" });  // 恰好一个匹配�
 
 **frame 门禁（P0-D，精确化）**。声明 `meta.hosts` 之外的子 frame（广告像素 / 统计 / 第三方
 widget）**默认只排除出解析面**，不再是整步 REJECT：池抽取、`hintLookup`、FW8 身份回捞、DRF、
-`locatorAnyFrame`、done/when 求值都只在**允许帧**（frame origin 在 `hosts` 内；主 frame 恒允许）
+`locatorAnyFrame`、done/when 求值都只在**允许帧**（主 frame 恒允许；子 frame 与任一声明条目
+**同注册域**即免检——不引入 PSL，双向取最后两段近似，IPv4/IPv6 只认精确相等，大小写折叠、
+协议/端口不参与，唯一出处 `frameGateExcludes`）
 上进行；被排除 frame 记一条 step warning `frames_excluded: [origin…]`（含"已排除、不影响页面
 其余操作"）。被排除帧里的元素不进池、不会被动作，但池中其余元素的真实 `frame` 下标与 `f<fi>:`
-ref 不变（只排除解析面，不重编号）。**只有声明面命中被排除 frame 才拒绝**：①声明 target
+ref 不变（只排除解析面，不重编号）。同站子帧因此**不需要声明进 hosts**：声明 `google.com` 时
+`ogs.google.com` / 自家 `www.` 变体的 iframe 天然进池（多段后缀域是已知近似：两段近似会把
+`blog.co.uk` / `news.co.uk` 这类同用域组合误互放；IP 只认精确相等，`127.0.0.1` 声明 +
+`127.0.0.2` 帧仍排除）。**只有声明面命中被排除 frame 才拒绝**：①声明 target
 （`ctx.hint(...)` / 命令 `target`）在池 → ADMIT → FW8 → DRF 全落空后，引擎**只读探测**（不盖章、
 不动作）该目标是否只存在于被排除 frame——是则结构化 `frame_not_allowed`，reason 点名 frame
 origin + 目标 + 只读匹配证据 + 修法：第三方非交互 frame 默认排除，**不需要**为此加 hosts；
@@ -789,8 +794,9 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    帧内目标会点错/超时，退出码沿用该 CLI 既有失败口径（2），请改用 app/run 或 plan 面。
    `apps check` 另对非法 `frame:` 值与不在 `meta.hosts` 的 origin 出 stderr 静态提醒
    （`apps check` 的 lint 通道：不进 problems、不改 VALID/exit；拿不到 `meta.hosts` 时只做值形状检查）。
-3. **跨源帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
-   （`frames_excluded`）；`inspect --probe` 的子 frame 命中证据与 `frame_host` advisory 会点名 origin。
+3. **跨注册域帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
+   （`frames_excluded`）；与声明条目**同注册域**的子帧免检（不需声明，见上段）；`inspect --probe` 的
+   子 frame 命中证据与 `frame_host` advisory 会点名 origin。
    **读面同样可按帧限定**（E4）：`ctx.read.*` / `ctx.extract` 的 rows / done/when 的 CSS selector
    支持 ` frame:<origin链>` 尾缀——读/抽取的声明帧 miss 口径与 done 的 `frame_not_allowed` 升级
    见 §5 的「读侧帧限定」。

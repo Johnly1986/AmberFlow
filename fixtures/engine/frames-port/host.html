@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>frames-port ①：同机跨 host 主帧（127.0.0.1）</title></head>
+<body>
+<p>帧对照面：传 ?child=&lt;绝对 origin&gt; 时 iframe 指向该 origin（跨 hostname 对照，端口 lane 动态注入）；
+   不传 = 相对 src（同 hostname 同端口，正是免检面）。</p>
+<button id="host-anchor">HostAnchor</button>
+<script>
+  const child = new URLSearchParams(location.search).get("child") || "port-child.html";
+  document.write('<iframe src="' + child + '" width="320" height="120" title="child"></iframe>');
+</script>
+</body>
+</html>

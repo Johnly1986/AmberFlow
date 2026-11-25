@@ -687,12 +687,16 @@ JSON 对象（`drive` 行在值键漂移回放步另带 `value_target_drift:{fro
 `--expect-url <子串>`（可选）：每轮驾驶前检查当前 URL 是否包含它；不包含 = 确定性停
 `off_task_page`，不继续在漂移页上抽池/问模型。`started` 事件与 handoff 证据都回显
 `expect_url`；`started`/`handoff` 证据还回显 `frames_excluded:[{origin,index}]`（被 hosts
-信封排除的跨源子 frame）——桥面把它们投影给 Agent，`what_would_unblock` 第一条给出
+信封排除的**跨注册域**子 frame——与声明条目同注册域的子帧免检进池，见下）——桥面把它们
+投影给 Agent，`what_would_unblock` 第一条给出
 "把 origin 加入 hosts 后重试"的确定性建议。
 
 `hosts` 信封（声明才生效）：判定的唯一来源是发起方声明，`null`/`[]`/全空串 = **不设防**（不按
 入口 URL 推断）。声明后信封在驾驶中途生效，与 run 面 `hostGate` 同一谓词（`disallowedHost`，
-主页面 URL 判定；popup/新标签不在该判定内，run 面另有 `popup_not_allowed`）：
+主页面 URL 判定；popup/新标签不在该判定内，run 面另有 `popup_not_allowed`）。
+**子 frame 的解析面免检**：子帧 hostname 与任一声明条目**同注册域**（双向两段近似；IP
+只认精确相等，协议/端口不参与）就不需要声明进 hosts——天然进池/hint/done/when 解析面；
+只有跨注册域子帧被排除出解析面（`frames_excluded`）：
 - 轮首：当前页 URL 越界 = 确定性停 `host_not_allowed`——在抽池/问模型**之前**，且在最终信号判定
   **之前**（越界页上的信号成立不算完成）；
 - 步尾：动作把主页面带出信封即停，交接 `why_stuck.evidence.off_envelope`（= 落地 URL，区别于

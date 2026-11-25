@@ -4,6 +4,32 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 帧门禁同主域免检（iframe 解析面）
+
+> `hosts` 此前在帧解析面是"逐条声明制"：子帧 origin 必须被 `meta.hosts` 的子域包含
+> 语义盖住才进池。实测痛点：声明 `www.google.com` 时同站的 `ogs.google.com` iframe
+> 被排除出池/hint/done/when——`ogs.google.com` 不以 `.www.google.com` 结尾，两侧谁也
+> 不是谁的子域。本批把子帧解析面改为**注册域口径**：与任一声明条目同注册域即免检。
+
+- **`frameGateExcludes`（`src/engine/frame-scope.ts`，唯一出处）**：子帧（`fi > 0`）与
+  任一声明条目「同注册域」即免检——不引入 PSL，双向取**最后两段**近似
+  （`ogs.google.com` / `www.google.com` 的注册域近似都是 `google.com` ⇒ 互放）；
+  **IPv4（4 段全数字）/ IPv6（含冒号）只认精确相等**——两段近似对 IP 是误放源
+  （声明 `172.16.1.1` + 帧 `10.16.1.1` 的最后两段碰巧都是 `16.1`）；单标签退化为精确
+  相等；大小写折叠，协议/端口不参与。**已知近似**（PSL 缺失的代价，注释里写明）：
+  同用域组合会误互放（`blog.co.uk` 声明 + `news.co.uk` 帧两侧最后两段都是 `co.uk`）；
+  宽域声明 = 信任其全部子域（声明 `evil.io` + 帧 `google.com.evil.io` 免检——它确实是
+  声明注册域的下挂）。导航信封（goto/落地/popup 的 URL 判定）**不变**：本批只对子帧的
+  解析面免检；`frameGateOf` 帧分类同谓词（免检帧进 allowed，不再进 excluded）。
+  消费点（池抽取/hintLookup/FW8/DRF/locatorAnyFrame/done/when，11 处）不改——谓词放行
+  后自然同口径；跨注册域子帧仍排除，`frame_not_allowed` / `frames_excluded` 语义不变。
+  新证据 lane：`verify:frame-exempt`（14 条纯函数边界 + 2 条本地 fixture 集成 +
+  反证：禁用免检后「声明 `www.google.com` + 帧 `ogs.google.com`」边界必须红），
+  `verify:lanes` 升至 19 条。
+- **契约/文档同步**：F45 statement/truth 补免检口径（`src/cli/schema-gen.ts`）；
+  `NAVIGATION.hosts_envelope` 句同步；`docs/APP_SCRIPT_AUTHORING.md` §frame 门禁与
+  `meta.hosts` 表行、`docs/AGENT_INTERFACE.md` 的 `hosts` 信封节改免检表述。
+
 ## [Unreleased] — 2026-11-25 元素字段合同单源（引擎 ObserveElement ↔ 桥 ElementView）
 
 > 元素行是 Agent 看页面的唯一入口，但它的结构化描述此前只有桥面 `ElementView` 一处；
