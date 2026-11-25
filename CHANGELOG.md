@@ -44,6 +44,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `ctx.scrollList("page")` 语义不动）；`not_scrollable` 的建议也改成会话面可执行的
   `act scroll target=document`（此前推荐 `ctx.scrollList`，会话面没有 ctx）。
 
+- **`headful:true` 在桥下可用了**：桥起引擎子进程时 env 走白名单（`ENV_BASE`），
+  `DISPLAY`/`XAUTHORITY`/`WAYLAND_DISPLAY` 不在其中 → 有头请求永远报
+  `no usable XServer/DISPLAY`，且用户在外层 `export DISPLAY` 也无效（那是桥自己的环境，
+  传不进已启动的子进程）。三个显示变量加入白名单（最小必要面）。
+  这也是「headless 下某些站点降级渲染（评论区不下发）时无法改用 headful」的根因。
+
 - **死页不再被吞成空结果**：会话页被关闭后，`observe` 曾返回 `ok:true` + `counts` 全 0、
   `snapshot` 写出全空文件、`read` 返回 `value:null`——调用方无法区分「页面真的没内容」与
   「上下文已经没了」（只有 `goto`/`act` 才会抛 `Target page... closed`）。现在 `dispatch` 前置

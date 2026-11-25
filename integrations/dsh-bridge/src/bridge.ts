@@ -485,6 +485,10 @@ const ENV_BASE = [
   'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TZ', 'TMPDIR', 'TEMP', 'TMP',
   'LANG', 'LC_ALL', 'LC_CTYPE', 'NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS',
   'SSL_CERT_FILE', 'SSL_CERT_DIR', 'CURL_CA_BUNDLE', 'PLAYWRIGHT_BROWSERS_PATH',
+  // 有头浏览器的显示目标：不透传这两个，`headful:true` 在 bridge 下永远起不来
+  // （子进程看不到 X server，报 "no usable XServer/DISPLAY"），而 shell 里 export 也无效
+  // ——它只影响 bridge 自己的环境，传不进已经启动的子进程。属于显示会话的最小必要面。
+  'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY',
 ]
 const ENV_PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy']
 

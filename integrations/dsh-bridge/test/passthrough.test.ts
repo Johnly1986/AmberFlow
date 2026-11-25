@@ -563,3 +563,19 @@ test('execution_state：其它失败不补该键（形状不变）', async () =>
     assert.ok(!('execution_state' in r), 'no engine key = no bridge key')
   })
 })
+
+test('buildEnv：有头浏览器需要的显示变量必须透过（DISPLAY/XAUTHORITY/WAYLAND_DISPLAY）', async () => {
+  const { buildEnv } = await import('../src/bridge.ts')
+  const saved = { DISPLAY: process.env['DISPLAY'], XAUTHORITY: process.env['XAUTHORITY'] }
+  try {
+    process.env['DISPLAY'] = ':99'
+    process.env['XAUTHORITY'] = '/tmp/xauth-probe'
+    const env = buildEnv({ repoPath: '.', envMode: 'allowlist', forwardEnv: [] } as never)
+    assert.equal(env['DISPLAY'], ':99', 'DISPLAY must reach the engine child (headful otherwise never starts)')
+    assert.equal(env['XAUTHORITY'], '/tmp/xauth-probe', 'XAUTHORITY must reach the engine child')
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v
+    }
+  }
+})
