@@ -248,6 +248,17 @@ function clip(s: string, max: number): string {
  * 一个桥进程内的会话管理器：spawn/行解析/请求配对/串行化/TTL/reaper/杀进程树。
  * **缺省配置下不创建任何子进程**（所有会话都是 open op 显式创建的）。
  */
+/**
+ * 会话不可用时的错误文案（唯一出处）：idle 回收是正常行为，但「不存在」与「因空闲超时被回收」
+ * 是两件事——后者明说，并给出重开方式（否则调用方会去猜是不是传错 id 或会话崩了）。
+ */
+export function sessionGoneMessage(id: string, deadReason?: string): string {
+  if (deadReason !== 'idle_timeout') return `no live session ${JSON.stringify(id)}`
+  return `session ${JSON.stringify(id)} was reclaimed after idle timeout `
+    + "(no request for longer than its TTL) — open a new session (optionally with a larger "
+    + "idle_timeout_ms) and re-observe; page state is gone"
+}
+
 export class SessionManager {
   private readonly options: Required<Pick<SessionManagerOptions, 'idleMs' | 'maxSessions' | 'opTimeoutMs' | 'openTimeoutMs' | 'reaperMs'>> & SessionManagerOptions
   private readonly sessions = new Map<string, SessionState>()
@@ -341,9 +352,13 @@ export class SessionManager {
     }
     const state = this.sessions.get(id)
     if (state === undefined || state.dead) {
-      throw new SessionToolError('session_not_found', `no live session ${JSON.stringify(id)}`, {
+      // F80：idle 回收是正常行为，但「不存在」与「因空闲超时被回收」是两件事——后者要
+      // 明说（否则调用方会去猜"是不是我传错 id / 会话崩了"），并给出重开方式。
+      const reaped = state?.deadReason === 'idle_timeout'
+      throw new SessionToolError('session_not_found', sessionGoneMessage(id, state?.deadReason), {
         sessions: this.list(),
         ...(state?.deadReason === undefined ? {} : { last_code: state.deadReason }),
+        ...(reaped ? { last_code: 'idle_timeout', reclaimed: true } : {}),
       })
     }
     try {

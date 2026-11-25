@@ -579,3 +579,14 @@ test('buildEnv：有头浏览器需要的显示变量必须透过（DISPLAY/XAUT
     }
   }
 })
+
+test('sessionGoneMessage：idle 回收要说清是超时回收并给重开方式', async () => {
+  const { sessionGoneMessage } = await import('../src/session.ts')
+  const reaped = sessionGoneMessage('s-abc', 'idle_timeout')
+  assert.ok(/reclaimed after idle timeout/.test(reaped), `idle 回收要说清是超时回收（拿到 ${reaped}）`)
+  assert.ok(/open a new session/.test(reaped), `应给出重开方式（拿到 ${reaped}）`)
+  assert.ok(/idle_timeout_ms/.test(reaped), `应提到可调大 TTL（拿到 ${reaped}）`)
+  // 其它死因 / 未知会话仍是原来的"不存在"文案（键集与措辞不变）
+  assert.equal(sessionGoneMessage('s-abc'), 'no live session "s-abc"')
+  assert.equal(sessionGoneMessage('s-abc', 'child_exited'), 'no live session "s-abc"')
+})

@@ -44,6 +44,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `ctx.scrollList("page")` 语义不动）；`not_scrollable` 的建议也改成会话面可执行的
   `act scroll target=document`（此前推荐 `ctx.scrollList`，会话面没有 ctx）。
 
+- **idle 回收的会话错误文案说清了原因**：`session_not_found` 此前对所有情况都只说
+  `no live session "id"`——空转 5 分钟后回来，调用方无法区分「id 传错 / 会话崩了 / 被空闲回收」。
+  现在 `deadReason==="idle_timeout"` 时明说「因空闲超时被回收」并给重开方式（可调大
+  `idle_timeout_ms`），detail 带 `reclaimed:true`；其它死因措辞不变。
+  抽成纯函数 `sessionGoneMessage`（bridge 层单源）。
+
 - **文档不可滚时回退到内部滚动容器**：整页固定、内容装在内部 `overflow` 容器里的布局
   （「主面板 JS 滚动」的常见实现）此前 `scroll target=document/page` 直接报
   `not_scrollable (scrollHeight <= clientHeight)`——调用方只能靠"恰好在该容器里的某个元素"
