@@ -321,6 +321,8 @@ export function projectElementView(raw: unknown): ElementView | null {
   const label = typeof raw['label'] === 'string' ? raw['label'] : ''
   const clippedLabel = label === '' ? '' : clip(label, LABEL_MAX_CHARS)
   const hints = strArray(raw['hint_candidates'], HINTS_PER_ELEMENT, HINT_MAX_CHARS)
+  // 同一事实的两个引擎键名（observe `type` / inspect `input_type`）；桥侧统一投影成 `input_type`。
+  const inputType = str(raw['input_type'], IDENTITY_MAX_CHARS) ?? str(raw['type'], IDENTITY_MAX_CHARS)
   const classNames = strArray(raw['class_names'], CLASS_NAMES_PER_ELEMENT, CLASS_NAME_MAX_CHARS)
   const framePath = strArray(raw['frame_path'], FRAME_PATH_MAX_ITEMS, FRAME_PATH_SEGMENT_MAX_CHARS)
   const capabilities = strArray(raw['action_capabilities'], 8, IDENTITY_MAX_CHARS)
@@ -370,7 +372,9 @@ export function projectElementView(raw: unknown): ElementView | null {
     ...(str(raw['id'], IDENTITY_MAX_CHARS) === undefined ? {} : { id: str(raw['id'], IDENTITY_MAX_CHARS) as string }),
     ...(str(raw['name'], IDENTITY_MAX_CHARS) === undefined ? {} : { name: str(raw['name'], IDENTITY_MAX_CHARS) as string }),
     ...(str(raw['data_test'], IDENTITY_MAX_CHARS) === undefined ? {} : { data_test: str(raw['data_test'], IDENTITY_MAX_CHARS) as string }),
-    ...(str(raw['input_type'], IDENTITY_MAX_CHARS) === undefined ? {} : { input_type: str(raw['input_type'], IDENTITY_MAX_CHARS) as string }),
+    // 引擎两面对同一事实用两个键名（observe 面 `type`、inspect 面 `input_type`）：两个都读，
+    // 桥输出恒为 `input_type`。任一键名缺失走回退，不改变键名与值域。
+    ...(inputType === undefined ? {} : { input_type: inputType }),
     ...(str(raw['near'], IDENTITY_MAX_CHARS) === undefined ? {} : { near: str(raw['near'], IDENTITY_MAX_CHARS) as string }),
     // F84 批 3：行锚两键（仅同文案重复组元素携带；缺省/非重复组不出键——桥不补字段）。
     ...(rowTexts.items.length ? { row_texts: rowTexts.items } : {}),

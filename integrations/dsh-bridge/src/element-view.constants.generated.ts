@@ -90,7 +90,7 @@ export const ELEMENT_VIEW_FIELDS: readonly ElementViewFieldSpec[] = [
   { field: "id", faces: "both", address: false, caps: ["identityMaxChars"] },
   { field: "name", faces: "both", address: false, caps: ["identityMaxChars"] },
   { field: "data_test", faces: "both", address: false, caps: ["identityMaxChars"] },
-  { field: "input_type", faces: "inspect", address: false, caps: ["identityMaxChars"] },
+  { field: "input_type", faces: "both", address: false, caps: ["identityMaxChars"] },
   { field: "bbox", faces: "observe", address: false, caps: null },
   { field: "visible", faces: "observe", address: false, caps: null },
   { field: "admitted", faces: "observe", address: false, caps: null },

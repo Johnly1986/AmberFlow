@@ -335,6 +335,31 @@ check("label 镜像面全部对敏感输入设防（源码级同口径）", () =
   assert.ok(seen.size >= 5, `镜像面至少 5 个文件，实际 ${seen.size}`);
 });
 
+/* ------------------------------------------------------------------ 4. 桥投影：引擎两面的键名差异 */
+
+/**
+ * 引擎两面对同一事实用两个键名：observe 面 `type`、inspect 面 `input_type`。
+ * 桥投影必须**两个都读**，输出恒为 `input_type`——否则 observe 面经桥看过去会缺这个字段
+ * （同一页在 inspect 面有、observe 面没有，调用方无法判断"没有 type"还是"没投影"）。
+ */
+const BRIDGE_TYPE_CASES: ReadonlyArray<{ raw: Record<string, unknown>; want: string | undefined; why: string }> = [
+  { raw: { ref: "o0", tag: "input", input_type: "checkbox" }, want: "checkbox", why: "inspect 面键名 input_type" },
+  { raw: { ref: "o0", tag: "input", type: "checkbox" }, want: "checkbox", why: "observe 面键名 type（回退路径）" },
+  { raw: { ref: "o0", tag: "input" }, want: undefined, why: "两个键都不给 = 不出现该键（不发明）" },
+  { raw: { ref: "o0", tag: "button" }, want: undefined, why: "非 input 元素不产该键" },
+];
+
+check("桥投影 input_type：两面键名同义", async () => {
+  const { projectElementViews: project } = await import("../integrations/dsh-bridge/src/element-view.ts");
+  for (const c of BRIDGE_TYPE_CASES) {
+    const out = project([c.raw], 10).elements[0] as unknown as Record<string, unknown>;
+    assert.equal(out["input_type"], c.want, c.why);
+  }
+  // 两个键同时给时以 input_type 为准（inspect 面口径），不因回退而漂移
+  const both = project([{ ref: "o0", tag: "input", input_type: "radio", type: "text" }], 10).elements[0] as unknown as Record<string, unknown>;
+  assert.equal(both["input_type"], "radio", "两个键都在时 input_type 优先");
+});
+
 await Promise.all(failures);
 
 /* ------------------------------------------------------------------ 报告 */
@@ -345,7 +370,7 @@ if (problems.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    `verify-element-views: OK — parse ${PARSE_CASES.length}+${IGNORED_LINES.length} 行 / align 12 组判据 / label ${LABEL_CASES.length}x2 + ${LABEL_MIRRORS.length} 镜像组`,
+    `verify-element-views: OK — parse ${PARSE_CASES.length}+${IGNORED_LINES.length} 行 / align 12 组判据 / label ${LABEL_CASES.length}x2 + ${LABEL_MIRRORS.length} 镜像组 / 桥投影两层键名`,
   );
 }
 

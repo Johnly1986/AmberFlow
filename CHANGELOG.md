@@ -31,6 +31,21 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   采集但只有 observe 元素行投影；`href_full`/`action_family`/`action_capabilities`/`near`/`surface`/
   `heuristic` 是 inspect 独有；`bbox`/`visible`/`admitted`/`why_not_admitted`/`frame` 是 observe 独有。
 
+## [Unreleased] — 2026-11-25 桥元素投影补 `input_type`（引擎两面键名归一）
+
+> 字段合同登记的最后一项「引擎有桥不给」缺口。`ObserveElement` 用 `type`、inspect 元素行用
+> `input_type` 表达同一事实，而桥投影只读 `input_type`——于是**同一页在 inspect 面有这个键、
+> observe 面经桥看过去没有**，调用方无法区分「元素没有 type」与「桥没投影」。
+
+- 桥 `projectElementView` 两个键名都读（先 `input_type`，回退 `type`），输出**恒为 `input_type`**：
+  值域与 cap 不变（`identityMaxChars`），键名差异不外泄。
+- 字段合同 `SESSION_ELEMENT_VIEW_FIELDS` 的 `input_type` 行去掉 `engineOnly: ["observe"]`、
+  `faces` 由 `inspect` 改 `both`；生成器的 ⑤ 组断言因此要求桥**同时**读两个键
+  （漏读任一侧即红），生成物已重出。
+- 新增回归断言（`verify:element-views`）：四个臂——inspect 键名、observe 键名（回退路径）、
+  两键都缺（不出键）、非 input 元素（不出键），外加「两键同时给时以 `input_type` 为准」。
+  反证：去掉回退 → `bridge projection input_type: observe 面键名 type（回退路径）` 判红。
+
 ## [Unreleased] — 2026-11-25 元素视图批（模型面正确性 + 敏感值不进标签）
 
 > 从"元素接口缺少结构化文档"的调研里查出的三个**模型面**缺陷（`criteriaView` 的输出直接喂给

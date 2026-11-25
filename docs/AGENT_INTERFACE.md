@@ -637,8 +637,9 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 | `heuristic` | — | `heuristic` | 仅 inspect | 否 | ≤60 字符 | 启发式伪按钮标记（宽扫通道专属，审计可辨） |
 
 **引擎 ↔ 桥的差异（如实记录，不是缺陷）**：`label_truncated` / `hints_truncated` 是桥侧派生位
-（引擎不产，桥在裁剪时置位）；`input_type` 是同一事实的**两个引擎键名**——引擎 observe 面叫 `type`，
-inspect 面叫 `input_type`，桥投影只读 `input_type`，所以 observe 面的桥结果**不带**这个键；
+（引擎不产，桥在裁剪时置位）；`input_type` 是同一事实的**两个引擎键名**——引擎 observe 面叫 `type`、
+inspect 面叫 `input_type`，桥投影**两个键名都读**（先 `input_type` 再回退 `type`），
+所以两面经桥看过去同名同义，键名差异不外泄；
 `row_texts` / `row_index` 引擎两面都采集，但只有 observe 元素行投影（inspect 元素行不带）；
 `href_full` / `action_family` / `action_capabilities` / `near` / `surface` / `heuristic` 是 inspect 面
 独有（池投影与宽扫标记），observe 面不带；`bbox` / `visible` / `admitted` / `why_not_admitted` /

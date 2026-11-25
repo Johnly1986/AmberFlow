@@ -406,11 +406,11 @@ export const SESSION_ELEMENT_VIEW_FIELDS: readonly SessionElementViewField[] = [
     semantics: "`data-test` 属性（空值缺键）",
   },
   {
-    field: "input_type", engineObserve: "type", engineInspect: "input_type", bridge: "input_type", faces: "inspect",
-    engineOnly: ["observe"], caps: ["identityMaxChars"], address: false,
+    field: "input_type", engineObserve: "type", engineInspect: "input_type", bridge: "input_type", faces: "both",
+    caps: ["identityMaxChars"], address: false,
     semantics: "`type` 属性（input 族语义）",
-    note: "同一事实三面两个键名：引擎 observe 面叫 `type`、inspect 面叫 `input_type`；桥的投影只读 `input_type`，"
-      + "所以 observe 面桥不收这个引擎键（引擎有、桥面不给）——如实的现状，不改运行时输出",
+    note: "同一事实两个引擎键名：observe 面 `type`、inspect 面 `input_type`。桥投影两个键名都读（先 `input_type` 再回退 `type`），"
+      + "输出**恒为 `input_type`**——所以两面在桥侧同名同义，键名差异不外泄",
   },
   {
     field: "bbox", engineObserve: "bbox", engineInspect: null, bridge: "bbox", faces: "observe", caps: null, address: false,
