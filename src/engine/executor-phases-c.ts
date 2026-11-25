@@ -14,6 +14,7 @@ import { _executeElement, _hintOpts, _missingRequired, resolveCommandRef } from 
 import { type ActionabilityDetail, type AnyPage, type BrowserHandle, type ExecutedAction, type PwLike, type ReadyState, type RunReport, type Sig, type SkippedAction, type StateEffect, type StateFingerprint, type StateFlag, type StepStateRecord, type StopCode, type ThrottleSuspect } from "./executor-types.ts";
 import { type ActionCapability, type Elem, type ElemPool, actionCapabilities, poolSniff, urlInHostsEnvelope, urlOf } from "./extraction.ts";
 import { parseHint } from "./hint.ts";
+import { contextNavError, navErrorStopReason } from "./nav-error.ts";
 import { hintMatch } from "./rules.ts";
 import { type SettlePage, installSettle } from "./settle.ts";
 import { LOGIN_WALL_URL_RE, isWeakNegativeSignal } from "./signals.ts";
@@ -539,12 +540,16 @@ export async function runSetup(mw: BrowserMiddleware, a: {
       }
     }
     if (hostGate && hostGate.length) {
-      const deniedPopup = deniedContextUrl(pg, hostGate);
-      if (deniedPopup !== null) {
-        const why = `popup not allowed: ${deniedPopup} is outside the declared hosts envelope (${hostGate.join(", ")}) — popup/new-tab origins are part of the same host gate`;
+      // 导航失败（Chrome 错误页）不是 popup 越界：原文优先，按既有 config_error 收口。
+      const navFailure = await contextNavError(pg);
+      const deniedPopup = navFailure === null ? deniedContextUrl(pg, hostGate) : null;
+      if (navFailure !== null || deniedPopup !== null) {
+        const why = (navFailure === null ? null : navErrorStopReason(navFailure))
+          ?? `popup not allowed: ${String(deniedPopup)} is outside the declared hosts envelope (${hostGate.join(", ")}) — popup/new-tab origins are part of the same host gate`;
         if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
         return { kind: "early", browser, report: {
-          goal: instruction, done: false, stop_reason: why, stop_code: "popup_not_allowed",
+          goal: instruction, done: false, stop_reason: why,
+          stop_code: navFailure === null ? "popup_not_allowed" : "config_error",
           steps: [], audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
         } };
       }

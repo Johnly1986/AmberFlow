@@ -36,6 +36,7 @@
 | 打开筛选面板会**替换主内容树**（feed 从 DOM 摘除）→ 面板态验收要用面板内锚，回列表态再验 feed | r4 | round4 报告 §c8 |
 | 排序菜单/图层面板内的条目：排序 2 项 + 图层 9 项共用一个 `[role=menu]`——done 锚要写具体文案不要写 role 容器 | r4 | round4 报告 timeline 第 6 条 |
 | 广告卡（Sponsored）价格 ≠ 有机价（如北京 Hilton 广告 $134 vs 有机 $127）——「最低价」口径须排除广告卡并如实声明 | r1/r3/r4 | 各轮报告口径说明 |
+| **地点详情页评论列表在 headless 下不下发**（HeadlessChrome UA ⇒ 面板只剩 `Write a review`、`[data-review-id]` 恒 0）；同一 URL 同一路径换 **headful**（无显示环境 `xvfb-run`）即正常。**不是登录墙**（无需账户）。A/B 各跑 2 轮：headless 0/0、headful 35/35 | 2026-11-25 | 三阶段任务 run（`~/.amberflow/task-runs/gmaps-restaurants/`）；结构化版 `site-facts/google-maps.json` 的 `reviews-hidden-when-headless` |
 
 ## 实验纪律备注
 

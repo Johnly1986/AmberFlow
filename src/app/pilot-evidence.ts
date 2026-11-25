@@ -14,12 +14,15 @@ import { urlOf } from "../engine/extraction.ts";
 import { frameGateOf } from "../engine/frame-scope.ts";
 import type { ObserveResult } from "../engine/observe.ts";
 import type { AnyPage } from "../engine/executor.ts";
+import { disallowedHost } from "../engine/host-envelope.ts";
 import type { ElemPool } from "../engine/elem-model.ts";
 import { sleep } from "../support/sleep.ts";
+import { isChromeErrorPage, pageNavError } from "../engine/nav-error.ts";
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
+import { checkSignal, type SignalSpec } from "../engine/signals.ts";
 import { clipText } from "../support/text.ts";
 import { bounded, isObj } from "./session-runtime-contract.ts";
-import type { PilotHandoff, WeakPick } from "./pilot-contract.ts";
+import type { PilotHandoff, PilotStopCode, WeakPick } from "./pilot-contract.ts";
 
 /** DOM 快照落盘上限（超长截断并注明总长，避免长页把证据目录写爆）。 */
 const DOM_SNAPSHOT_CAP_BYTES = 2_000_000;
@@ -57,6 +60,10 @@ export function handoffWhyEvidence(a: {
   expectUrl: string | null;
   valueNeed: { target: string; key: string; ref: string } | null;
   missedHint: string | null;
+  /** 走出 hosts 信封的落地 URL（只有 host_not_allowed 停因给）；null = 未越界。 */
+  offEnvelope?: string | null;
+  /** Chrome 错误页还原的导航原文（只有 unreachable/config_error 停因给）；null = 无导航失败。 */
+  navError?: string | null;
 }): Record<string, unknown> {
   return {
     inert_run: a.inertRun,
@@ -66,6 +73,10 @@ export function handoffWhyEvidence(a: {
     ...(a.expectUrl === null ? {} : { expect_url: a.expectUrl }),
     ...(a.valueNeed === null ? {} : { needs_value: a.valueNeed }),
     ...(a.missedHint === null ? {} : { resume_hint: { hint: a.missedHint, missed: true } }),
+    // 越界落地页：给"是哪一步走出信封的"事实，人才能判断是加 host 还是换入口。
+    ...(a.offEnvelope === undefined || a.offEnvelope === null ? {} : { off_envelope: a.offEnvelope }),
+    // 导航失败原文：落在 Chrome 错误页时唯一的原文来源（事后读页面拿不到），带码的判据。
+    ...(a.navError === undefined || a.navError === null ? {} : { nav_error: a.navError }),
   };
 }
 
@@ -216,5 +227,76 @@ export function finalSignalFact(spec: Record<string, unknown> | null | undefined
     return clipText(JSON.stringify(spec), max);
   } catch {
     return null;
+  }
+}
+
+/**
+ * 驾驶面的**导航信封**判定（轮首与步尾共用；越界返回落地 URL，未越界 null）。
+ *
+ * 与 run 面 `hostGate`、session 的 `open`/`goto`/`tab` 同一判定：走出 hosts 就不再是任务语境
+ * （登录跳转、第三方重定向会把后续模型票带离任务页）。轮首判是为了不拿漂走后的候选问模型；
+ * 步尾判是为了把"是哪一步走出的"写进交接证据。
+ */
+export function envelopeEscape(url: string, hosts: string[] | null): string | null {
+  if (hosts === null || hosts.length === 0) return null;
+  return disallowedHost(url, hosts) === null ? null : url;
+}
+
+/** 信封/导航判定的一次结果：停因 + 交接证据（`offEnvelope` 只在真越界时给）。 */
+export interface EnvelopeStop {
+  stop: PilotStopCode;
+  offEnvelope: string | null;
+  reason: string | null;
+}
+
+/**
+ * 信封或**导航失败**判定（轮首/步尾/finish 共用）。
+ *
+ * 落在 Chrome 错误页不等于越界：错误页 URL 的 host 是 `chromewebdata`，拿它判信封会把
+ * 「网络不通」说成「走出 hosts」。错误页一律先还原原文再按引擎既有码归类
+ * （`unreachable` = 站点此刻不可达；`config_error` = 端口/URL 等声明问题或原文不可得）。
+ */
+export async function envelopeStopOf(page: AnyPage, url: string, hosts: string[] | null): Promise<EnvelopeStop | null> {
+  if (isChromeErrorPage(url)) {
+    const failure = await pageNavError(page);
+    return { stop: failure?.code ?? "config_error", offEnvelope: null, reason: failure?.reason ?? null };
+  }
+  return envelopeEscape(url, hosts) === null ? null : { stop: "host_not_allowed", offEnvelope: url, reason: null };
+}
+
+/**
+ * 信封判定的**页面取址体**（轮首与 finish 共用）。
+ *
+ * 取址失败 = null（不越界）：页面已死由既有 `browser_dead` / 信号不成立路径如实收口，
+ * 不把「读不到 URL」冒充成「越界」（那会把死页诊断成信封问题，解锁建议也就指向错处）。
+ */
+export async function envelopeStopNow(
+  page: () => Promise<AnyPage>,
+  hosts: string[] | null,
+): Promise<EnvelopeStop | null> {
+  try {
+    const p = await page();
+    return await envelopeStopOf(p, urlOf(p), hosts);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 最终信号的判定体（`--final-signal` 每轮判与 `finish` 指令共用同一实现）。
+ *
+ * 只回答"此刻是否成立"，**不判完成**：pilot 的正因收尾是 `final_signal_held`，
+ * 信号不成立只是继续驾驶。页面已死/信号形状非法一律 false（不抛）。
+ */
+export async function finalSignalHeldImpl(
+  spec: Record<string, unknown> | null | undefined,
+  page: () => Promise<AnyPage>,
+  hosts: string[] | null,
+): Promise<boolean> {
+  if (spec === null || spec === undefined || !isObj(spec) || Object.keys(spec).length === 0) return false;
+  try {
+    return await checkSignal(await page() as never, spec as SignalSpec, { hosts });
+  } catch {
+    return false;
   }
 }

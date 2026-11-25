@@ -23,6 +23,9 @@ export const PILOT_STOP_CODES = [
   "final_signal_held", // 声明的最终信号被 checkSignal 验证成立（正因收尾）
   "budget_exceeded",   // --max-steps 用满（与 run 同名同义）
   "off_task_page",     // 当前 URL 不含发起方声明的 --expect-url（页面漂移的确定性停因）
+  "host_not_allowed",  // 当前 URL 越出 hosts 信封（与 run 面 hostGate / session 同一判定）
+  "unreachable",       // 落在 Chrome 错误页且原文是连接/DNS/超时类（站点此刻不可达，不是越界）
+  "config_error",      // 导航失败的其余归因（端口被拒/畸形 URL/原文不可得）——改声明，不重试
   "low_confidence",    // 模型 pick 低于闸门且 reobserve 更宽后仍低（run 同序）
   "target_ambiguous",  // 解析命中多个不同候选（run 命令步同一歧义谓词）
   "needs_value",       // fill/select 决策步缺值（绝不猜；Agent 兜底给值）
@@ -165,7 +168,11 @@ export interface PilotOptions {
   url: string;
   /** 总目标（发起方给的一句话；驾驶问句的 goal 底座）。 */
   goal: string;
-  /** 导航信封（缺省从 --url 推断）。 */
+  /**
+   * 导航信封（单一来源 = 声明本身；未声明/`null`/`[]`/全空串 = 不设防，**不**按 `url` 推断）。
+   * 空串条目在此归一并剔除。CLI `amber session --url` 的面由 CLI 的 `inferHosts` 显式声明
+   * 后传入，所以那条默认路径的信封不受这里的「未声明」语义影响。
+   */
   hosts?: string[] | null;
   /** 最终信号声明（缺省 = 无信号收尾：预算内推进、连续 inert 即停）。 */
   finalSignal?: Record<string, unknown> | null;
@@ -273,6 +280,21 @@ function baseUnblockHints(stop: PilotStopCode, ctx?: PilotUnblockContext): strin
       return [
         "redirect 回任务页（当前 URL 已偏离发起方声明的 --expect-url）",
         "核对 --expect-url 与入口 URL：只写稳定的路径片段（如 /maps），不要写 query",
+      ];
+    case "host_not_allowed":
+      return [
+        "redirect 回信封内的页面（驾驶已走出 hosts：登录/第三方跳转不作为驾驶面）",
+        "确认这一步导航是任务需要的：需要就把它加进 hosts，不需要就别点那个入口",
+      ];
+    case "unreachable":
+      return [
+        "先验证站点可达（curl/fetch）：不可达就等站点恢复或换入口，不是改 hosts/声明",
+        "可达则放宽 --timeout 或稍后重试（reason 带浏览器原文 net::ERR_*）",
+      ];
+    case "config_error":
+      return [
+        "核对 reason 里的 net::ERR_*：端口被拒（ERR_UNSAFE_PORT）/URL 畸形 = 改入口 URL，不要重试",
+        "确认声明的 hosts 与实际入口一致后 redirect 回可用页面",
       ];
     case "browser_dead":
       return ["redirect 重开入口页（浏览器已死，现场不可恢复）"];

@@ -6,6 +6,7 @@ import { induceHint } from "../model/hint-memory.ts";
 import { sleep } from "../support/sleep.ts";
 import { type TraceStep } from "./audit.ts";
 import { contextPageCount, deniedContextUrl, disallowedHost, round3 } from "./executor-pure.ts";
+import { contextNavError, navErrorStopReason } from "./nav-error.ts";
 import { type AnyPage, type HintMemoryLike, type OutcomeMemoryLike, type StopCode } from "./executor-types.ts";
 import { type Elem, type ElemPool, esig, urlOf } from "./extraction.ts";
 import type { BrowserMiddleware, PostActionPhase } from "./executor.ts";
@@ -35,6 +36,15 @@ export async function runPostAction(mw: BrowserMiddleware, a: {
     let done = done0; let manualDone = manualDone0;
     setPendingAfterIdx(trace.length - 1);
     if (verbose) console.log(`  step ${stepNo}: ${desc} (${how}, ${method}, conf=${conf.toFixed(2)}${inert ? ", inert" : ""})`);
+    // 导航失败先于信封判定：Chrome 错误页的 URL host 是 `chromewebdata`，直接判信封会把
+    // 「网络不通」说成「越界/popup 越界」。run 面停因闭集不加 `unreachable`（冻结契约），
+    // 分类与处置建议由 `navErrorStopReason` 写进 reason，与 pilot 面的建议同源不打架。
+    const navFailure = await contextNavError(pg);
+    if (navFailure !== null) {
+      stop("config_error", `${navErrorStopReason(navFailure)} on step ${stepNo}`, stepNo);
+      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { control: "break", done, manualDone };
+    }
     // NAVIGATION ENVELOPE, post-action half: an executed action must not land
     const landed = disallowedHost(post.url, hostGate);
     if (landed !== null) {
@@ -100,6 +110,14 @@ export async function runPostAction(mw: BrowserMiddleware, a: {
       }
       // Popup 可能在 action 之后几十/几百 ms 才 commit；done 轮询结束后再扫一次 context，
       if (hostGate && hostGate.length) {
+        // 同一口径：错误页不是 popup 越界（原文优先，按既有 config_error 收口）。
+        const settledNav = await contextNavError(pg);
+        if (settledNav !== null) {
+          done = false;
+          stop("config_error", `${navErrorStopReason(settledNav)} on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+          return { control: "break", done, manualDone };
+        }
         const settledPopup = deniedContextUrl(pg, hostGate);
         if (settledPopup !== null) {
           done = false;

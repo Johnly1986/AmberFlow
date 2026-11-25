@@ -27,6 +27,8 @@ import path from "node:path";
 import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
 import { drivingGoalText, unblockHintsFor, type PilotOptions } from "../src/app/pilot-contract.ts";
 import { weakPicksFrom } from "../src/app/pilot-evidence.ts";
+import { projectHandoff } from "../src/app/session-driver.ts";
+import type { PilotHandoff } from "../src/app/pilot-contract.ts";
 import {
   bindValueFor, countValueTargetId, findPoolRefBySig, slotKeyFor, valueAliasKeyOf,
   valueKeyOf, valueNeedOf, valueSigOf, valueTargetIdOf,
@@ -610,7 +612,8 @@ async function scenarioFrameExcluded(origin: string): Promise<void> {
   const hostOrigin = `http://127.0.0.1:${(host.address() as { port: number }).port}`;
   void origin;
   const { rt, events } = await boot({
-    url: `${hostOrigin}/frame-host.html`, goal: "zerblonix frobnicate", maxSteps: 2,
+    // 信封显式声明：本场景断言的正是「声明了 hosts 之后跨源 frame 被排除」。
+    url: `${hostOrigin}/frame-host.html`, goal: "zerblonix frobnicate", maxSteps: 2, hosts: ["127.0.0.1"],
   });
   try {
     await new Promise((resolve) => setTimeout(resolve, 800));   // 等跨源 iframe 载入
@@ -820,6 +823,326 @@ async function scenarioNeedsValueKeyDrift(origin: string): Promise<void> {
   }
 }
 
+/**
+ * 驾驶面的**导航信封**：动作把页面带出 hosts ⇒ `host_not_allowed`（与 run 面 hostGate 同一判定），
+ * 交接块带 `off_envelope` 落地 URL，解锁建议指向 redirect。
+ *
+ * 造法同 frame 场景：同一台服务器绑两个 host（127.0.0.1 / 127.0.0.2）——信封按 hostname 判，
+ * 端口不算跨源。入口在信封内，点一下跳到信封外。
+ */
+async function scenarioHostEnvelope(origin: string): Promise<void> {
+  void origin;
+  const away = await startFixtureServer("127.0.0.2");
+  const here = http.createServer((req, res) => {
+    if (new URL(req.url ?? "/", "http://127.0.0.1").pathname === "/envelope.html") {
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.end(`<!doctype html><html><head><meta charset="utf-8"><title>envelope</title></head><body>
+        <main><a id="escape" href="${away.origin}/home.html">Cross host page</a></main></body></html>`);
+      return;
+    }
+    res.statusCode = 404;
+    res.end("not found");
+  });
+  await new Promise<void>((resolve) => here.listen(0, "127.0.0.1", resolve));
+  const hereOrigin = `http://127.0.0.1:${(here.address() as { port: number }).port}`;
+  // driver:"agent" = 每步由 Agent 点名（resume 无需先开交接），本场景不花模型票。
+  const { rt, events } = await boot({
+    url: `${hereOrigin}/envelope.html`, goal: "zerblonix frobnicate", hosts: ["127.0.0.1"], maxSteps: 3,
+    driver: "agent",
+  });
+  try {
+    assert.equal(await rt.handleLine(`{"cmd":"resume","hint":"Cross host page"}`), "drive");
+    const stop = await rt.drive();
+    assert.equal(stop, "host_not_allowed", "walking out of the hosts envelope is a deterministic stop");
+    const handoff = events.find((e) => e["type"] === "handoff") as Record<string, unknown> | undefined;
+    assert.ok(handoff !== undefined, "handoff projected for the envelope stop");
+    const h = handoff!["handoff"] as Record<string, unknown>;
+    const ev = (h["why_stuck"] as Record<string, unknown>)["evidence"] as Record<string, unknown>;
+    assert.ok(String(ev["off_envelope"] ?? "").startsWith(away.origin), "handoff names the URL that left the envelope");
+    assert.ok((h["what_would_unblock"] as string[]).some((w) => w.includes("redirect")), "unblock says redirect back inside");
+    // 同一信封内改道 = 不再拦（守卫只对信封外生效）。
+    assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/envelope.html"}`), "drive");
+    assert.notEqual(await rt.drive(), "host_not_allowed", "back inside the envelope the gate releases");
+    await rt.finish(null);
+  } finally {
+    await rt.closeBrowser();
+    await new Promise<void>((resolve) => here.close(() => resolve()));
+    await away.close();
+  }
+}
+
+/**
+ * 信封只来自声明（纯构造面）：未声明/null/[]/全空串 = `hosts === null`（不设防），
+ * 显式声明原样生效。取消入口 URL 推断后，「未声明」不再悄悄变成「只准待在入口 host」。
+ */
+async function scenarioHostEnvelopeDefaults(_origin: string): Promise<void> {
+  const env = laneEnv();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-pilot-out-"));
+  const build = (hosts: string[] | null | undefined): PilotRuntime => new PilotRuntime({
+    url: "http://entry.example/home", goal: "g",
+    ...(hosts === undefined ? {} : { hosts }), env, outDir,
+  }, { respond: () => { /* 纯构造面：不驾驶 */ } });
+  for (const [label, hosts, want] of [
+    ["omitted", undefined, null],
+    ["null", null, null],
+    ["empty array", [], null],
+    ["blank entries only", ["", "  "], null],
+    ["declared", ["a.example"], ["a.example"]],
+    ["declared with blanks", ["", "b.example", " "], ["b.example"]],
+  ] as Array<[string, string[] | null | undefined, string[] | null]>) {
+    assert.deepEqual(build(hosts).hosts, want, `hosts ${label}: envelope comes from the declaration only`);
+  }
+}
+
+/**
+ * 信封优先于完成裁决：起点 302 到信封外，且越界页恰好满足 `finalSignal`。
+ * 越界页上的「信号成立」不得被判成完成（否则第三方/SSO 页会冒充 ok:true 收尾）。
+ */
+async function scenarioEnvelopeBeforeFinalSignal(_origin: string): Promise<void> {
+  const away = await startFixtureServer("127.0.0.2");
+  const entry = http.createServer((_req, res) => {
+    res.statusCode = 302;
+    res.setHeader("location", `${away.origin}/home.html`);
+    res.end();
+  });
+  await new Promise<void>((resolve) => entry.listen(0, "127.0.0.1", resolve));
+  const entryOrigin = `http://127.0.0.1:${(entry.address() as { port: number }).port}`;
+  // 越界页（away/home.html）上 #detail-link 存在 ⇒ 信号在信封外也成立：完成裁决不得抢在信封之前。
+  const { rt, events } = await boot({
+    url: `${entryOrigin}/start.html`, goal: "zerblonix frobnicate", hosts: ["127.0.0.1"],
+    finalSignal: { css_exists: "#detail-link" }, maxSteps: 3, driver: "agent",
+  });
+  try {
+    assert.equal(await rt.drive(), "host_not_allowed", "an off-envelope page never satisfies the final signal");
+    const handoff = events.find((e) => e["type"] === "handoff") as Record<string, unknown> | undefined;
+    assert.ok(handoff !== undefined, "handoff projected for the envelope stop");
+    const h = handoff!["handoff"] as Record<string, unknown>;
+    assert.equal(h["stop_code"], "host_not_allowed", "handoff stop code is the envelope one");
+    assert.equal(h["step_id"], 0, "the stop happens before any driving step (no pool, no vote)");
+    assert.equal(drivesOf(events).length, 0, "zero actions were executed on the off-envelope page");
+    assert.ok(String(h["url"]).startsWith(away.origin), "handoff anchors the landing page that left the envelope");
+
+    // finish 也必须在同一判定下被拒：交接保持打开，改道回信封内才能收尾。
+    assert.equal(await rt.handleLine('{"cmd":"finish","signal":{"css_exists":"#detail-link"}}'), "stay");
+    const rejected = events.filter((e) => e["type"] === "command_result").pop();
+    assert.ok(rejected !== undefined, "finish got a single-line receipt");
+    assert.equal(rejected!["ok"], false, "finish off the envelope is rejected");
+    assert.equal(rejected!["code"], "host_not_allowed", "the rejection reuses the existing code");
+    assert.equal(rt.done, false, "a rejected finish does not end the driving loop");
+    assert.equal(rt.stoppedAt, "host_not_allowed", "the stop code is unchanged");
+    assert.notEqual(rt.handoffOpen, null, "the handoff stays open for redirect/resume");
+    await rt.finish(null);
+    const end = events.find((e) => e["type"] === "pilot_end");
+    assert.equal(end!["ok"], false, "wrapping up does not claim success");
+    assert.equal(end!["stop_code"], "host_not_allowed");
+  } finally {
+    await rt.closeBrowser();
+    await new Promise<void>((resolve) => entry.close(() => resolve()));
+    await away.close();
+  }
+}
+
+/**
+ * attach 在 `about:blank` 起步：未声明 hosts = 不设防，宿主随后导航到真实页仍可驾驶。
+ * 推断入口 hostname 时 `about:blank` 会造出 `[""]` 信封——那会把一切 http(s) 页判成越界。
+ */
+async function scenarioAttachAboutBlank(origin: string): Promise<void> {
+  const env = laneEnv();
+  const session = await browserSession(true);
+  const events: SinkEvent[] = [];
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-pilot-out-"));
+  const rt = new PilotRuntime({
+    url: "about:blank", goal: "zerblonix frobnicate", maxSteps: 2, driver: "agent",
+    sessionFactory: async () => session, ownsSession: false, skipStartNavigation: true, env, outDir,
+  }, { respond: (obj) => { events.push(obj as SinkEvent); } });
+  try {
+    await rt.start();
+    assert.equal(rt.hosts, null, "an about:blank entry declares no envelope");
+    const started = events.find((e) => e["type"] === "started");
+    assert.equal(started!["ok"], true, "attaching on about:blank is a normal start");
+    assert.equal(started!["attached"], true, "started marks the attach mode");
+    // 宿主把页导航到真实站点：未声明信封 ⇒ 不拦（入口 hostname 推断出的空串信封会每轮拦下）。
+    await session.page.goto(`${origin}/home.html`, { waitUntil: "domcontentloaded" });
+    const stop = await rt.drive();
+    assert.notEqual(stop, "host_not_allowed", "no envelope was declared, so nothing is out of it");
+    assert.equal(stop, "await_pick", "driving continues on the real page");
+    await rt.finish(null);
+  } finally {
+    await rt.closeBrowser();
+    await session.close();
+  }
+}
+
+/**
+ * P0-1：改道即换语境必须包括 **未消费的 resume 点名**。
+ *
+ * 序列：点击走出信封 → 停 `host_not_allowed` → 越界页上 Agent 发 `resume{hint}`（守卫在
+ * hint 消费之前命中，hint 留在队列）→ `redirect` 到信封内、且含该 hint 目标的新页 →
+ * 再驾驶一步。改道后的新页**不得**执行旧语境点名：`resumeHint` 必须已被 `redirectReset`
+ * 清空，因此新页只走正常驾驶（agent 档 = 投影候选等点名），不会出现那一步点击。
+ */
+async function scenarioRedirectDropsResumeHint(origin: string): Promise<void> {
+  void origin;
+  const away = await startFixtureServer("127.0.0.2");
+  const here = http.createServer((req, res) => {
+    const p = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    const html = p === "/envelope.html"
+      ? `<!doctype html><html><head><meta charset="utf-8"><title>envelope</title></head><body>
+        <main><a id="escape" href="${away.origin}/home.html">Cross host page</a></main></body></html>`
+      : p === "/restart.html"
+        ? `<!doctype html><html><head><meta charset="utf-8"><title>restart</title></head><body>
+          <button id="restart" onclick="document.body.dataset.clicked='1'">Restart account</button></body></html>`
+        : null;
+    if (html === null) { res.statusCode = 404; res.end("not found"); return; }
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(html);
+  });
+  await new Promise<void>((resolve) => here.listen(0, "127.0.0.1", resolve));
+  const hereOrigin = `http://127.0.0.1:${(here.address() as { port: number }).port}`;
+  const { rt, events } = await boot({
+    url: `${hereOrigin}/envelope.html`, goal: "zerblonix frobnicate", hosts: ["127.0.0.1"], maxSteps: 8,
+    driver: "agent",
+  });
+  try {
+    // ① 走出信封：步尾停 host_not_allowed。
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Cross host page"}'), "drive");
+    assert.equal(await rt.drive(), "host_not_allowed", "the click walks out of the envelope");
+    // ② 越界页上再点名：轮首信封守卫先命中，hint 进队列但本轮不会被消费。
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Restart account"}'), "drive");
+    assert.equal(await rt.drive(), "host_not_allowed", "the envelope guard still stops before consuming the hint");
+    assert.equal(rt.resumeHint, "Restart account", "the queued hint is still pending before the redirect");
+    const before = drivesOf(events).length;
+    // ③ 改道到信封内、且确实含该 hint 目标的新页：旧语境的点名必须失效。
+    assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/restart.html"}`), "drive");
+    assert.equal(rt.resumeHint, null, "redirect drops the stale resume point (the new page is a different context)");
+    const stop = await rt.drive();
+    assert.equal(stop, "await_pick", "the new page drives normally instead of executing the stale hint");
+    const after = drivesOf(events).slice(before);
+    assert.equal(after.length, 0, "no action was executed on the new page");
+    const clickedFlag = await (await rt.page()).evaluate(
+      () => (globalThis as unknown as { document: { body: { dataset: Record<string, string | undefined> } } })
+        .document.body.dataset["clicked"] ?? "",
+    ) as string;
+    assert.equal(clickedFlag, "", "the stale hint's target was never clicked on the new page");
+    await rt.finish(null);
+  } finally {
+    await rt.closeBrowser();
+    await new Promise<void>((resolve) => here.close(() => resolve()));
+    await away.close();
+  }
+}
+
+/**
+ * 导航失败 ≠ 越界：点击一个指向不可达站点的链接后，浏览器落在 `chrome-error://chromewebdata/`。
+ * 该页 URL 的 host 是 `chromewebdata`，拿它判 hosts 信封会谎报 `host_not_allowed`。
+ *
+ * 断言两件事：① 连接类原文（`ERR_NAME_NOT_RESOLVED`）= `unreachable`、端口被拒原文
+ * （`ERR_UNSAFE_PORT`）= `config_error`，两者的交接证据 `nav_error` 都带**浏览器原文**；
+ * ② 同一 hosts 信封下真正跨 host 的链接仍是 `host_not_allowed`（正常语义不变）。
+ */
+async function scenarioNavFailureNotEnvelope(origin: string): Promise<void> {
+  void origin;
+  const away = await startFixtureServer("127.0.0.2");
+  const here = http.createServer((req, res) => {
+    if (new URL(req.url ?? "/", "http://127.0.0.1").pathname !== "/nav-error.html") {
+      res.statusCode = 404; res.end("not found"); return;
+    }
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(`<!doctype html><html><head><meta charset="utf-8"><title>nav error</title></head><body>
+      <main>
+        <a id="dns" href="http://nope-af.invalid/">Dns fail target</a>
+        <a id="port" href="http://127.0.0.1:1/">Unsafe port target</a>
+        <a id="cross" href="${away.origin}/home.html">Cross host target</a>
+      </main></body></html>`);
+  });
+  await new Promise<void>((resolve) => here.listen(0, "127.0.0.1", resolve));
+  const hereOrigin = `http://127.0.0.1:${(here.address() as { port: number }).port}`;
+  const { rt, events } = await boot({
+    url: `${hereOrigin}/nav-error.html`, goal: "zerblonix frobnicate", hosts: ["127.0.0.1"], maxSteps: 8,
+    driver: "agent",
+  });
+  const lastEvidence = (): Record<string, unknown> => {
+    const handoff = events.filter((e) => e["type"] === "handoff").pop();
+    assert.ok(handoff !== undefined, "a handoff was projected");
+    const block = handoff!["handoff"] as Record<string, unknown>;
+    return ((block["why_stuck"] as Record<string, unknown>)["evidence"] ?? {}) as Record<string, unknown>;
+  };
+  const lastStop = (): string => {
+    const block = (events.filter((e) => e["type"] === "handoff").pop() as Record<string, unknown>)["handoff"];
+    return String((block as Record<string, unknown>)["stop_code"]);
+  };
+  try {
+    // ① DNS 失败：原文 = net::ERR_NAME_NOT_RESOLVED ⇒ unreachable，且不是越界。
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Dns fail target"}'), "drive");
+    assert.equal(await rt.drive(), "unreachable", "a DNS failure is unreachable, not an envelope escape");
+    assert.notEqual(lastStop(), "host_not_allowed", "the error page URL is never reported as an out-of-envelope host");
+    const dnsEvidence = lastEvidence();
+    assert.ok(String(dnsEvidence["nav_error"] ?? "").includes("net::ERR_NAME_NOT_RESOLVED"),
+      "the handoff keeps the browser's original net::ERR_* text");
+    // ② 端口被浏览器拒绝：ERR_UNSAFE_PORT 不是「网络不可达」——改端口，不是重试。
+    assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/nav-error.html"}`), "drive");
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Unsafe port target"}'), "drive");
+    assert.equal(await rt.drive(), "config_error", "a browser-refused port is a config error, not unreachable");
+    const portEvidence = lastEvidence();
+    assert.ok(String(portEvidence["nav_error"] ?? "").includes("net::ERR_UNSAFE_PORT"),
+      "the handoff keeps the port rejection text");
+    // ③ 反证：同一信封下真正跨 host 的跳转仍是 host_not_allowed（正常语义没被放宽）。
+    assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/nav-error.html"}`), "drive");
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Cross host target"}'), "drive");
+    assert.equal(await rt.drive(), "host_not_allowed", "a real cross-host navigation stays an envelope stop");
+    assert.ok(String(lastEvidence()["off_envelope"] ?? "").startsWith(away.origin),
+      "the envelope stop still names the landing URL that left the envelope");
+    await rt.finish(null);
+  } finally {
+    await rt.closeBrowser();
+    await new Promise<void>((resolve) => here.close(() => resolve()));
+    await away.close();
+  }
+}
+
+/**
+ * 交接 evidence 超限退化清单（纯函数，可失败）：**保现场**优先于原插入序。
+ *
+ * `off_envelope` 在 evidence 里恰是第 9 个键；纯按插入序截前 8 键会把「是哪一步走出信封」这条
+ * 真实停驶现场切掉（40 条 forbidden + 6 个 excluded frame 的真实量级 = 900+ 字符）。
+ */
+async function scenarioEvidenceKeysPriority(_origin: string): Promise<void> {
+  const project = (evidence: Record<string, unknown>): Record<string, unknown> => {
+    const handoff: PilotHandoff = {
+      stop_code: "host_not_allowed", step_id: 1, goal_digest: "g",
+      why_stuck: { summary: "s", evidence }, what_would_unblock: [], evidence_refs: {}, url: "u",
+    };
+    return (((projectHandoff(handoff)["why_stuck"] as Record<string, unknown>)["evidence"]) ?? {}) as Record<string, unknown>;
+  };
+  const longText = "x".repeat(1200);
+  // ① 真实停驶现场量级：9 键、off_envelope 第 9 —— 退化清单必须含它。
+  const realScene = project({
+    inert_run: 3, forbidden: Array.from({ length: 40 }, (_, i) => `e${String(i)}`),
+    ledger: [{ key: "k", tries: 3, last_outcome: longText }],
+    loop_stop: { desc: longText, tries: 3 },
+    frames_excluded: Array.from({ length: 6 }, (_, i) => ({ origin: `http://f${String(i)}.test`, index: i })),
+    expect_url: "/maps", needs_value: { target: longText, key: "k", ref: "e1" },
+    resume_hint: { hint: longText, missed: true }, off_envelope: "http://away.invalid/x",
+  });
+  assert.equal(realScene["truncated"], true, "an oversized evidence block degrades to a key list");
+  const realKeys = realScene["keys"] as string[];
+  for (const key of ["off_envelope", "expect_url", "needs_value", "resume_hint"]) {
+    assert.ok(realKeys.includes(key), `the locator key ${key} survives truncation`);
+  }
+  assert.ok(realKeys.length <= 8, "the degraded key list stays bounded to 8");
+  // ② 10 键、off_envelope 末尾：仍 ≤8 且保它（定位键优先于插入序）。
+  const tail = project(Object.fromEntries([
+    ...Array.from({ length: 9 }, (_, i) => [`k${String(i)}`, longText] as const),
+    ["off_envelope", "http://away.invalid/x"] as const,
+  ]));
+  const tailKeys = tail["keys"] as string[];
+  assert.equal(tailKeys.length, 8, "a 10-key block degrades to exactly 8");
+  assert.ok(tailKeys.includes("off_envelope"), "off_envelope at the tail is still kept");
+  // ③ 未超限：投影逐字节等于原 evidence，且不出现 truncated。
+  const small = { inert_run: 0, forbidden: ["a"], off_envelope: "http://away.invalid/x" };
+  assert.deepEqual(project(small), small, "an in-budget evidence block is projected byte-identically");
+}
+
 const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["arrival(rules 零模型到达)", scenarioArrival],
   ["needs_value→resume 值+点名", scenarioNeedsValue],
@@ -841,7 +1164,14 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["决策源不可达 no_model_runtime", scenarioNoModel],
   ["驾驶上文：已执行+outcome/当前页/期望页", scenarioContextText],
   ["结束态可见性：weak_picks 筛选 + conf_floor", scenarioWeakPicksPure],
+  ["交接 evidence 超限保现场（off_envelope 不被切）", scenarioEvidenceKeysPriority],
   ["任务页漂移→off_task_page", scenarioOffTaskPage],
+  ["信封只来自声明：未声明/空串=不设防", scenarioHostEnvelopeDefaults],
+  ["导航信封：走出 hosts→host_not_allowed", scenarioHostEnvelope],
+  ["改道丢弃旧 resume 点名（不在新页执行）", scenarioRedirectDropsResumeHint],
+  ["导航失败≠越界（unreachable/config_error 带原文）", scenarioNavFailureNotEnvelope],
+  ["信封优先于完成裁决：越界页信号成立≠完成", scenarioEnvelopeBeforeFinalSignal],
+  ["attach：about:blank 起步不造空串信封", scenarioAttachAboutBlank],
   ["frame 排除→显式证据+加入 hosts 建议", scenarioFrameExcluded],
   ["attach：注入会话+跳过导航+不关宿主", scenarioAttachSession],
 ];

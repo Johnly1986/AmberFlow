@@ -102,10 +102,15 @@ run 面的**决策语句步**（`ctx.step(goal, { done })`，无 `act`）早已�
 6. `checkSignal(finalSignal)`——成立即停 `final_signal_held`；缺最终信号声明时以
    「预算内持续推进、连续 inert 即停」收尾（诚实，不发明完成）。
 
-**停因闭集**（9 码）：`low_confidence` / `target_ambiguous` / `needs_value` / 连续 inert
+**停因闭集**（12 码）：`low_confidence` / `target_ambiguous` / `needs_value` / 连续 inert
 （复用 anti-repeat 证据）/ `no_model_runtime` / `off_task_page`（`--expect-url` 的页面漂移
-确定性守卫——当前 URL 不含声明子串即停，不在漂移页上继续抽池/问模型）/ `budget_exceeded`
-（`--max-steps` 与 run 同名同义）/ `final_signal_held` / `browser_dead`。
+确定性守卫——当前 URL 不含声明子串即停，不在漂移页上继续抽池/问模型）/ `host_not_allowed`
+（驾驶走出 hosts 信封，轮首（含最终信号判定之前）与步尾各判一次；`finish` 在越界页同样被拒；
+交接带 `off_envelope` 落地 URL，与 run 面 `hostGate` 同一主页面 URL 谓词；信封只来自声明，
+未声明/null/[]/全空串 = 不设防）/ `budget_exceeded`（`--max-steps` 与 run 同名同义）/ `final_signal_held` /
+`browser_dead` / `unreachable`（落在 Chrome 错误页且浏览器原文是连接/DNS/超时类——站点此刻不可达，
+先验证可达或放宽超时，不是越界）/ `config_error`（导航失败的其余归因：端口被浏览器拒绝
+`ERR_UNSAFE_PORT`、畸形 URL、或原文不可得——改声明/改端口，不要重试）。
 
 终态语义（session 托管面，单源 `src/app/session-driver.ts`）：driver 到达
 `final_signal_held` / `budget_exceeded` / `aborted` / `browser_dead` 后**不可续驾驶**——
@@ -226,7 +231,7 @@ PW1–PW3 已落地；**CLI 入口 `amber pilot`/`amber pilot export` 已于 202
 
 | 件 | 文件 | 说明 |
 |---|---|---|
-| 契约 | `src/app/pilot-contract.ts` | 停因闭集（8 码）/ 兜底指令闭集（4 指令）/ `PilotHandoff` 交接块 / 轨迹行类型 / 选项面与解锁建议查表 |
+| 契约 | `src/app/pilot-contract.ts` | 停因闭集（12 码）/ 兜底指令闭集（4 指令）/ `PilotHandoff` 交接块 / 轨迹行类型 / 选项面与解锁建议查表 |
 | 驾驶运行时 | `src/app/pilot-runtime.ts` | `PilotRuntime`：抽池 → resume-hint 确定性执行 → 规则档先行 → `pickProposal` 闭集投票 → 闸门 → `actOnce` 执行 → inert/信号判定；决策源装配与 run 同序列（`resolveProviderSpec` → `applySpecToRuntime`） |
 | 入口编排 | ~~`src/app/pilot-entry.ts`~~ | **2026-11-23 移除**（agent 面经 `amberflow_session` 的 drive 系列 op；引擎库面由 `PilotRuntime` 直接驱动） |
 | CLI | ~~`src/cli/commands/pilot.ts`~~ | **2026-11-23 移除**；等价入口是 `amber session` 的 `drive/driveCommand/driveStatus/driveClose` 请求 |

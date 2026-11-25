@@ -37,7 +37,6 @@ import {
 } from "../engine/executor.ts";
 import { elemFamily, esig, urlOf } from "../engine/extraction.ts";
 import type { Elem, ElemPool } from "../engine/elem-model.ts";
-import { checkSignal, type SignalSpec } from "../engine/signals.ts";
 import { affordanceRule, DESTRUCTIVE_PATTERNS, hintCandidates, hintMatch, navRule } from "../engine/rules.ts";
 import { foldNestedDuplicates, pickRejection } from "../engine/executor-actionability.ts";
 import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
@@ -45,7 +44,7 @@ import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
   activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type AppliedSpec,
 } from "../model/decision-provider.ts";
-import { errMsg, isDeadPageError, isObj } from "./session-runtime-contract.ts";
+import { errMsg, isDeadPageError } from "./session-runtime-contract.ts";
 import { modelVote } from "./pilot-vote.ts";
 import { PilotAskAdapter } from "./pilot-ask-adapter.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
@@ -55,8 +54,8 @@ import {
 } from "./pilot-value-need.ts";
 import { clipText } from "../support/text.ts";
 import {
-  emitStepRequest as emitStepRequestEvidence, finalSignalFact, frameExclusionsOf, handoffEvidence,
-  handoffWhyEvidence, weakPicksFrom,
+  emitStepRequest as emitStepRequestEvidence, envelopeStopNow, envelopeStopOf, finalSignalFact, finalSignalHeldImpl,
+  type EnvelopeStop, frameExclusionsOf, handoffEvidence, handoffWhyEvidence, weakPicksFrom,
 } from "./pilot-evidence.ts";
 import { handlePilotLine, type PilotCommandTarget } from "./pilot-commands.ts";
 import { PILOT_AWAIT_PICK, PILOT_DEFAULT_MAX_STEPS, PILOT_INERT_LIMIT, drivingGoalText, pilotExitCode, unblockHintsFor, type PilotHandoff, type PilotOptions, type PilotRecordLine, type PilotStopCode } from "./pilot-contract.ts";
@@ -103,6 +102,8 @@ export class PilotRuntime implements PilotCommandTarget {
   private recordFailed = false;
   resumeHint: string | null = null;
   private lastError: string | null = null;
+  /** 最近一次信封/导航失败判定（越界落地 URL 或错误页原文；各自只随对应停因进证据）。 */
+  private gate: EnvelopeStop | null = null;
   /** 驾驶者：model = 决策模型投票（缺省）；agent = 每步等 Agent resume{hint} 点名（零模型票）。 */
   readonly driverMode: "model" | "agent";
   /** 本地 laya checkpoint 名（配置 > 缺省 english；在线 provider 档不消费它）。 */
@@ -151,13 +152,9 @@ export class PilotRuntime implements PilotCommandTarget {
     this.opts = opts;
     this.sink = sink;
     this.runId = runId ?? `${Date.now().toString(36)}-${process.pid}`;
-    let hosts: string[] | null = null;
-    try {
-      const h = new URL(opts.url).hostname;
-      hosts = [h];
-    } catch { /* 非法 URL 在 start() 里结构化报错，不在这里猜 */ }
-    if (opts.hosts && opts.hosts.length > 0) hosts = [...opts.hosts];
-    this.hosts = hosts;
+    // 信封只来自声明：未声明 = 不设防（不推断入口 URL——那会把「未声明」变成「只准待在入口 host」）。
+    const declared = (opts.hosts ?? []).map((h) => h.trim()).filter((h) => h !== "");
+    this.hosts = declared.length > 0 ? declared : null;
     this.maxSteps = Math.max(1, Math.min(200, opts.maxSteps ?? PILOT_DEFAULT_MAX_STEPS));
     this.confFloor = typeof opts.confFloor === "number" && Number.isFinite(opts.confFloor)
       ? Math.max(0, Math.min(1, opts.confFloor)) : 0.25;
@@ -302,6 +299,9 @@ export class PilotRuntime implements PilotCommandTarget {
     // 任务页守卫（确定性）：发起方声明了 --expect-url 而当前 URL 不含它 = 页面已漂移。
     // 守卫在抽池/模型票之前——漂走后的候选与模型决策都不是任务语境，继续只会烧预算。
     if (this.expectUrl !== null && !urlNow.includes(this.expectUrl)) return "off_task_page";
+    // 导航信封（与 run 面 hostGate 同一判定）：轮首判 = 不拿漂走后的候选问模型。
+    const head = await envelopeStopOf(page, urlNow, this.hosts);
+    if (head !== null) { this.gate = head; return head.stop; }
     const goal = this.drivingGoal(urlNow);
 
     // ① 抽池（settle 门 + 与 run 同一条抽取链）。
@@ -506,6 +506,10 @@ export class PilotRuntime implements PilotCommandTarget {
       }
     }
 
+    // 步尾判 = 把"是哪一步走出的"写进交接证据（点击后跳登录页最常见）。
+    const tail = await envelopeStopOf(page, urlAfter, this.hosts);
+    if (tail !== null) { this.gate = tail; return tail.stop; }
+
     // anti-repeat：连续无变化（ok 但 changed=false，或连续失败）达阈值 = stuck_inert。
     const inert = !step.ok || step.changed !== true;
     this.inertRun = inert ? this.inertRun + 1 : 0;
@@ -515,17 +519,11 @@ export class PilotRuntime implements PilotCommandTarget {
 
   /** checkSignal 验证一条信号声明在当前页是否成立（--final-signal 每轮判与 finish 指令共用）。 */
   async signalHeld(spec: Record<string, unknown>): Promise<boolean> {
-    try {
-      return await checkSignal(await this.page() as never, spec as SignalSpec, { hosts: this.hosts });
-    } catch {
-      return false;
-    }
+    return await finalSignalHeldImpl(spec, () => this.page(), this.hosts);
   }
 
   private async finalSignalHeld(): Promise<boolean> {
-    const spec = this.opts.finalSignal;
-    if (spec === null || spec === undefined || !isObj(spec) || Object.keys(spec).length === 0) return false;
-    return await this.signalHeld(spec);
+    return await finalSignalHeldImpl(this.opts.finalSignal, () => this.page(), this.hosts);
   }
 
   /* ---------------------------------------------------------------- 兜底协议 */
@@ -555,6 +553,8 @@ export class PilotRuntime implements PilotCommandTarget {
         evidence: handoffWhyEvidence({
           inertRun: this.inertRun, forbidden: this.forbidden, ledgerEvidence: this.ledger.evidence(),
           framesExcluded: this.excludedFrames, expectUrl: this.expectUrl, valueNeed, missedHint,
+          offEnvelope: stop === "host_not_allowed" ? this.gate?.offEnvelope ?? null : null,
+          navError: stop === "unreachable" || stop === "config_error" ? this.gate?.reason ?? null : null,
         }),
       },
       what_would_unblock: unblockHintsFor(stop, {
@@ -587,10 +587,6 @@ export class PilotRuntime implements PilotCommandTarget {
     });
   }
 
-  /**
-   * 兜底指令分派（stdin JSONL 闭集）。返回 "drive" = 回驾驶轮；"close" = 会话收尾；
-   * "stay" = 单行被拒/失败（回执已发，继续等下一条——session 的单行失败纪律）。
-   */
   /** 改道即换语境：步史与禁选清段重新累计（预算不清零——它是已执行驾驶步的事实）。 */
   redirectReset(): void {
     this.history.length = 0;
@@ -606,6 +602,8 @@ export class PilotRuntime implements PilotCommandTarget {
     this.pendingValue = null;
     this.missedHint = null;
     this.lastValueNeed = null;
+    this.resumeHint = null;
+    this.gate = null;
   }
 
   /** 起飞：解析决策源 → 开入口页 → 驾驶直到停因/预算/信号。 */
@@ -690,12 +688,14 @@ export class PilotRuntime implements PilotCommandTarget {
   }
 
   /**
-   * 驾驶主循环：每步先判最终信号 → 驾驶一步 → 停因投影交接 → 等兜底指令。
-   * 由入口（runPilot）在 stdin 就绪时调用；返回最终停因（null = 被中断/abort）；
-   * agent 模式另返回 PILOT_AWAIT_PICK（步间等待：候选已投影，等 resume{hint} 点名）。
+   * 驾驶主循环：每轮先判信封/导航失败、再判最终信号 → 驾驶一步 → 停因投影交接 → 等兜底指令。
+   * 返回最终停因（null = 被中断/abort）；agent 模式另返回 PILOT_AWAIT_PICK（等 resume{hint}）。
    */
   async drive(): Promise<PilotStopCode | typeof PILOT_AWAIT_PICK | null> {
     while (!this.finished && this.stepCount < this.maxSteps) {
+      // 信封先于完成裁决：越界页上的「信号成立」不是完成（SSO/第三方页能偶然满足选择器）。
+      const first = await envelopeStopNow(() => this.page(), this.hosts);
+      if (first !== null) { this.gate = first; await this.handoff(first.stop); return this.stopCode; }
       // 完成只认信号（每步动作后判一次；动作前不判——forceAct 语义）。
       if (await this.finalSignalHeld()) {
         this.stopCode = "final_signal_held";

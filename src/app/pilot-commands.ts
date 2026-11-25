@@ -10,6 +10,7 @@ import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts";
 import type { ElemPool } from "../engine/elem-model.ts";
 import { disallowedHost, type AnyPage } from "../engine/executor.ts";
 import { urlOf } from "../engine/extraction.ts";
+import { envelopeStopNow } from "./pilot-evidence.ts";
 import { settle } from "../engine/settle.ts";
 import type { PilotLedger } from "./pilot-ledger.ts";
 import {
@@ -172,6 +173,16 @@ export async function handlePilotCommand(
         target.respond({
           type: "command_result", ok: false, code: "config_error",
           reason: 'finish needs a signal: {"cmd":"finish","signal":{...}} or a pre-declared --final-signal',
+        });
+        return "stay";
+      }
+      // 信封外的「信号成立」不是完成：与轮首/步尾同一判定（越界/导航失败回既有码，交接保持打开）。
+      const gate = await envelopeStopNow(() => target.page(), target.hosts);
+      if (gate !== null) {
+        target.respond({
+          type: "command_result", ok: false, code: gate.stop, pilot: true,
+          reason: gate.reason
+            ?? `the page left the hosts envelope (${gate.offEnvelope ?? ""}) — redirect back inside before finishing`,
         });
         return "stay";
       }

@@ -68,14 +68,37 @@ function projectWeakPicks(picks: PilotHandoff["weak_picks"]): Array<Record<strin
   }));
 }
 
-/** 交接块的有界投影：只保留 pilot-contract 闭集字段；evidence 超限退化为键名清单。 */
+/**
+ * evidence 超限退化后的键名清单（≤8 条）。
+ *
+ * 优先保留**停驶现场定位键**（存在就留），再按 evidence 的原插入序补足；输出仍按原插入序，
+ * 所以未超限的投影逐字节不变，超限时的键序也不引入新的排列语义。
+ */
+const EVIDENCE_LOCATOR_KEYS: readonly string[] = ["off_envelope", "expect_url", "needs_value", "resume_hint"];
+const EVIDENCE_KEY_LIMIT = 8;
+
+function boundedEvidenceKeys(evidence: Record<string, unknown>): string[] {
+  const present = Object.keys(evidence);
+  const pinned = present.filter((k) => EVIDENCE_LOCATOR_KEYS.includes(k));
+  const rest = present.filter((k) => !pinned.includes(k));
+  const picked = new Set([...pinned, ...rest.slice(0, Math.max(0, EVIDENCE_KEY_LIMIT - pinned.length))]);
+  return present.filter((k) => picked.has(k)).slice(0, EVIDENCE_KEY_LIMIT);
+}
+
+/**
+ * 交接块的有界投影：只保留 pilot-contract 闭集字段；evidence 超限退化为键名清单。
+ *
+ * 键名清单**保现场**：优先留能定位停驶原因的键（越界落地页 / 期望页 / 未决值 / 落空点名），
+ * 其余按原序补足。纯按插入序截前 8 键会把越界落地 URL 这类现场事实切掉——键序是实现细节，
+ * 停驶现场不是（`off_envelope` 在 evidence 里恰是第 9 个键）。
+ */
 export function projectHandoff(h: PilotHandoff): Record<string, unknown> {
   const why = h.why_stuck;
   const evidence = why.evidence ?? {};
   let boundedEvidence: Record<string, unknown> = evidence;
   try {
     if (JSON.stringify(evidence).length > MAX_HANDOFF_EVIDENCE_CHARS) {
-      boundedEvidence = { truncated: true, keys: Object.keys(evidence).slice(0, 8) };
+      boundedEvidence = { truncated: true, keys: boundedEvidenceKeys(evidence) };
     }
   } catch {
     boundedEvidence = {};
