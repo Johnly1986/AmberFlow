@@ -362,10 +362,10 @@ ${ROW_CLIMB_JS}
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
     const tag = String(e.tagName || "").toLowerCase();
-    // 范围控件不读活值（value 不是身份；与 LABEL_HELPERS_JS 的 isRangeLike 同一口径）。
-    const isRange = tag === "input" && String(e.getAttribute("type") || "").toLowerCase() === "range";
+    // 活值不是身份：range 每次操作换值；password/file/hidden 是明文凭据（同 LABEL_HELPERS_JS 口径）。
+    const live = tag === "input" && /^(range|password|file|hidden)$/i.test(String(e.getAttribute("type") || "").toLowerCase());
     const label = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
-      || e.getAttribute("placeholder") || (isRange ? "" : e.getAttribute("value")) || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      || e.getAttribute("placeholder") || (live ? "" : e.getAttribute("value")) || "").replace(/\s+/g, " ").trim().slice(0, 200);
     e.setAttribute("data-af-probe", tok + "-" + i);
     let rowTexts = null;
     if (arg.inRow !== undefined && rowCtx !== null && __rowVisible(e)) {

@@ -141,7 +141,9 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
     let label = (await el.getAttribute("aria-label")) ?? (await el.getAttribute("title")) ?? firstNode.trim() ?? "";
     let text = "";
     if (!label || tag === "select") text = ((await el.innerText()) ?? "").trim();
-    if (!label) label = text || (await el.getAttribute("placeholder")) || (await el.getAttribute("value")) || "";
+    // 敏感输入的活值是明文凭据，绝不当标签（同 LABEL_HELPERS_JS 的 isSecretInput 口径）。
+    const secret = tag === "input" && /^(password|file|hidden)$/i.test(((await el.getAttribute("type")) ?? "").toLowerCase());
+    if (!label) label = text || (await el.getAttribute("placeholder")) || (secret ? "" : await el.getAttribute("value")) || "";
     if (tag === "input" || tag === "textarea" || tag === "select") {
       let wrapper = ((await el.evaluate(FN_WRAPPER)) as string) ?? "";
       wrapper = wrapper.split(/\s+/).filter(Boolean).join(" ");

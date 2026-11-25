@@ -91,15 +91,26 @@ export const LABEL_HELPERS_JS = String.raw`
   // 拿它做 label 会让同一元素在两次观察里叫两个名字（hint 因此失配，set_range 第二轮直接
   // target_not_found）。身份必须来自稳定面——aria-label / label 包裹 / id / name / data-test。
   const isRangeLike = (e, tag) => tag === 'input' && String(e.getAttribute('type') || '').toLowerCase() === 'range';
+  // 敏感输入（password / file / hidden）的活值**不是身份，也绝不可进标签**：明文凭据不得进入
+  // 池快照 / observe 行 / 模型面 / trace / 跑分产物。只按 type 排除（不做"看起来像凭据"的
+  // 形态启发——value 是标签兜底链的最后一环，启发式会误伤大量真实标签且无法解释）。
+  // 与 isRangeLike 同一形态：不读自身 value，只读稳定面 aria-label / label 包裹 / placeholder。
+  // 与 ROW_CLIMB_JS 的 __rowIsSecret 同口径（dup 分组键必须与池行 label 一致）。
+  const isSecretInput = (e, tag) => tag === 'input'
+    && /^(password|file|hidden)$/i.test(String(e.getAttribute('type') || ''));
   const labelOfRaw = (e, tag) => {
     const first = e.childNodes.length ? String(e.childNodes[0].textContent || '') : '';
     let label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || first || '');
     const text = (!label || tag === 'select') ? norm(e.innerText || '') : '';
-    // 范围控件不读自身 value（活值），只读 placeholder（原生 range 无 placeholder，等于不读）。
+    // 范围控件与敏感输入不读自身 value（活值），只读 placeholder（原生 range 无 placeholder，
+    // 敏感输入常见 placeholder="请输入密码" 这类稳定身份）。
     if (!label && isRangeLike(e, tag)) label = text || e.getAttribute('placeholder') || '';
-    else if (!label) label = text || e.getAttribute('placeholder') || e.getAttribute('value') || '';
+    else if (!label) {
+      label = text || e.getAttribute('placeholder')
+        || (isSecretInput(e, tag) ? '' : e.getAttribute('value')) || '';
+    }
     if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-      const own = isRangeLike(e, tag) ? '' : (e.value || '').trim();
+      const own = (isRangeLike(e, tag) || isSecretInput(e, tag)) ? '' : (e.value || '').trim();
       let p = e.closest('label');
       if (!p && e.id) {
         try { p = document.querySelector('label[for="' + CSS.escape(e.id) + '"]'); } catch (err) { p = null; }
@@ -248,10 +259,12 @@ export const ROW_CLIMB_JS = String.raw`  const __dupKeyOf = (tag, label) => Stri
   // 不同（K 不同 → 同一 row-index:N 指到不同成员）。改名 __rowLabelOf 避免与 LABEL_HELPERS_JS
   // 的 labelOfRaw 冲突（四 pass 里只有 OBSERVE 内插了 LABEL_HELPERS_JS）。
   const __rowTag = (el) => String(el.tagName || el.nodeName || '').toLowerCase();
-  // 范围控件的活值不是身份（与 LABEL_HELPERS_JS 的 isRangeLike 同一口径）——两处必须同步，
-  // 否则池行 label 与 dup 分组标签会分叉。
+  // 范围控件与敏感输入的活值不是身份（与 LABEL_HELPERS_JS 的 isRangeLike/isSecretInput 同一
+  // 口径）——两处必须同步，否则池行 label 与 dup 分组标签会分叉。
   const __rowIsRange = (el, tag) => tag === 'input'
     && String(el.getAttribute('type') || '').toLowerCase() === 'range';
+  const __rowIsSecret = (el, tag) => tag === 'input'
+    && /^(password|file|hidden)$/i.test(String(el.getAttribute('type') || ''));
   const __rowLabelOf = (el) => {
     const tag = __rowTag(el);
     const norm = (t) => String(t || '').replace(/[\uE000-\uF8FF]/g, '').replace(/[ \t\n\r\f\v]+/g, ' ').trim();
@@ -259,9 +272,12 @@ export const ROW_CLIMB_JS = String.raw`  const __dupKeyOf = (tag, label) => Stri
     let label = norm(el.getAttribute('aria-label') || el.getAttribute('title') || first || '');
     const text = (!label || tag === 'select') ? norm(el.innerText || '') : '';
     if (!label && __rowIsRange(el, tag)) label = text || el.getAttribute('placeholder') || '';
-    else if (!label) label = text || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+    else if (!label) {
+      label = text || el.getAttribute('placeholder')
+        || (__rowIsSecret(el, tag) ? '' : el.getAttribute('value')) || '';
+    }
     if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-      const own = __rowIsRange(el, tag) ? '' : String(el.value || '').trim();
+      const own = (__rowIsRange(el, tag) || __rowIsSecret(el, tag)) ? '' : String(el.value || '').trim();
       let p = el.closest ? el.closest('label') : null;
       if (!p && el.id) {
         try { p = document.querySelector('label[for="' + (globalThis.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]'); } catch (err) { p = null; }

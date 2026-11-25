@@ -32,6 +32,7 @@ import os from "node:os";
 import path from "node:path";
 import { browserSession } from "../src/engine/executor.ts";
 import { type ElemPool, type PageLike, windowAudit } from "../src/engine/extraction.ts";
+import { observePage } from "../src/engine/observe.ts";
 import { extractElements } from "../src/app/candidate-scan.ts";
 import { hintCandidates, hintMatch } from "../src/engine/rules.ts";
 import { SessionRuntime } from "../src/app/session-runtime.ts";
@@ -444,6 +445,21 @@ const CASES: ObservationCase[] = [
     name: "hydrate-delay-static",
     // F89 静态页：双门首轮即稳 ≈ 零额外等待（settled:true，耗时口径与 E5 同量级）。
     run: async (ctx) => await observeSessionExtract(ctx, "?delay=0", {}),
+  },
+  {
+    name: "secret-input",
+    // 敏感输入的活值不是身份：password/file/hidden 的 value 不得出现在池行 / observe 行 /
+    // 被剔账（这三个面各自有一份 label 实现，golden 把「三面同口径 + 敏感值零泄漏」钉住）。
+    run: async (ctx) => {
+      const out = await observePoolDedup(ctx, "secret-input.html");
+      const observed = await observePage(ctx.page as unknown as PageLike, { max: 60 });
+      return {
+        ...out,
+        observe: {
+          elements: observed.elements.map((e) => ({ tag: e.tag, type: e.type ?? "", label: e.label ?? "" })),
+        },
+      };
+    },
   },
 ];
 

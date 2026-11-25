@@ -15,6 +15,10 @@
  */
 
 import { describeFrameSuffixRejection, describeRowIndexSuffixRejection, describeRowSuffixRejection, parseHint, splitTailSuffixes, type ParsedHint } from "./hint.ts";
+// ARIA 行的解析与「池↔行」逐项身份对齐（criteriaView 的判据底座）：单一出处 aria-view.ts。
+import { ariaLinesAligned, parseAriaInteractiveLine } from "./aria-view.ts";
+export { ariaLinesAligned, expectedAriaRoles, parseAriaInteractiveLine } from "./aria-view.ts";
+export type { AriaLine } from "./aria-view.ts";
 
  import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
@@ -99,12 +103,13 @@ export const WIDE_POOL_ELEMENTS = WIDE_SCAN_POOL_ELEMENTS;
  */
 export const MAX_CHOICES = 200;
 
-/** Roles the accessibility snapshot renders as interactive leaves. */
+/** Roles the accessibility snapshot renders as interactive leaves (闭集：只收这些行)。 */
 export const ARIA_INTERACTIVE_ROLES = [
   "button", "link", "textbox", "combobox", "checkbox", "radio", "searchbox",
   "spinbutton", "menuitem", "switch", "slider", "tab",
 ];
-const ARIA_LINE_RE = new RegExp(`^\\s*-\\s+(${ARIA_INTERACTIVE_ROLES.join("|")})(?:\\s+"([^"]*)")?`);
+/** 成员判定只做全等（不是子串/前缀）：解析器按 role 查表。 */
+const ARIA_INTERACTIVE_ROLE_SET: ReadonlySet<string> = new Set(ARIA_INTERACTIVE_ROLES);
 
 export const CUSTOM_WIDGET_TAGS = new Set(["div", "span", "li", "td", "img", "svg", "i", "p", "article"]);
 export const CLICKY_EVENTS = new Set(["click", "mousedown", "mouseup", "keydown", "keyup"]);
@@ -447,7 +452,13 @@ export function lexicalOverlap(instruction: string, label: string): boolean {
 
 /* ------------------------------------------------------------------ views */
 
-/** Interactive leaves of Playwright's ARIA snapshot, in DOM order (or null). */
+/**
+ * Interactive leaves of Playwright's ARIA snapshot, in DOM order (or null).
+ *
+ * 行解析见 `aria-view.parseAriaInteractiveLine`：单引号包裹的 YAML 键（名字含 `": "` 时
+ * Playwright 必然加引号）与裸键走同一条还原路径；非交互 role（`text:` / `heading` /
+ * `/url:` …）仍被忽略。
+ */
 export async function ariaInteractiveLines(page: PageLike): Promise<Array<[string, string]> | null> {
   let snap: string;
   try {
@@ -457,8 +468,8 @@ export async function ariaInteractiveLines(page: PageLike): Promise<Array<[strin
   }
   const out: Array<[string, string]> = [];
   for (const ln of (snap ?? "").split("\n")) {
-    const m = ARIA_LINE_RE.exec(ln);
-    if (m) out.push([m[1]!, (m[2] ?? "").trim()]);
+    const parsed = parseAriaInteractiveLine(ln, ARIA_INTERACTIVE_ROLE_SET);
+    if (parsed !== null) out.push(parsed);
   }
   return out;
 }
@@ -471,6 +482,10 @@ export async function ariaInteractiveLines(page: PageLike): Promise<Array<[strin
  * 0.20; PURE aria role+name -> logo wins 0.59 vs 0.07 (regression); role + our
  * label/attrs -> 0.50 vs 0.18 (this function). The ` [test=..] -> href` suffixes
  * are load-bearing even though rules/hints never read this text.
+ *
+ * 对齐判据是**逐项身份**（`ariaLinesAligned`），不是数量相等：数量相等只说明巧合，
+ * 位置错配会把**另一个元素**的 role/name 送进模型，选错也没有任何信号。无法逐项确认时
+ * **刻意降级**到 `tag "label"`——宁可少给 role 语义，也不给错的身份。
  */
 export function criteriaView(
   elems: ElemPool, forbidden: Set<string>, ariaLines: Array<[string, string]> | null,
@@ -482,9 +497,9 @@ export function criteriaView(
   notes: Record<string, string> | null = null,
 ): Record<string, string> {
   const crit: Record<string, string> = {};
-  const aligned = ariaLines !== null && ariaLines.length === Object.keys(elems).length;
   const ordered = Object.entries(elems)
     .sort((a, b) => (a[1].scan ?? Number(a[0].slice(1))) - (b[1].scan ?? Number(b[0].slice(1))));
+  const aligned = ariaLines !== null && ariaLinesAligned(ordered, ariaLines);
   ordered.forEach(([ref, e], i) => {
     if (forbidden.has(ref)) return;
     const note = notes?.[ref] ? ` ${notes[ref]}` : "";

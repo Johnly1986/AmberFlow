@@ -25,6 +25,7 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
   ${BUCKET_HELPERS_JS}
   const WS = /[ \t\n\r\f\v]+/g;
   const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
+  const isSecretInput = (e) => /^input$/i.test(String(e.tagName || '')) && /^(password|file|hidden)$/i.test(String(e.getAttribute('type') || ''));  // 敏感活值是明文凭据，不进标签（同 LABEL_HELPERS_JS 口径）
   const all = [];
   __collectAll(document, arg.sel, all);
   const out = [];
@@ -55,12 +56,11 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
       // 旧章由 EXTRACT_JS 每趟开头清；audit 读到的是最近一次建池的裁决。
       drops.push({ tag: e.tagName.toLowerCase(),
                    label: norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText
-                     || e.getAttribute('placeholder') || e.getAttribute('value') || '').slice(0, 40),
+                     || e.getAttribute('placeholder') || (isSecretInput(e) ? '' : e.getAttribute('value')) || '').slice(0, 40),
                    why: String(dropWhy) });
       continue;
     }
-    const tag = e.tagName.toLowerCase();
-    const label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || e.getAttribute('placeholder') || e.getAttribute('value') || '').slice(0, 40);
+    const tag = e.tagName.toLowerCase(), label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || e.getAttribute('placeholder') || (isSecretInput(e) ? '' : e.getAttribute('value')) || '').slice(0, 40);
     if (!label && (tag === 'a' || tag === 'button')) continue;
     const main = (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article'));
     const cls = __classify(e, main);
@@ -619,9 +619,9 @@ const HINT_HEAD = String.raw`(arg) => {
             const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
             const labelOf = (e) => {
                 const first = e.childNodes.length ? String(e.childNodes[0].textContent||'').trim() : '';
-                const rng = /^range$/i.test(String(e.getAttribute('type')||'')) && /^input$/i.test(String(e.tagName||''));
+                const live = (e) => { const t = String(e.tagName||'').toLowerCase(); return t === 'input' && /^(range|password|file|hidden)$/i.test(String(e.getAttribute('type')||'')); };  // 活值不是身份（同 LABEL_HELPERS_JS）
                 return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
-                        (e.innerText||'').trim() || e.placeholder || (rng ? '' : e.value) || '').replace(/\s+/g,' ').trim();
+                        (e.innerText||'').trim() || e.placeholder || (live(e) ? '' : e.value) || '').replace(/\s+/g,' ').trim();
             };
             // A2：裸词按「大小写不敏感 + 词边界/前缀」匹配**完整**标签（不是 CSS，也不是整串全等）： // aria-label="Sort by, Not selected" 必须能被 "Sort by" 命中（逗号/句点/冒号边界同样算词尾）。
             const bareHit = (lab, dt, tok) => {

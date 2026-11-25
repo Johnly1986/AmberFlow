@@ -1,14 +1,13 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "candidate-scan-pure",
-  "note": "P2-2.2b：候选扫描 extractElements 与扫描独占助手从 src/engine/extraction.ts 整函数搬入 src/app/candidate-scan.ts（应用层候选生产；hash 保持 = 纯搬移）。；W4-3：label 40/200 字面量改 FULL_LABEL_MAX/MODEL_LABEL_MAX 单源，非纯搬移；P1-5 JS 监听探针升级（容器委托盖章 / 预算常量 / 缓存键 URL+DOM 指纹）：jsInteractiveWidgets 与新增 JS_PROBE_* 常量/函数为**有意非纯搬移变更**，已按 split-check 文档纪律从 manifest 删除（extractElements/addNearContext/extractHeuristicWidgets/extractRowsPerElement 保持纯搬移 hash 不动）",
+  "note": "P2-2.2b：候选扫描 extractElements 与扫描独占助手从 src/engine/extraction.ts 整函数搬入 src/app/candidate-scan.ts（应用层候选生产；hash 保持 = 纯搬移）。；W4-3：label 40/200 字面量改 FULL_LABEL_MAX/MODEL_LABEL_MAX 单源，非纯搬移；P1-5 JS 监听探针升级（容器委托盖章 / 预算常量 / 缓存键 URL+DOM 指纹）：jsInteractiveWidgets 与新增 JS_PROBE_* 常量/函数为**有意非纯搬移变更**，已按 split-check 文档纪律从 manifest 删除（extractElements/addNearContext/extractHeuristicWidgets/extractRowsPerElement 保持纯搬移 hash 不动）；敏感输入口径批（`password`/`file`/`hidden` 的活值不是身份、绝不可进标签）为**有意非纯搬移变更**：候选扫描兜底 `extractRowsPerElement` 与池/observe/回捞/A3 四面同口径，按 split-check 文档纪律把该符号从 manifest 删除，其余三个符号保持纯搬移 hash 不动",
   "files": {
     "src/app/candidate-scan.ts": {
       "symbols": {
         "addNearContext": "3fd66f7eeeb7b43d80bcdc6954cc783f5a10811a14fb8415868fd81e4a0c8ff1",
         "extractElements": "c8fd11eac531dc243304f0f49eeea307cbbb863cc1d077ea9fd927424bd4238a",
-        "extractHeuristicWidgets": "b4ed83f98ad83b7aada263387bbcb68cdc09e4b5a1ac33a4b67ccdf56e812377",
-        "extractRowsPerElement": "3a290b997dd9386521b720931882ecf23874a6820862bf2fc903aa857d1b34c2"
+        "extractHeuristicWidgets": "b4ed83f98ad83b7aada263387bbcb68cdc09e4b5a1ac33a4b67ccdf56e812377"
       }
     }
   }

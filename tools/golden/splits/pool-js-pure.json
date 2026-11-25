@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "pool-js-pure",
-  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）；滑块身份修正批（`value` 不是身份——range 控件不再用活值当 label）为**有意非纯搬移变更**，按同一纪律把连带改变的 LABEL_HELPERS_JS / ROW_CLIMB_JS / HINT_HEAD 从 manifest 删除（三者口径必须同步，见 LABEL_HELPERS_JS 的 isRangeLike 注释），其余符号保持 hash 不动",
+  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）；滑块身份修正批（`value` 不是身份——range 控件不再用活值当 label）为**有意非纯搬移变更**，按同一纪律把连带改变的 LABEL_HELPERS_JS / ROW_CLIMB_JS / HINT_HEAD 从 manifest 删除（三者口径必须同步，见 LABEL_HELPERS_JS 的 isRangeLike 注释），其余符号保持 hash 不动；敏感输入批（`password`/`file`/`hidden` 的活值不是身份，也绝不可进标签）为**有意非纯搬移变更**，四处口径必须同步：LABEL_HELPERS_JS / ROW_CLIMB_JS（pool-js-core.ts）与 WINDOW_AUDIT_JS / HINT_HEAD（pool-js.ts）——这四个符号本就不在 manifest 内（前两者从未列入，后两者已由上一批删除），故本批无 manifest 条目变更，其余符号 hash 不动",
   "files": {
     "src/engine/pool-js-core.ts": {
       "symbols": {

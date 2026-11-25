@@ -138,8 +138,10 @@ const IDENTITY_PROBE_JS = String.raw`(arg) => {
 ${ANCHOR_JS}
   const labelOf = (e) => {
     const first = e.childNodes.length ? String(e.childNodes[0].textContent || '').trim() : '';
+    // 敏感输入的活值是明文凭据，绝不进标签（候选摘要会进 target_ambiguous 证据；同 LABEL_HELPERS_JS 口径）。
+    const secret = /^input$/i.test(String(e.tagName || '')) && /^(password|file|hidden)$/i.test(String(e.getAttribute('type') || ''));
     return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
-            (e.innerText || '').trim() || e.placeholder || e.value || '').replace(/\s+/g, ' ').trim();
+            (e.innerText || '').trim() || e.placeholder || (secret ? '' : e.value) || '').replace(/\s+/g, ' ').trim();
   };
   const rows = [];
   for (let i = 0; i < all.length; i++) {

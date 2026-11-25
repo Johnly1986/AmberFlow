@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "extraction-pure",
-  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）；决策平面统一 P0：pageText 纯搬移到 state-text.ts（hash 不变，manifest 路径随迁）；stateText 同批搬移但新增 AMBERFLOW_STATE_TEXT_SCOPE=wide 的 opt-in 实现（非纯搬移，按 split-check 纪律从 manifest 移除）",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）；决策平面统一 P0：pageText 纯搬移到 state-text.ts（hash 不变，manifest 路径随迁）；stateText 同批搬移但新增 AMBERFLOW_STATE_TEXT_SCOPE=wide 的 opt-in 实现（非纯搬移，按 split-check 纪律从 manifest 移除）；ARIA 视图批（模型面元素接口三缺陷）：ARIA 行解析从 extraction.ts 的 `ARIA_LINE_RE` 常量改为 `aria-view.parseAriaInteractiveLine`（单引号 YAML 键 + name 还原），`ariaInteractiveLines`/`criteriaView` 的对齐判据改为逐项身份（`aria-view.ariaLinesAligned`）——均为**有意非纯搬移变更**，按 split-check 纪律把 `ARIA_LINE_RE`（已删除）与两个改动的函数从 manifest 删除，其余符号保持 hash 不动",
   "files": {
     "src/engine/elem-model.ts": {
       "symbols": {
@@ -39,11 +39,8 @@
       "symbols": {
         "allowedFrameOrigins": "8b5bca6656e08f5c9f7eb5221117b9dbba1f7dedf749b0a03d342918f11ac4c8",
         "ARIA_INTERACTIVE_ROLES": "112aafef698df8ffe45c17e02c83ad7d4699f3484c8b55bbe5e589b27c7db50e",
-        "ARIA_LINE_RE": "87d81560bbbf4f77327b154e85aca205849fd9599bebf7db9c0a3a599b7cbcaf",
-        "ariaInteractiveLines": "573e3f39d8e170f1a58643c1e5c1515074d5a6047a120c04a0206c478ccc32a1",
         "candidateMeta": "ab562366285de937c65e7a440ef14f541fef9f9cfd8ba3c76b683d3dba0a3641",
         "CLICKY_EVENTS": "27cd3140b5a15243366358a6d4abb8efc552fa99bd30dda776d5eea0d8b8112a",
-        "criteriaView": "e7c76237da3f78e159c1b648967487b36558875eead2d657131958279ec5fb44",
         "CUSTOM_WIDGET_TAGS": "39bcaf07b8be47d1e9eeeb033c843549aecc9369f4da98984b9b2cbfef04905d",
         "ExcludedHintProbe": "69703460497f6bfaf091c2c30ee3bc39d57acc766c6dad4f3c63f55afcd9365d",
         "frameHintFailureEvidence": "698bb6b0c84714a3ac77ede3758b607dc58f3592f2cd27a2acb26743b3f44b6a",
