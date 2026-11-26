@@ -84,6 +84,16 @@ const TALL_DOC = `${PAGE_HEAD}<div style="height:3000px">tall</div>${PAGE_TAIL}`
 /** A8/R2-SCROLL：文档自身不可滚，内容装在内层滚动容器里（`overflow:hidden` 的 body + 内层 auto）。 */
 const INNER_SCROLL = `${PAGE_HEAD}<style>html,body{height:100%;margin:0;overflow:hidden}#panel{height:600px;overflow:auto}#deep{height:3000px}</style><div id="panel"><div id="deep">tall</div></div>${PAGE_TAIL}`;
 
+
+/**
+ * A9/R3：面板打开只改 URL（history.pushState）、不改可见文本——changed 仍必须为 true。
+ *
+ * 注：`PageSnapshot` 本身就带 `url` 字段，所以"URL 变了"天然进快照 diff；本场景真正钉住
+ * 的是「快照 diff 的输入里 URL 在场」这条事实不被回归（例如有人把快照的 url 键删掉时，
+ * 本断言会红）。
+ */
+const URL_ONLY_PANEL = `${PAGE_HEAD}<style>#list{height:4000px}</style><div id="list">${"long list item ".repeat(80)}</div><button id="open-panel" onclick="history.pushState({},'','?panel=price')">Price</button>${PAGE_TAIL}`;
+
 const ROUTES: Record<string, { body?: string; redirect?: string }> = {
   "/strong": { body: STRONG_WEAK },
   "/dup": { body: DUP_SAME },
@@ -95,6 +105,7 @@ const ROUTES: Record<string, { body?: string; redirect?: string }> = {
   "/std": { body: STD_SCROLL },
   "/tall": { body: TALL_DOC },
   "/inner-scroll": { body: INNER_SCROLL },
+  "/url-panel": { body: URL_ONLY_PANEL },
   // A5：丢段（实体段清空）与"追加 query 的合法重定向"两条对照夹具。
   "/place/X/data=!4m8": { redirect: "/place//@1.3,103.8,11z" },
   "/place//@1.3,103.8,11z": { body: SINGLE_BUTTON },
@@ -255,6 +266,9 @@ function script(origin: string): { steps: Step[]; index: Record<string, number> 
   // ---- A8：文档不可滚时回退到内部滚动容器 ---------------------------------
   add("a8-open", { type: "open", url: `${origin}/inner-scroll` });
   add("a8-doc", { type: "act", op: "scroll", target: "document", to: "bottom" });
+  // ---- A9：changed 的 URL 信号源（面板开在快照看不见的地方）------------------
+  add("a9-open", { type: "open", url: `${origin}/url-panel` });
+  add("a9-price", { type: "act", op: "click", target: "Price" });
 
   add("close", { type: "close" });
   return { steps, index };
@@ -393,6 +407,13 @@ function assertSession(run: SessionRun, index: Record<string, number>): void {
     const keys = Object.keys(okNav).sort().join(",");
     check(keys === "hosts,id,ok,title,type,url", `A5 形状保留的合法重定向键集应逐字节不变（拿到 ${keys}）`);
     check(!("reason" in okNav), "A5 形状保留时不得追加 reason");
+  }
+
+  /* A9：只改 URL（pushState）不改文本——快照 diff 天然覆盖（snapshot 带 url 字段），钉住该覆盖不被回归 */
+  const a9 = resp(run, index["a9-price"]!, "a9-price");
+  if (a9 !== undefined) {
+    check(a9["ok"] === true, `A9 点 Price 应成功（code=${JSON.stringify(a9["code"])}）`);
+    check(a9["changed"] === true, `A9 URL 已变（pushState）时 changed 必须为 true（拿到 ${JSON.stringify(a9["changed"])}——快照 diff 看不见的面板打开不能报假阴）`);
   }
 
   /* A8：文档不可滚 → 回退内部容器，并如实带回用了哪个容器（标准路径不带 container） */
@@ -624,7 +645,7 @@ async function main(): Promise<number> {
   assert.equal(true, true);
   if (JSON_OUT) console.log(JSON.stringify({ ok: true, problems: [] }));
   else console.log("verify-walk-r1: OK — A1 不变量/四场景、A2 双柄补事实+单柄原文字节不变、A3 四操作符+~=反例、"
-    + "A4 无显示器 config_error 且会话存活+运行期 browser_dead、A5 九例形状+三键、A6 programmatic 回退+page 合成、B15 at_bottom、A7 死页不吞成空结果、A8 文档不可滚回退内部容器 全部对上");
+    + "A4 无显示器 config_error 且会话存活+运行期 browser_dead、A5 九例形状+三键、A6 programmatic 回退+page 合成、B15 at_bottom、A7 死页不吞成空结果、A8 文档不可滚回退内部容器、A9 快照 diff 覆盖 URL 变化 全部对上");
   return 0;
 }
 

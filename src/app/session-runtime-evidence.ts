@@ -222,7 +222,19 @@ export async function doRead(ctx: Ctx, req: Record<string, unknown>): Promise<Re
     return { ok: true, what, selector, attr, value };
   }
   const value = what === "text" ? await ctx.read.text(selector) : await ctx.read.value(selector);
-  return { ok: true, what, selector, value };
+  // 命中数事实：CSS 选择器命中多个元素时 `text`/`value` 静默取**第一个**（DOM 惯例），
+  // 但「页面有 2 个 role=main、read 拿到的是左侧列表那个」这类现场里，调用方必须能区分
+  // "就一个元素、值如此" 与 "命中多个、这是第一个"。`matched_zero` 让 "元素不存在"
+  // 与 "存在但值为空" 可区分（value:null 两义，count 命中数补全事实）。
+  let matched: number | undefined;
+  try {
+    matched = Number(await ctx.read.count(selector));
+  } catch { /* count 读不到就不附（additive 字段） */ }
+  return {
+    ok: true, what, selector, value,
+    ...(matched !== undefined && Number.isFinite(matched) ? { matched_count: matched } : {}),
+    ...(matched === 0 ? { matched_zero: true } : {}),
+  };
 }
 
 export async function doSignal(ctx: Ctx, log: (line: string) => void, req: Record<string, unknown>): Promise<Record<string, unknown>> {

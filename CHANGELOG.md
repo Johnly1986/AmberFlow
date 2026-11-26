@@ -50,6 +50,11 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `idle_timeout_ms`），detail 带 `reclaimed:true`；其它死因措辞不变。
   抽成纯函数 `sessionGoneMessage`（bridge 层单源）。
 
+- **`read` 的命中数事实**：CSS 选择器命中多个元素时 `text`/`value` 静默取**第一个**
+  （DOM 惯例）——同一页有 2 个 `role=main` 时，调用方拿到的是哪个、页面上有几个，全靠猜。
+  现在 `read` 响应 additive 带 `matched_count`（命中数）与 `matched_zero:true`（零命中时），
+  "元素不存在"与"存在但值为空"从此可区分（`value:null` 两义）。
+
 - **文档不可滚时回退到内部滚动容器**：整页固定、内容装在内部 `overflow` 容器里的布局
   （「主面板 JS 滚动」的常见实现）此前 `scroll target=document/page` 直接报
   `not_scrollable (scrollHeight <= clientHeight)`——调用方只能靠"恰好在该容器里的某个元素"
