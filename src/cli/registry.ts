@@ -270,7 +270,7 @@ amber apps remove <应用> [--yes] [--force]`,
     usage: `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
               [--headful] [--window maximized|fullscreen] [--input <请求文件>] [--out <目录>]
               [--record <轨迹文件>] [--record-values] [--on-ambiguous fail|act]
-              [--idle-timeout-ms N] [--max-request-bytes N]
+              [--target-resolution off|declared] [--idle-timeout-ms N] [--max-request-bytes N]
 amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
                      [--goal "<一句话>"] [--host HOST]... [--force] [--json]`,
     examples: [
@@ -291,6 +291,7 @@ amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <app
       "--record <文件>           动作轨迹 JSONL（fill/select 只记 value_hash，不记明文）；export 的输入",
       "--record-values           安全 opt-in：轨迹里 fill/select 除 hash 外再记明文 value（默认关；轨迹可能被复制进仓库）",
       "--on-ambiguous fail|act   A2：act 目标命中多个不同候选时怎么办。缺省 fail = 零动作 + 结构化 target_ambiguous + 候选证据（与 run 命令步同一歧义谓词）；act = 恢复旧行为（可行动优先直接执行第一个候选）。单行请求可用 onAmbiguous 覆盖",
+      "--target-resolution off|declared  class-only 控件（无 id/data-test/aria-label）默认要靠它才可寻址：declared（缺省）= 池内落空后按同一份 hint 形状（含 within:#容器）在 DOM 里结构化解析，恰好一个可见才动作，多个 = target_ambiguous 零动作；off = 关掉这层兜底（池内解析结果逐字节不变）。非法值 = 用法错误",
       "--idle-timeout-ms N       两次请求之间的静默上限（缺省 300000；0 = 不限）；超时干净关会话并 exit 3",
       "--max-request-bytes N     单行请求上限（缺省 1048576）",
       "session export：--record 轨迹 → app.mjs 骨架（meta 占位 + steps + observe_hints；done 未归纳，写成占位符+注释候选）",

@@ -36,7 +36,7 @@ $AMBERFLOW_HOME/apps/<id>/app.mjs
 ```text
 apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
           → app_check（加载 + dry 调用序列校验）
-          → inspect（看真实页面，给 hint 候选）
+          → inspect（CLI `amber inspect`：看真实页面，给 hint 候选）
           → explain（dry 调用序列）
           → run --max-steps 1 --trace（执行预算，拿结构化反馈）
           → run（完整运行）
@@ -226,12 +226,18 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_apps` | `amber apps list --json` | 列出可运行应用 |
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
-| `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
 | `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/drive/drive_command/drive_status/drive_close/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作；`drive` 系列在**同一 page** 上跑 pilot 驾驶（`pilot:true`/`attached:true`，见下） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
 | `amberflow_test` | `amber test … --json` | 真实站点回归；`max_steps` / `timeout_sec` 与 CLI 对齐 |
+
+**`amberflow_inspect` 存在，但不再对模型暴露**（两派评估后的产品决策：它与 `op:"observe"`
+在模型面上抢同一个"观察"槽位）。观察请用 **`amberflow_session` 的 `op:"observe"`**——同一会话内
+保持页面状态，拿到 `hint_candidates` 后可直接 `act`；需要**一次性只读页面勘察**（不建会话、含
+`ax` 可访问性证据块与只读 CSS `probes`）时，用 CLI **`amber inspect --url <url> --json`**。
+工具定义、`ctx.amberflow.inspect` 服务门、`src/cli/commands/inspect.ts` 与 ElementView 合同的
+`inspect` face 都原样保留，仅注册面关闭（桥侧开关 `EXPOSE_INSPECT_TOOL`，置 true 即恢复）。
 
 **不再提供** `amberflow_plan`、`amberflow_app_set_step`、`amberflow_app_set_invariant`、
 `amberflow_app_remove_step`。Agent 用文件系统读取/编辑 `app.mjs`；桥不写任意代码。
@@ -381,14 +387,42 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   稳定（骨架已挂载）而内容还在灌，只看行数会提前放行。响应 `settled` **恒出现**（缺省路径）：
   稳定 = true；窗口内仍在变 = false（抽取照常发生——读到的就是此刻事实，不无界等）。
   `blank_rows` 恒带（本页全空字段的行数；settled:false 时以全帧 rowStats 为准）。
+- **`settle_reason`（可选第三键，additive）**：稳定门**判不了**时出现——一次读指标返回 `null`
+  即 `settled:false` + `settle_reason:"read_failed"`（失败即 false，绝不拿没读到的内容谎报稳定）。
+  正常路径（稳定或窗口到点仍在变）**不带**该键；值闭集目前只有 `read_failed`。桥的 `extract`
+  投影按「引擎有才有」同口径透传（四个键：`settled`/`blank_rows`/`scroll_settled`/`settle_reason`）。
 - **`wait_settled` 请求级口径**：缺省不传 = 缺省门运行；`true` = 冗余兼容；`false` =
   **opt-out**（跳过双门，回到旧的行数单指标判定）——opt-out 与 `settle:"off"` 时 `settled`
-  **缺席**（无门无证据，绝不谎报稳定）。桥对三个键做有界透传（引擎有才有）。
+  **缺席**（无门无证据，绝不谎报稳定）。桥对 `settled`/`blank_rows`/`scroll_settled` 做有界透传
+  （引擎有才有）。
 - 模型可见渲染：`settled:false` 或 `blank_rows>0` 时追加一行
   `lazy-render: blank_rows=<n>, settled=<b> — rows may still be hydrating; re-extract or read settled`。
 - 离线锚：`fixtures/engine/hydrate-delay.html`（`?delay=ms` 参数化）三路径——缺省（水合在
   稳定窗口内）行内有值 + settled:true；opt-out（窗口外）空值 + blank_rows>0 + settled 缺席；
   静态页 settled:true（双门首轮即稳 ≈ 零额外等待）。
+
+`amberflow_session` 的 `extract` 的 `fields` 闭集与 `@self`（P0-B）：
+
+- 值形态不变（子 CSS / `"."` / `"@…"`），新增正式伪属性 **`"@self"`** = 该行元素可见文本
+  （`innerText`，trim），实现上归一成既有 `"."`（抽取语义零新增）。需要行文本用 `@self` 或 `"."`。
+- `@` 面是**闭集**：只认真实 HTML 属性（大小写不敏感）+ `@self`；`data-*` 是唯一开放族，`aria-*`
+  与 `on<event>` 按表枚举。**DOM 属性名不是 HTML 属性**——`@innerText` 这类入口即 `config_error`
+  （`problems[]` 逐字段点名 + `reason` 带闭集说明），不再静默返回空串；属性名合法但页面没有该属性
+  仍是空串（与旧行为一致）。
+- 清单唯一出处：`src/app/session-extract-fields.ts` 的 `EXTRACT_ATTR_WHITELIST` /
+  `EXTRACT_ATTR_CLOSED_SET_TEXT`；文档不复述清单（防两处漂移）。
+- 作用面：**仅会话 `extract`**；应用脚本面 `ctx.extract` 的 `@attr` 口径未变（见
+  `docs/APP_SCRIPT_AUTHORING.md` §extract）。
+
+`amberflow_session` 的 `observe` 树视图（`format:"tree"`，P1-B）：
+
+- `format` 缺省不传 / `"rows"` = 现状：响应键集与之前**逐字节一致**（`elements` 等 JSON 照旧）。
+- `format:"tree"` = **追加**一份展示文本，不改 JSON 事实面：`tree`（YAML 风格缩进 `- key: value`，
+  按 `frame` 分组、组内保持原始行序）、`tree_chars`/`tree_bytes`（**整棵**文本的真实大小）。每个
+  元素块给 `ref`/`tag`/`label`/`text`/`label_source`/`hint_candidates`，并把可 act 性写成
+  `actable: true|false`；不可 act 时给 `why`（复用既有 `why_not_admitted` 原文，不另造判断）。
+- 有界：行数仍受 `max` 限制；文本至多 6000 字符，超限截断并带 `tree_truncated:true`（截断行仍报
+  全量 `chars/bytes`）。`tree` 只供人/模型阅读，**不是地址**——target 仍只认 `hint_candidates`。
 
 `amberflow_session` 的 `extract` 选择器错误（C2）：
 
@@ -417,6 +451,11 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   形状与无尾缀时一致（只回 null/miss）。
 - 信号（`signal`/`wait_for`）的 css_* selector 同样支持尾缀（E4/F71）；done/when 的升级语义
   （声明帧指向被排除帧 → `frame_not_allowed`）只在 run 面生效，会话信号仍只回布尔。
+- **`css_*` 走原始 DOM，`act` 的 `target` 走 hint**——同一个串可以一个命中、一个永不命中（最常见是
+  把 act 用的 hint 串当 CSS 信号等，白等到超时）。`wait_for` 在**超时且信号是单个 `css_*` 算子**时
+  补 `timeout_diagnostics: {css_selector, hint_matchable, hint_match_count, note}`，用 `waitForTarget`
+  （与 act 同一份 `hintMatch`）判"这串能不能当 hint 用"。判定不可得（`dry`、或判定抛错）时只给
+  `css_selector`，**不写** `hint_matchable`（"不是 hint"在没评过时同样是假话）。`held:true` 时该键不出现。
 
 `amberflow_session` 的信号校验报错（C3）：
 
@@ -424,7 +463,8 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   现在带**合法形态**提示（叶 `{op:[arg…]}` 按位置放数组；组合 `all_of`/`any_of`/`not`；对象形
   `{selector,text}` 非法），与 CLI/加载期同一出处（`src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT`）。
   `problems` 数组原样保留，调用方不用再拼提示；桥的失败投影给 `code` + `reason`（含同一份提示），
-  `problems` 留在引擎会话响应里。
+  并把 `problems` 一并透出（引擎有才有、逐项有界：对象项按 `field`/`kind`/`raw`/`attr`/`value`
+  投影，字符串项截 300 字符，至多 10 条；模型可见渲染在 `problems:` 行下逐条列出）。
 
 `amberflow_session` 的 `tab` op（F76/F77，P3）：
 
@@ -585,17 +625,71 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 > 对它做**双向交叉校验**（表里的键必须在源码里，三面源码里的键也必须在表里），任何一面加减字段
 > 而表没跟上都判红。
 
-`amberflow_inspect` 与 `amberflow_session op:"observe"` 的元素行共用
+CLI `amber inspect --json` 与 `amberflow_session op:"observe"` 的元素行共用
 `integrations/dsh-bridge/src/element-view.ts` 的**同一份投影合同**（同形同义）：只有信封不同——
 inspect 是一次性无状态面（`url` 入参、顶层 `element_count`/`ax`/`advisories`/`window`），
 observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,omitted}`，多帧另有 `frame_counts`，
-顶层另有 `ax` 证据块，见下）。
+顶层另有 `ax` 证据块，见下）。桥不再把 inspect 注册成模型工具（模型面观察走 `observe`），但投影合同的
+`inspect` face 仍服务 CLI 与 `ctx.amberflow.inspect` 服务门，下表照旧覆盖两面。
 
 **核心不变量（机制保证）**：**地址只来自 `hint_candidates`。** `ref` 是**展示/对账锚，不是动作地址**；
-`structure_path` 是诊断证据（动态页面会失效）；`label` / `bbox` / `class_names` / `row_texts` 都是
-人读信息。`act` / `read` / `extract` 的 `target` 只认 **hint 字符串**（六形状闭集 + 尾缀）或 CSS。
+`structure_path` 是诊断证据（动态页面会失效）；`label` / `bbox` / `class_names` / `row_texts` / `anchor_ids` 都是
+人读信息或作用域素材。`act` / `read` / `extract` 的 `target` 只认 **hint 字符串**（六形状闭集 + 尾缀）或 CSS。
 把 `ref`、`structure_path` 或快照文本照抄进 target 只会得到 `target_not_found`——这条由
 `npm run session-contract:check` 的字段合同断言钉住：`address:true` 的行**有且只有** `hint_candidates`。
+
+**候选的生命周期：`hint_candidates` 是「当次会话有效」，不是永久地址。**
+
+这一点必须写进任何 `app.mjs` 的写法里：观察面给出的候选（尤其是
+`<label> within:#<id>` 这种）**由引擎在当次 observe 时自证产生**，其中 `<id>` 往往来自站点的
+渲染序号（Google 地图的 `ucc-N` 就是典型），**跨会话会变**。
+
+- ✅ **照抄当次候选**：`const [row] = await ctx.observe(...)` → 取 `row.hint_candidates[0]` → 立即 `act`。
+- ❌ **把候选写死进 `app.mjs`**：等价于把"当次自证"误当"稳定契约"，下一次运行大概率 `target_not_found`。
+- ⚠️ **`row-index:N` 是 id 无关的次选**：它绑定"同文案重复组内的 DOM 先序位次"，页面多一个同名
+  控件就会错位——**而错位不会报错，会点错东西**（比 `target_ambiguous` 更坏的失败形态）。因此
+  任何用 `row-index` 的流程，`done` 信号必须断言"目标行变了、其他行没变"，不能只断言 `ok:true`。
+- ⚠️ **`in-row:<token>` 的 token 不能含空白**（≤40 字符、小写折叠），且只在**同文案重复组**上采集
+  `row_texts`——非重复组恒落空。这是名字上看不出来的能力边界，用它之前先确认元素带 `row_texts`。
+
+
+**`anchor_ids` + `within:`：同 label 不同容器的唯一区分手段**
+
+观察行在有 `id` 祖先时带 `anchor_ids`（祖先 `id` 链、内→外、小写、≤8 条 × ≤40 字符）。
+它是**地址素材，不是地址**：单独照抄不构成 hint，必须配合 `within:`：
+
+```
+observe 行:  tag=button  label="查看更多"  text="展开"  anchor_ids=["ucc-14"]   ← 评论正文的展开器
+observe 行:  tag=button  label="查看更多"  text="展开"  anchor_ids=["503__uuxhif0"] ← 侧栏那个
+target:      查看更多 within:#ucc-14
+```
+
+Google 地图的评价页就有 3 个同名「查看更多」，裸词永远 `target_ambiguous`；靠 `anchor_ids`
+给出的容器链才能精确点到评论正文那一个（实测：点前正文 70 字符折叠，点后 493 字符全文，
+另外两条评论不受影响）。
+
+**`target_resolution`（open 参数）：class-only 控件的可达性开关**
+
+`open` 传 `target_resolution: "off" | "declared"`。`declared`（引擎缺省）表示：池内落空后，
+仍按**同一份 hint 形状**在 DOM 里做结构化解析（含 `within:` 容器作用域），从而让
+**无 id / data-test / aria-label 的 class-only 控件**可寻址；`off` 关闭这层兜底。
+不传 = 引擎缺省，且 spawn argv 不变。
+
+- 该解析**绝不猜**：DOM 里可见匹配 >1 → `target_ambiguous` + 零动作；只有全部隐藏 → 视为未命中。
+- 池内命中仍然优先，`stopCode` 闭集不变。
+- 判定与池面**同一份 `hintMatch`**，所以 `within:<id>` 在池面与声明面语义一致。
+
+**`readiness`（候选为空时才出现）**：`observe` 在 `ok:true` 且候选为空时补一个 `readiness` 块，
+用来区分"页面确实没有可用元素"与"页面还没加载完"——没有它时两者都是 `ok:true + elements:[]`：
+
+```json
+"readiness": {"document_state":"loading","elements":0,"verdict":"loading",
+              "hint":"页面仍在加载（document.readyState=loading）：重试 observe，或用 waitFor 等到目标出现"}
+```
+
+`document_state` ∈ `loading|interactive|complete|unknown`（`unknown` = 读不到，按 `loading` 处理）；
+`verdict` 两档：`complete` ⇒ `empty`（已就绪、确实没有候选），其余 ⇒ `loading`。
+**元素非空时这个键不出现**（响应形状与改动前逐字节一致）。它是**事实不是门**：不改 `ok`、不阻断、不判完成。
 
 列说明：**引擎 observe** = `src/engine/observe.ts` 的 `ObserveElement` 键（`—` = 该面不产）；
 **引擎 inspect** = `amber inspect --json` 元素行的键（`—` = 该面不产）；**出现面** 是桥输出面
@@ -610,11 +704,14 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 | `tag` | `tag` | `tag` | 两面 | 否 | — | 元素标签名（小写） |
 | `role` | `role` | `role` | 两面 | 否 | ≤60 字符 | 显式 ARIA 角色（`role` 属性，小写）；没有角色时缺键 |
 | `label` | `label` | `label` | 两面 | 否 | ≤200 | 可见标签（匹配口径是引擎 `full_label` 的 ≤200 前缀）；人读信息：可读、不可当地址；照抄进 target 不构成寻址 |
+| `text` | `text` | — | 仅 observe | 否 | ≤200 | 元素**可见文本**（去掉 style/script 子树后的内容文本）；`aria-label` 优先时 `label` 是属性值、`text` 才是页面上的可见名；人读信息，不可寻址 |
+| `label_source` | `label_source` | — | 仅 observe | 否 | — | `label` 的取值档位（闭集 `aria-label` / `label` / `text` / `title` / `none`；`name`/`id`/`data-test` 是保留位、当前不产出） |
 | `label_truncated` | — | `label_truncated` | 两面 | 否 | — | `label` 被截断过（引擎匹配口径 200，或桥层按 `labelMaxChars` 再裁）；inspect 面由引擎置位；observe 面引擎不产此键，桥在裁剪时自己置位 |
 | `hints_truncated` | — | — | 两面 | 否 | — | 引擎给的候选条数多于桥收集上限（桥侧独立置位）；兼容位：当前两侧候选生成上限都低于收集上限，实际不会出现 |
 | `href` | `href` | `href` | 两面 | 否 | ≤160 字符 | 链接地址（inspect 面是去 origin/query 的展示投影，observe 面是 DOM 原始属性） |
 | `href_full` | — | `href_full` | 仅 inspect | 否 | ≤160 字符 | 原始 `getAttribute('href')`（query/fragment/origin 都在）；observe 面的 `href` 本身就是原始属性；此键只在 inspect 面出现 |
 | `class_names` | `class_names` | `class_names` | 两面 | 否 | ≤8 条 × ≤40 字符 | 有界类名清单 |
+| `anchor_ids` | `anchor_ids` | — | 仅 observe | 否 | ≤8 条 × ≤40 字符（实现界） | 祖先 `id` 链（内→外、小写）——**地址素材不是地址**：单独照抄不构成 hint，写进 target 必须配合 `within:`（如 `展开 within:#review-a`）；与 `declared.ts` 的 `anchor_ids` 同一口径（共享 `ANCHOR_JS` 单源），无 id 祖先时缺键 |
 | `id` | `id` | `id` | 两面 | 否 | ≤60 字符 | `id` 属性（空值缺键） |
 | `name` | `name` | `name` | 两面 | 否 | ≤60 字符 | `name` 属性（空值缺键） |
 | `data_test` | `data_test` | `data_test` | 两面 | 否 | ≤60 字符 | `data-test` 属性（空值缺键） |

@@ -21,6 +21,7 @@ import { amberflowHome } from "../../support/amberflow-home.ts";
 import { parseRunDefaults } from "../../support/run-defaults.ts";
 import { runSession, SESSION_DEFAULT_IDLE_TIMEOUT_MS, type SessionSink } from "../../app/session-runtime.ts";
 import { exportSessionRecord } from "../../app/session-export.ts";
+import { hostsEnvelopeLogLine, normalizeHostsEnvelope } from "../../engine/host-envelope.ts";
 import { commandHelp } from "../registry.ts";
 
 const EXPORT_USAGE = `amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
@@ -138,6 +139,8 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
         "max-request-bytes": { type: "string" },
         // A2：act 缺省歧义策略（fail = 歧义不执行；act = 恢复旧行为）。
         "on-ambiguous": { type: "string" },
+        // declared-DOM 解析开关（class-only 控件的唯一处方；缺省 declared）。
+        "target-resolution": { type: "string" },
         // 有头窗口尺寸：maximized（最大化，保留浏览器 chrome）| fullscreen（全屏，F11 语义）。
         window: { type: "string" },
       },
@@ -151,7 +154,11 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
   const explicitHosts: string[] = [];
   for (const h of v.host ?? []) for (const part of h.split(",")) if (part.trim()) explicitHosts.push(part.trim());
   if (typeof v.hosts === "string") for (const part of v.hosts.split(",")) if (part.trim()) explicitHosts.push(part.trim());
-  const hosts = explicitHosts.length > 0 ? explicitHosts : inferHosts(v.url);
+  // P1-B：声明期归一化 + 校验（`hostMatchesEnv` 只做全等/子域后缀，所以一条带
+  // scheme/port/path/query 的声明**永远不可能**命中——它是一条永假规则）。这里把每条解释成
+  // 它想说的 host，单条告警在会话起来后打到 stderr；解释结果本身也回显成人话（见下方 sink.log）。
+  const hostsNorm = normalizeHostsEnvelope(explicitHosts.length > 0 ? explicitHosts : inferHosts(v.url));
+  const hosts = hostsNorm.hosts;
 
   const runId = `${Date.now().toString(36)}-${process.pid}`;
   const outDir = typeof v.out === "string" && v.out.trim() !== ""
@@ -179,12 +186,26 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
     });
   }
 
+  // P0-C：--target-resolution 闭集 off|declared；非法值 = 用法错误（exit 2 系），不静默取缺省。
+  const targetResolutionRaw = v["target-resolution"];
+  if (targetResolutionRaw !== undefined && targetResolutionRaw !== "off" && targetResolutionRaw !== "declared") {
+    throw usageError(`--target-resolution 需要 off 或 declared（拿到 ${JSON.stringify(targetResolutionRaw)}）`, {
+      hint: "缺省 declared：class-only 控件（无 id/data-test/aria-label）要靠它在池落空后按 DOM 结构解析才可寻址；off = 关掉这层兜底（池内解析逐字节不变）。",
+      next: ["amber session --help"],
+    });
+  }
+
   const sink: SessionSink = {
     // stdout 只能是协议行：一行一个 JSON 对象（不缩进，绝不混人话）。
     respond: (obj) => ctx.stdout(JSON.stringify(obj)),
     log: (line) => diag(ctx, `[session] ${line}`),
   };
   diag(ctx, `[session] ${runId}  idle=${idleTimeoutMs ?? SESSION_DEFAULT_IDLE_TIMEOUT_MS}ms  out=${outDir}`);
+  // P1-B：把"我传的 N 条被解释成了什么"与改写事实各回显一行（stderr 人话；无声明/无改写时
+  // 分别是 null 与不出现，键集不变）。
+  const hostsLog = hostsEnvelopeLogLine(hostsNorm);
+  if (hostsLog !== null) sink.log(hostsLog);
+  if (hostsNorm.warning !== null) sink.log(hostsNorm.warning);
   // 运行参数的配置默认值（AMBERFLOW_HEADFUL 等 env 层）：--headful 旗标仍最优先。坏配置响亮报错。
   const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
   if (runDefaultErrors.length) {
@@ -223,6 +244,8 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
     inputFile: typeof v.input === "string" ? path.resolve(ctx.cwd, v.input) : null,
     // A2：缺省 fail（会话不再在歧义上"随便点第一个"）；--on-ambiguous act 恢复旧行为。
     onAmbiguous: onAmbiguousRaw === "act" ? "act" : "fail",
+    // P0-C：缺省由 sessionTargetResolution 归一成 "declared"（这里只透传显式声明）。
+    ...(targetResolutionRaw === undefined ? {} : { targetResolution: targetResolutionRaw }),
     ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
     ...(maxRequestBytes === undefined ? {} : { maxRequestBytes }),
     verbose: ctx.globals.verbose,

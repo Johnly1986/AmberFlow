@@ -717,6 +717,8 @@ export function suggestHints(
   // 为什么向外生长是有判别力的（不是死代码）：anchor_ids ≤8 截断按元素深度不同——同 label
   // 的浅元素留得住外层段、深元素被截掉，链每加一段 = 多一个必经锚点，匹配集严格变窄。
   // 顺序仍 身份→label→frame→within、上限 4（R-10：链候选与 frame 候选互不挤占——顺序不变）。
+  // F83：第 5 档（in-row）是否已产出候选——内容可分 ⇒ 第 6 档（位置候选）不产，见函数尾。
+  let inRowPushed = false;
   if (!labelPushed && labelUsable) {
     const anchors: string[] = (elem.anchor_ids ?? []).map((aid) => String(aid));
     const validSeg = (a: string): boolean => /^[a-z0-9_\-.:]+$/.test(a);
@@ -753,7 +755,6 @@ export function suggestHints(
     // 无 row_texts（非重复组）时此档天然不产出（fail-closed 与匹配面同一对称）。
     // F84 批 3（deny-list 可配化）：opts.tokenAllow 在场的词元**跳过价格/时段 deny 模式**
     // 直接参与生成（结构约束不退让）；缺省 undefined = 护栏行为逐字节不变。
-    let inRowPushed = false;   // F83：第 5 档是否已产出候选（第 6 档只在"内容不可分网格"上跑）
     if (!withinPushed && Array.isArray(elem.row_texts) && elem.row_texts.length > 0) {
       const allow = opts?.tokenAllow;
       const tokenOk = (t: string): boolean => {
@@ -775,17 +776,18 @@ export function suggestHints(
         if (push(`${label} in-row:${tok}`)) { inRowPushed = true; break; }
       }
     }
-    // F83 第 6 档（row-index 建议闭环，生成纪律 v1.0 §3.6）：**仅当 within 全落空 且 第 5 档
-    // 全落空**——即行内容词元全被生成期护栏拒绝或全不自证（**内容不可分网格 = 硬案例本体**）
-    // ——才从 `row_index` 生成 `<label> row-index:N`（N = 该元素 dup 组内 DOM 先序位次），走
-    // 同一个 push → hintMatch 自证（恰好唯一命中才保留）。**内容可分时内容候选优先**（第 5
-    // 档先行且命中即停 ⇒ 候选清单里不出现 row-index）；**单用 only**（生成器不产组合候选，
-    // Q3 仲裁；作者手写组合走推荐纪律）；**不产 unstable 标记**（批 1 裁决理由：row-index
-    // 候选只在内容完全不可分时才产，此时它是唯一可行动出口而非半成品）。序号是身份代理，
-    // 能不用就不用——本档只回答"引擎建议什么"，不限制"作者可以声明什么"。
-    if (!withinPushed && !inRowPushed && elem.row_index !== undefined) {
-      push(`${label} row-index:${elem.row_index}`);
-    }
+  }
+  // F83 第 6 档（row-index 建议闭环，生成纪律 v1.0 §3.6；id 无关的补充形态）：元素是同文案
+  // 重复组成员（`row_index` 在场）**即产** `<label> row-index:N`（N = dup 组内 DOM 先序位次，
+  // 1-based）——与身份/label/frame/within 档**并行**：within 命中时照产（`within:#id` 更精确，
+  // 但 id 由渲染序生成——Google 评价页那种 `#ucc-14` 跨会话会漂，作者照抄会碎；id 无关的
+  // row-index 必须同时在清单里，作者才有可抄的稳定形态）；within 全落空时本档独立产出。
+  // **第 5 档已命中（内容可分）则不产**：`row-index` 错位不报错、会点错东西，比
+  // `target_ambiguous` 更坏——内容定位已经唯一，就不再递位置耦合的选项给作者。仍走同一个
+  // push → hintMatch 自证（恰好唯一命中才保留；0/多命中不产）；label 不可用（空 /
+  // `label_source:"none"`，同 labelUsable）不产。**单用 only**（生成器不产组合候选，Q3 仲裁）。
+  if (labelUsable && !inRowPushed && elem.row_index !== undefined) {
+    push(`${label} row-index:${elem.row_index}`);
   }
   return out.slice(0, 4);
 }

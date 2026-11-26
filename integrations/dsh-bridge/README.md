@@ -11,12 +11,12 @@ English | [中文](README.zh.md)
 
 `dsh-amberflow-bridge` exposes an external browser engine as model-facing tools. AmberFlow has exactly ONE app format: a **flow script** at `$AMBERFLOW_HOME/apps/<id>/app.mjs` (or in the checkout's fixtures) exporting `meta` and `flow(ctx)`. The script owns the control flow — `if`, `for`, `while`, sub-functions — while the engine owns each step's target, gate, action and completion signal, and DOM signals are the only completion truth. The bridge adds no browser or app logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts.
 
-The plugin ships **nine** tools: `amberflow_status` (environment/model facts), `amberflow_apps` (list flow apps through `amber apps list --json`), `amberflow_app_show` (metadata + current `app.mjs` source + version anchors), `amberflow_app_check` (load + dry-run the call sequence, no browser), `amberflow_inspect` (read-only page observation and hint candidates), `amberflow_session` (one state-preserving authoring session: open → observe → act → read/extract/signal → snapshot → close; never judges completion — that truth lives only in `amberflow_run`), `amberflow_app_create` (generate a flow skeleton with `amber apps new`), `amberflow_run` (run one app; `max_steps` is an execution budget), `amberflow_learn` (record a flow into a flow app, gated by a rules-only replay of the generated script), and `amberflow_test` (real-site regression suite). `amberflow_inspect` and `amberflow_session` `op:"observe"` share ONE element-row contract (`src/element-view.ts`: same field names — `hint_candidates`, not `hints` — same clipping, same 60/200 row cap, admission diagnostics passed through untouched; `ref` is a display anchor, act targets are hint strings). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets the three
+The plugin ships **nine** tools: `amberflow_status` (environment/model facts), `amberflow_apps` (list flow apps through `amber apps list --json`), `amberflow_app_show` (metadata + current `app.mjs` source + version anchors), `amberflow_app_check` (load + dry-run the call sequence, no browser), `amberflow_session` (one state-preserving authoring session: open → observe → act → read/extract/signal → snapshot → close; never judges completion — that truth lives only in `amberflow_run`), `amberflow_app_create` (generate a flow skeleton with `amber apps new`), `amberflow_run` (run one app; `max_steps` is an execution budget), `amberflow_learn` (record a flow into a flow app, gated by a rules-only replay of the generated script), and `amberflow_test` (real-site regression suite). **`amberflow_inspect` is deliberately not registered for the model** — it competed with `op:"observe"` for the same "observe the page" slot: page observation is `amberflow_session` `op:"observe"`, and one-shot read-only recon (AX-tree evidence, read-only CSS `probes`, `--summary`) is the CLI's `amber inspect --url <url> --json`. The tool itself is kept — tool body, `ctx.amberflow.inspect` service door, `amber inspect` CLI and the `inspect` face of the shared element-row contract — only its registration is switched off (`EXPOSE_INSPECT_TOOL`). The CLI `amber inspect --json` and `amberflow_session` `op:"observe"` share ONE element-row contract (`src/element-view.ts`: same field names — `hint_candidates`, not `hints` — same clipping, same 60/200 row cap, admission diagnostics passed through untouched; `ref` is a display anchor, act targets are hint strings). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets the three
 **online decision model** fields — Model URL, Token Key, ModelName (the same `AMBERFLOW_DECISION_*` keys
 `amber config set` writes for the engine CLI) — plus the execution parameters: the step gap and the
 HEADFUL switch.
 
-The authoring loop for an Agent is `amberflow_status` → `amberflow_apps` → `amberflow_app_show` (read `path` and the current source) → **edit `app.mjs` with the file tools** → `amberflow_app_check` → `amberflow_inspect` (look at the real page before writing a hint) → `amberflow_run` with `max_steps`/`trace` for structured feedback → `amberflow_run` full → `amberflow_test`. There is no step-number editing interface: a script has no static step table, steps are runtime facts, and the script version is the only flow version.
+The authoring loop for an Agent is `amberflow_status` → `amberflow_apps` → `amberflow_app_show` (read `path` and the current source) → **edit `app.mjs` with the file tools** → `amberflow_app_check` → `amberflow_session` `op:"observe"` (look at the real page before writing a hint; one-shot read-only recon with AX evidence and CSS `probes` is the CLI's `amber inspect --url <url> --json`) → `amberflow_run` with `max_steps`/`trace` for structured feedback → `amberflow_run` full → `amberflow_test`. There is no step-number editing interface: a script has no static step table, steps are runtime facts, and the script version is the only flow version.
 
 ## Table of Contents
 
@@ -139,7 +139,7 @@ Every browser door can be made visible with `--headful`:
 | Surface | How |
 |---|---|
 | Engine CLI | `amber run <app> --headful`; `amber inspect --url <URL> --headed`; `node tools/learn.ts --headful` |
-| DSH tools | `…_run` with `headful: true`, `…_inspect` with `headful: true`, `…_learn` with `headful: true` (or `cdp` to drive a browser you already have open) |
+| DSH tools | `…_run` with `headful: true`, `…_session` `op:"open"` with `headful: true`, `…_learn` with `headful: true` (or `cdp` to drive a browser you already have open) |
 
 Two things to know:
 
@@ -226,8 +226,8 @@ is rejected instead of being silently downgraded.
 ## Model Experience
 
 The model sees a set of tools with narrow schemas: list/read (`apps` / `app_show`), validate
-(`app_check`), observe (`inspect`), author (`app_create` + its own file edits to `app.mjs`), run
-(`run` with an optional execution budget), record (`learn`), and regress (`test`).
+(`app_check`), observe (`session` `op:"observe"`), author (`app_create` + its own file edits to
+`app.mjs`), run (`run` with an optional execution budget), record (`learn`), and regress (`test`).
 `amberflow_run` answers with PASS or FAIL, the completion count, invariant counts, the failed steps
 with their obstacle text, and the report path; steps that completed are a count, not rows, so a
 sixty-step flow costs a line rather than a page. Every answer also carries a **tier line** —

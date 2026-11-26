@@ -28,8 +28,11 @@ import type {
 /** resolver 的显式依赖（不读外层闭包状态；phase 拆分时可整体传参）。 */
 export interface DeclaredTargetsDeps {
   readonly pg: AnyPage;
-  /** 步号：只进停因文案（与原 run() 内文案同源）。 */
-  readonly stepNo: number;
+  /**
+   * 步号：只进停因文案（与原 run() 内文案同源）。会话 act 面没有步序概念——缺省 = 文案不提步号
+   * （绝不编一个 0 出来；run 面照旧逐字带上真实步号）。
+   */
+  readonly stepNo?: number;
   /** skipped 记账（与 run() 同一数组/同一去重）。 */
   readonly noteSkipped: (s: SkippedAction) => void;
   /** 池侧 hint 选项（`this._hintOpts()` 的转口；DRF/池判定同一口径）。 */
@@ -167,7 +170,11 @@ export function createDeclaredTargetsResolver(deps: DeclaredTargetsDeps): Declar
       if (!dr.eligible) return null;
       // DRF 真跑了（形状 eligible）且可见零命中——记事实供停因尾缀回显（歧义分支自行结构化）。
       if (dr.visible_matches === 0) {
-        self.declaredMiss = { target, mode: dr.mode, total: dr.total_matches, hidden: dr.hidden_matches };
+        self.declaredMiss = {
+          target, mode: dr.mode, total: dr.total_matches, hidden: dr.hidden_matches,
+          // 页内 pass 求值失败的帧（有界，≤3）：让"脚本没跑起来"与"页面 0 命中"可区分。
+          ...(dr.frame_eval_failed === undefined ? {} : { eval_failed: dr.frame_eval_failed }),
+        };
       }
       if (dr.visible_matches > 1) {
         for (const cand of dr.candidates.filter((c) => c.visible)) {
@@ -184,7 +191,8 @@ export function createDeclaredTargetsResolver(deps: DeclaredTargetsDeps): Declar
             + `${dr.visible_matches} visible element(s) across frames (total=${dr.total_matches}, `
             + `hidden=${dr.hidden_matches}) — candidates: ${formatDeclaredCandidates(dr.candidates)}. `
             + `Declared-target resolution never guesses among several matches; narrow the declaration `
-            + `to a unique #id / [data-test=…] / exact visible text on step ${deps.stepNo}`,
+            + `to a unique #id / [data-test=…] / exact visible text`
+            + (deps.stepNo === undefined ? "" : ` on step ${deps.stepNo}`),
         };
         return null;
       }

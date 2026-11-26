@@ -97,7 +97,7 @@ import type { ActionabilityDetail, AnyPage, BrowserHandle, DecisionRuntimeHooks,
 import { FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_OVERLAY } from "./eval-snippets.ts";
 import {
   clickActionableAncestor, declaredHitTest, describeActionFailure, hitRelation, occlusionProbe,
-  timeoutDispatchNavigated,
+  timeoutDispatchNavigated, type AutoScrollFact,
 } from "./executor-actionability.ts";
 
 /* ------------------------------------------------------------------ run ctx */
@@ -444,6 +444,71 @@ export const PASS_ID_FALLBACK = compile("arg", `return (${ID_FALLBACK_PROBE_JS})
 /** X1：去掉实现函数第一个参数（`mw`）后的参数元组；包装方法用它保持原签名类型。 */
 type OmitMw<T extends readonly unknown[]> = T extends readonly [unknown, ...infer R] ? R : never;
 
+/**
+ * P0-C：页面快照的**取证扩展**（`snapshot` 的返回形状），两个键都是"这次到底比了什么"的事实：
+ *   - `snapshot_scope`：正文取自被操作元素所属的**最近面板容器**（element），还是退回整页
+ *     文档（document，页面没有可识别面板时）；
+ *   - `chars_scanned`：实际带出/比较的正文字符数——4000 截断从此可见，而不是隐形。
+ * `target_text` 只在声明了元素作用域时出现：被操作元素自己的子树文本（≤1200）。
+ */
+export type PageSnapshotEvidence = PageSnapshot & {
+  snapshot_scope: "element" | "document";
+  chars_scanned: number;
+  target_text?: string;
+};
+
+/** 面板作用域的正文字符上限（与整页口径一致：都是 4000 字）。 */
+const PANEL_TEXT_MAX = 4000;
+/** 元素子树文本上限（判"这一块动没动"，不需要整页）。 */
+const TARGET_TEXT_MAX = 1200;
+
+/**
+ * P0-C：**元素所属面板**的正文 + 元素子树文本（页面侧单次只读）。
+ *
+ * 为什么按元素上溯而不是取页面上第一个 `main`：一个页面可以有多个 `main`/面板（侧栏、
+ * 底部抽屉、主内容区），"第一个"经常是**另一个**面板——被点的评论列表在第二个面板里展开，
+ * 第一个一字未变，改动就被读成 `changed:false`。
+ * 判据有界且确定：从元素自身向上找最近的语义面板容器（main/region/dialog/section/article/
+ * aside/form/table/ul/ol/nav/header/footer 及等价 role），到 `body`/`html` 即止；一个都没有
+ * = document 作用域（如实标注，不假装有面板）。
+ */
+export const PANEL_TEXT_JS = (node: any): {
+  scope: "element" | "document"; panel: string | null; text: string; target: string;
+} => {
+  const g = globalThis as unknown as { document: any };
+  const doc = node.ownerDocument || g.document;
+  const SEL = [
+    "main", "[role=main]", "[role=region]", "[role=dialog]", "[role=tabpanel]", "[role=article]",
+    "dialog", "section", "article", "aside", "form", "table", "ul", "ol", "nav", "header", "footer",
+  ].join(",");
+  const textOf = (el: any): string => {
+    try {
+      return String(el.innerText || "");
+    } catch {
+      return String(el.textContent || "");
+    }
+  };
+  const target = String(node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
+  let panel: any = null;
+  for (let p = node, k = 0; p && k < 24; k += 1, p = p.parentElement) {
+    if (p === doc.body || p === doc.documentElement) break;
+    let hit = false;
+    try {
+      hit = typeof p.matches === "function" && p.matches(SEL);
+    } catch {
+      hit = false;
+    }
+    if (hit) {
+      panel = p;
+      break;
+    }
+  }
+  if (panel === null) return { scope: "document", panel: null, text: "", target };
+  const tag = String(panel.tagName || "").toLowerCase();
+  const desc = panel.id ? `${tag}#${String(panel.id)}` : tag;
+  return { scope: "element", panel: desc, text: textOf(panel), target };
+};
+
 export class BrowserMiddleware {
   /** Vocabulary of the rule layer, aliased for callers/tests (`rules.ts`). */
   static readonly STOP_TOKENS = STOP_TOKENS;
@@ -607,6 +672,15 @@ export class BrowserMiddleware {
   doneGuardPolicy: "warn" | "fail" = "warn";
   /** S1：fill 后读回（缺省 true）。 */
   fillReadback = true;
+  /**
+   * P0-C：点击后的**稳定门**（null = 关闭，缺省开启）。
+   *
+   * 点击引发的展开/抽屉/评论加载是异步渲染：点完立刻拍 after 快照，会把"真的展开了"
+   * 读成 `changed:false`（假阴性）；反之把快照面缩到元素所属面板后，"没动"也才说得准。
+   * 语义 = 等 two-frame + `quietMs` 内无 DOM mutation 再取快照，`maxMs` 是硬上限
+   * （长动效页面不至于把动作卡住）。只作用于单动作面的 click/check。
+   */
+  clickSettled: { quietMs: number; maxMs: number } | null = { quietMs: 200, maxMs: 1200 };
   /** W8：敏感槽位键名单（见 `MiddlewareOptions.secretSlotKeys`；缺省空 = 无敏感槽位）。 */
   secretSlotKeys: ReadonlySet<string> = new Set<string>();
   /**
@@ -632,6 +706,11 @@ export class BrowserMiddleware {
     { epoch: 0, navEpoch: 0, current: null };
   /** 上一条 `not-actionable-or-covered` 的结构化现场（只在同一次调用内消费）。 */
   _lastActionabilityDetail: ActionabilityDetail | null = null;
+  /**
+   * P0-D：离屏自动救场的事实（`"applied"` = 滚入视口后重试成功；`"attempted"` = 试过仍失败）。
+   * 与 `_lastAncestorRetarget` 同一纪律：一次动作只消费一次，null = 没发生救场。
+   */
+  _lastAutoScroll: AutoScrollFact | null = null;
   /**
    * B1：`occludedReason` 返回 null（非 timeout 异常 / hit-test 读不到）时的 Playwright 首行。
    * 只在同一次单动作调用内消费（与 `_lastActionabilityDetail` 同一纪律），不改 run 面返回值。
@@ -1436,14 +1515,28 @@ export class BrowserMiddleware {
    * validation. Frames are observed too: an action inside an iframe changes the
    * FRAME's document, so inert detection has to see it. Frameless pages pay
    * nothing.
+   *
+   * P0-C：传了 `scope`（被操作元素的 locator）时，正文改取**该元素所属的最近面板容器**
+   * （见 `PANEL_TEXT_JS`）；找不到面板就退回整页 `body` 并在 `snapshot_scope` 里如实标注。
+   * 不传 = 既有 `main, body` 口径，产物与之前一致（run 面调用点不传）。
    */
-  async snapshot(page: AnyPage): Promise<PageSnapshot> {
+  async snapshot(page: AnyPage, scope?: AnyLoc | null): Promise<PageSnapshotEvidence> {
+    const scoped = scope === undefined || scope === null ? null : await this._panelText(scope);
     let text = "";
-    try {
-      text = String(await firstLoc(page.locator("main, body")).innerText({ timeout: 1500 })).slice(0, 4000);
-    } catch {
-      text = "";
+    let snapshotScope: "element" | "document" = "document";
+    if (scoped !== null && scoped.scope === "element" && scoped.text !== "") {
+      text = scoped.text.slice(0, PANEL_TEXT_MAX);
+      snapshotScope = "element";
+    } else {
+      try {
+        // document 作用域：整页正文（不接受"页面上第一个 main"——多面板页面会取错面板）。
+        const sel = scoped === null ? "main, body" : "body";
+        text = String(await firstLoc(page.locator(sel)).innerText({ timeout: 1500 })).slice(0, PANEL_TEXT_MAX);
+      } catch {
+        text = "";
+      }
     }
+    const targetText = scoped === null ? undefined : scoped.target.slice(0, TARGET_TEXT_MAX);
     let vals = "";
     let checks = "";
     try {
@@ -1475,12 +1568,33 @@ export class BrowserMiddleware {
       return {
         url: urlOf(page), title: await page.title(), text, vals,
         ...(checks ? { checks } : {}), frames,
+        snapshot_scope: snapshotScope, chars_scanned: text.length,
+        ...(targetText === undefined ? {} : { target_text: targetText }),
       };
     } catch {
       return {
         url: safeUrl(page), title: "", text, vals,
         ...(checks ? { checks } : {}), frames,
+        snapshot_scope: snapshotScope, chars_scanned: text.length,
+        ...(targetText === undefined ? {} : { target_text: targetText }),
       };
+    }
+  }
+
+  /** P0-C：一次只读页面取证 = 元素所属面板正文 + 元素子树文本（读不到 = null，不造假）。 */
+  async _panelText(loc: AnyLoc): Promise<{ scope: "element" | "document"; panel: string | null; text: string; target: string } | null> {
+    try {
+      const raw = await firstLoc(loc).evaluate(PANEL_TEXT_JS);
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+      const r = raw as Record<string, unknown>;
+      return {
+        scope: r["scope"] === "element" ? "element" : "document",
+        panel: typeof r["panel"] === "string" ? r["panel"] : null,
+        text: typeof r["text"] === "string" ? r["text"] : "",
+        target: typeof r["target"] === "string" ? r["target"] : "",
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -1495,7 +1609,10 @@ export class BrowserMiddleware {
    * `"__clicked__"` means the probe already performed the real click.
    */
   async occludedReason(page: AnyPage, el: Elem, probeMs = 800, slowMs = 2500): Promise<string | null> {
-    return await occlusionProbe(this, page, el, probeMs, slowMs);
+    // P0-D：离屏救场注入的"滚入视口"原语 = 本文件已在用的同一实现（单一出处，
+    // 不在可及性模块里再写一份滚动逻辑）。
+    return await occlusionProbe(this, page, el, probeMs, slowMs,
+      (loc) => _scrollIntoViewWithEvidence(this, page, loc));
   }
 
   /**

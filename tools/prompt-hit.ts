@@ -984,9 +984,9 @@ const BRIDGE_DESC_MAX_CHARS = 800;
     }
     }
   });
-  // 基线 94 条（桥面盘点值）：数量漂移只 warn——桥面新增工具描述是正常演进，重审长度预算后
-  // 同步本基线（`selector` 参数原本已存在，本次只扩描述、不新增条目）。
-  const BRIDGE_DESC_BASELINE = 94;
+  // 基线 95 条（桥面盘点值）：数量漂移只 warn——桥面新增工具描述是正常演进，重审长度预算后
+  // 同步本基线（本轮 +1 = `amberflow_session` 的 `format` 参数描述，419 字符 < 800 硬上限）。
+  const BRIDGE_DESC_BASELINE = 95;
   if (descriptions.length !== BRIDGE_DESC_BASELINE) {
     bridgeWarnings.push(`bridge_desc: description 数量 ${descriptions.length}/${BRIDGE_DESC_BASELINE} 与基线不同——新增/删除桥面描述需重审长度预算`);
   }

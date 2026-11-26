@@ -59,11 +59,11 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 | type | 请求（额外字段） | 成功响应（额外字段） | 失败 code |
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts`；落地路径形状被站点改写时另有 `requested_url`/`landed_url`/`landed_path_shape_changed:true` + `reason`（`ok` 语义不变） | `host_not_allowed` / `unreachable` / `config_error`（含浏览器启动期环境错误：headed 但没有可用的 XServer/DISPLAY — 会话**不终结**，可改 headless 重试） |
-| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；元素行的字段全集见 [AGENT_INTERFACE §3.2](AGENT_INTERFACE.md) 的唯一权威表——本文只记信封：`frame` 下标、多 frame 时的 `frame_counts`） | `bad_selector` |
-| `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；`ambiguous` **只在歧义停时出现**（恒等式 `ambiguous === (code === "target_ambiguous")`，`ok:true` 不可能带它），`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` 是弱档旁路 advisory（成功也回显）；scroll 成功另可带 `strategy:"programmatic"`（非标准滚动器回退）与 `at_bottom:true`（已到底）；set_range 多柄另带 `handles`/`handle_index`/`peers`/`row_index`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
+| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；**候选为空时**另有 `readiness`——见「observe 的 readiness：空页 vs 还没加载完」节；元素行的字段全集见 [AGENT_INTERFACE §3.2](AGENT_INTERFACE.md) 的唯一权威表——本文只记信封：`frame` 下标、多 frame 时的 `frame_counts`） | `bad_selector` |
+| `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；`target` 支持 `within:#<id>` 容器作用域（`<id>` 取自 observe 行的 `anchor_ids`，同 label 不同容器时唯一区分手段）；命中池外的 declared-DOM 目标时 `ref` 形如 `drf:0`（**不是**池 ref）；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；`ambiguous` **只在歧义停时出现**（恒等式 `ambiguous === (code === "target_ambiguous")`，`ok:true` 不可能带它），`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` 是弱档旁路 advisory（成功也回显）；scroll 成功另可带 `strategy:"programmatic"`（非标准滚动器回退）与 `at_bottom:true`（已到底）；set_range 多柄另带 `handles`/`handle_index`/`peers`/`row_index`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
-| `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
-| `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms` | `config_error`（坏信号形状） |
+| `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性（**闭集**，见「extract 的 fields 闭集与 `@self`」节）；`"@self"` = 行元素可见文本（等价 `"."`）；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
+| `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms`；**超时且信号是单个 `css_*` 算子时**另有 `timeout_diagnostics`——见「waitFor 超时诊断：css 与 hint 不是一回事」节 | `config_error`（坏信号形状） |
 | `signal` | `signal` | `held,elapsed_ms` | `config_error` |
 | `snapshot` | `screenshot?`(缺省 true), `poolMax?`(120) | `snapshot_file,pool_file,screenshot_file?,counts` | `io_error` |
 | `mark` | `note` | `note`（只进 `--record` 轨迹，不动页面） | `config_error` |
@@ -369,8 +369,8 @@ B2 的容器滚动需要**先命中一个元素 hint**（`target` + `to/by`）�
 
 ### extract 的稳定读与空行事实（S2）
 
-懒渲染页的两个高频事故：直接抽到"还在灌"的半截列表；把骨架空行当真值。`extract` 增两个
-additive 面（缺省不给 = 响应除 `blank_rows` 外逐字节不变）：
+懒渲染页的两个高频事故：直接抽到"还在灌"的半截列表；把骨架空行当真值。`extract` 增 additive
+面（缺省不给 = 响应除 `blank_rows` 外逐字节不变）：
 
 - `waitSettled:true`（只接受 `true`）：抽行前做**双指标稳定门**——行数与空行数（一次 evaluate
   同时拿两个数）连续 2 轮相等才算稳定（600ms 间隔，至多 5 轮，与 E5 滚动稳定窗同款）。空行数
@@ -378,6 +378,94 @@ additive 面（缺省不给 = 响应除 `blank_rows` 外逐字节不变）：
   `settled:false`——**不是失败**，读到的就是此刻事实；不等价于 waitFor，也不判 done。
 - `blank_rows`（恒带）：本页返回行里**所有字段都是空串**的行数（判读权在调用方）；`waitSettled`
   未稳定时会用行选择器再统计一次全 DOM 空行数兜底。骨架行/懒加载未灌满的第一判别信号。
+- `settle_reason`（可选第三键，additive）：稳定门**判不了**时出现——一次读指标拿到 `null`
+  （读失败），此时 `settled:false` + `settle_reason:"read_failed"`（失败即 false，绝不拿没读到的
+  内容谎报稳定）。正常路径（稳定，或窗口到点仍在变）**不带**该键；值闭集目前只有 `read_failed`。
+
+### `within:` 与 `--target-resolution`：class-only 控件怎么点得到（P1-C3）
+
+同 label、不同容器的一类控件（典型：Google 地图评价页有 3 个「查看更多」，评论正文的展开器
+只是其中之一）永远 `target_ambiguous`。区分手段是 **容器作用域**，而容器的来源是观察面的
+`anchor_ids`：
+
+```
+$ amber session --url <页> --target-resolution declared     # 缺省即 declared
+> {"type":"observe","max":80}
+  → tag=button label="查看更多" text="展开" anchor_ids=["ucc-14"]        ← 评论正文那个
+  → tag=button label="查看更多" text="展开" anchor_ids=["503__uuxhif0"]  ← 侧栏那个
+> {"type":"act","op":"click","target":"查看更多 within:#ucc-14"}
+  → ok:true, ref:"drf:0", changed:true
+```
+
+- `anchor_ids` = 祖先 `id` 链（内→外、小写、≤8 条 × ≤40 字符）。**它是地址素材不是地址**：
+  单独照抄不构成 hint；写进 target 必须配 `within:#<id>`。
+- `--target-resolution off|declared`（缺省 `declared`）：`declared` = 池内落空后仍按**同一份
+  hint 形状**在 DOM 里结构化解析（含 `within:` 作用域），这是 class-only 控件可寻址的原因；
+  `off` = 关闭该兜底（池外目标一律 `target_not_found`）。非法值 exit 2，不静默回落。
+- **绝不猜**：DOM 里可见匹配 >1 → `target_ambiguous` 零动作；全部隐藏 → 视为未命中。
+- 池内命中优先，`stopCode` 闭集不变；判定与池面是**同一份 `hintMatch`**，所以 `within:<id>`
+  在池面与声明面语义一致。
+- 走 declared 解析命中的 `ref` 形如 `drf:0`（**不是**池 `eN`）；这也是"这次是不是走了 DOM 兜底"
+  的可观察信号。
+
+### waitFor 超时诊断：css 与 hint 不是一回事（P1-B3）
+
+`css_*` 信号走**原始 DOM**（Playwright locator），而 `act` 的 `target` 走 **hint**（池字段匹配，
+`aria-label` 在提取期已并进 `label`）。同一个串在两种语义下可以一个命中、一个永不命中——最常见的
+翻车是**把 act 用的 hint 串当 CSS 信号等**，白等到超时还不知道为什么。
+
+`waitFor` 只在**超时**（`held:false`）且信号是**单个 `css_*` 算子**时，补一个诊断块，
+用 `ctx.waitForTarget`（observe + `hintMatch`，与 act 同一口径）判"这串能不能当 hint 用"：
+
+```json
+{"id":4,"type":"waitFor","ok":true,"held":false,"timeout_ms":6000,"poll_ms":200,"elapsed_ms":6020,
+ "timeout_diagnostics":{"css_selector":"button[aria-label=\"价格\"]","hint_matchable":true,
+ "hint_match_count":1,"note":"该串作为 hint 可命中 1 个候选，但作为 CSS 不存在：…别把 hint 串当 CSS 信号等。"}}
+```
+
+- `hint_matchable:true` ⇒ 这串能当 act 的 `target` 用，只是不能当 CSS；`hint_match_count>1` 时
+  note 会提示"多候选时 act 默认报 `target_ambiguous`"。
+- `hint_matchable:false` ⇒ 两种语义都不成立，换更短的独词或先 `observe` 抄 `hint_candidates`。
+- **判定不可得时不冒充**：`dry` 面、或 `waitForTarget` 抛错时，只给 `css_selector`，
+  **不写** `hint_matchable`（还没真评过，"不是 hint"同样是假话）。
+- 复合信号（`all_of`/`any_of`/`not`）、`manual`、`url_contains`、多算子 spec 一律**跳过**；
+  `held:true` 时**不带这个键**（响应形状与改动前逐字节一致）。
+
+判据用的是 `ctx.waitForTarget`——**与 act 同一份 `hintMatch`**，不是"候选数组成员判定"。
+这点很关键：`hint_candidates` 只装"已自证唯一命中、可直接照抄"的串，像 `tag[attr=value]`
+这种**能命中但永不入候选**的写法不在里面；用成员判定会把能用的 hint 判成"不是 hint"。
+
+### observe 的 readiness：空页 vs 还没加载完（P1-B2）
+
+`observe` 在**候选为空**时会补一个 `readiness` 块，用来区分两种完全不同的处境——
+"页面确实没有可用元素"与"页面还没加载完"。没有它时两者都是 `ok:true + elements:[]`，
+自动化流程会据此后判定"没有可用元素"并停手。
+
+```json
+{"id":2,"type":"observe","ok":true,"counts":{"elements":0,"admitted":0,"omitted":0},
+ "elements":[],"readiness":{"document_state":"loading","elements":0,"verdict":"loading",
+ "hint":"页面仍在加载（document.readyState=loading）：重试 observe，或用 waitFor 等到目标出现"}}
+```
+
+- **只在 `ok:true` 且候选为空时出现**；元素非空时**不带这个键**（连一次页面读取都不付，
+  响应形状与改动前逐字节一致）。
+- `document_state` ∈ `loading | interactive | complete | unknown`（`unknown` = 读不到，
+  例如替身页面没有 `evaluate`、或读取超时——**不抛**，按 `loading` 处理）。
+- `verdict` 只有两档：`complete` ⇒ `empty`（已就绪、确实没有候选）；其余 ⇒ `loading`。
+- **它是事实不是门**：`readiness` 不影响 `ok`、不阻断、不判完成；`loading` 时该重试就重试。
+
+### extract 的 fields 闭集与 `@self`（P0-B）
+
+`fields` 的值形态不变（子 CSS / `"."` 行文本 / `"@…"` 取属性），`@` 面从"任意名字"收敛成**闭集**：
+
+- **`"@self"`（新增伪属性）** = 该行元素自身的可见文本（`innerText`，trim），实现上归一成既有
+  `"."`（抽取语义零新增）。需要"这一行的文本"就用它或 `"."`。
+- `"@attr"` 只认真实 **HTML 属性**（大小写不敏感）+ `"@self"`；`data-*` 是唯一开放族，`aria-*`
+  与 `on<event>` 按表枚举。**DOM 属性名不是 HTML 属性**——`@innerText` 这类入口即 `config_error`
+  （`problems[]` 逐字段点名、`reason` 带闭集说明），不再静默返回空串；属性名合法但页面没有该属性
+  仍是空串（与旧行为一致）。
+- 清单唯一出处：`src/app/session-extract-fields.ts` 的 `EXTRACT_ATTR_WHITELIST` /
+  `EXTRACT_ATTR_CLOSED_SET_TEXT`。本文不复述清单（避免两处漂移）。
 
 ### act 的同标签页导航事实（S3，`navProbeMs`）
 

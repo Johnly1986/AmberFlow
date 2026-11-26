@@ -466,7 +466,9 @@ function checkElementViewLimits(): string[] {
     ["EXTRACT_JS", EXTRACT_JS, "slice(0, 8).map((c) => String(c).slice(0, 40))"],
     ["OBSERVE_JS", OBSERVE_JS, "slice(0, 8).map(function (c) { return String(c).slice(0, 40); })"],
     ["STRUCTURE_HELPERS_JS", STRUCTURE_HELPERS_JS, "__STRUCTURE_PATH_MAX = 160"],
-    ["ROW_CLIMB_JS", ROW_CLIMB_JS, "rows.length < 6"],
+    // ROW_CLIMB_JS 的行累加器在 rows 独立行走后改名 acc；pin 钉的是"行预算上界 = 6"
+    // 这条不变量（数字侧另有 rowTextsMaxLines !== 6 守着），不是变量名。
+    ["ROW_CLIMB_JS", ROW_CLIMB_JS, "acc.length < 6"],
   ];
   for (const [name, text, needle] of pins) {
     if (!text.includes(needle)) problems.push(`ElementView 静态 pin 丢失：${name} 不再包含 ${JSON.stringify(needle)}`);

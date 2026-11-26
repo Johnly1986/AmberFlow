@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "pool-js-pure",
-  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）；滑块身份修正批（`value` 不是身份——range 控件不再用活值当 label）为**有意非纯搬移变更**，按同一纪律把连带改变的 LABEL_HELPERS_JS / ROW_CLIMB_JS / HINT_HEAD 从 manifest 删除（三者口径必须同步，见 LABEL_HELPERS_JS 的 isRangeLike 注释），其余符号保持 hash 不动；敏感输入批（`password`/`file`/`hidden` 的活值不是身份，也绝不可进标签）为**有意非纯搬移变更**，四处口径必须同步：LABEL_HELPERS_JS / ROW_CLIMB_JS（pool-js-core.ts）与 WINDOW_AUDIT_JS / HINT_HEAD（pool-js.ts）——这四个符号本就不在 manifest 内（前两者从未列入，后两者已由上一批删除），故本批无 manifest 条目变更，其余符号 hash 不动",
+  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）；滑块身份修正批（`value` 不是身份——range 控件不再用活值当 label）为**有意非纯搬移变更**，按同一纪律把连带改变的 LABEL_HELPERS_JS / ROW_CLIMB_JS / HINT_HEAD 从 manifest 删除（三者口径必须同步，见 LABEL_HELPERS_JS 的 isRangeLike 注释），其余符号保持 hash 不动；敏感输入批（`password`/`file`/`hidden` 的活值不是身份，也绝不可进标签）为**有意非纯搬移变更**，四处口径必须同步：LABEL_HELPERS_JS / ROW_CLIMB_JS（pool-js-core.ts）与 WINDOW_AUDIT_JS / HINT_HEAD（pool-js.ts）——这四个符号本就不在 manifest 内（前两者从未列入，后两者已由上一批删除），故本批无 manifest 条目变更，其余符号 hash 不动；P1-A 提取语义批（观察面 `label` 改走 `labelInfoOf(e, tag, true)` 并同时产出 `text`/`label_source`，与池面共用同一份可见文本算法）为**有意非纯搬移变更**，按同一纪律把 `OBSERVE_JS` 从 manifest 删除（其余符号保持纯搬移 hash 不动）",
   "files": {
     "src/engine/pool-js-core.ts": {
       "symbols": {
@@ -20,7 +20,6 @@
         "HEURISTIC_WIDGET_JS": "d0f58c1de427643a3a36d6015c0de47ee0a5e2e34acdff6fa6e22f51b07aaa50",
         "META_JS": "845e6f94c97c12301b172f07ee8ed1fd73cfc3b3badf5e68721cf9b111c7cfea",
         "NEAR_JS": "75f0cb28b51ed50442b1dddd012ec982f7d89ff31d4c0aa1af815dd73ec8d0ec",
-        "OBSERVE_JS": "78795751d5389ec083ca28e4b1387e090e508adb422450b9d0225fd66db820bc",
         "PASS_EXTRACT": "59387f580ed1bf4bf99427dbeff1cfbe883b7cb01de8bdc8c16e12b005b94d77",
         "PASS_HEURISTIC": "52250d41dccd75a4c896146cc7096a8f690037cdab3363945ffb87f286ff6307",
         "PASS_HINT": "071f8839fbf2761290a18ad3aa5fe221ad5d7261b75d1599ab17e6ac42ce66e2",

@@ -5,7 +5,9 @@
 import { sleep } from "../support/sleep.ts";
 import { type AmbiguityView } from "./ambiguity.ts";
 import { type ActMissDiagnostics, describeActionError, firstLoc } from "./executor-pure.ts";
-import { takeAncestorRetarget } from "./executor-actionability.ts";
+import {
+  afterActionEvidence, takeAncestorRetarget, type AutoScrollFact, type ClickSettleEvidence, type NoOpClickDiagnostics,
+} from "./executor-actionability.ts";
 import { executePoollessAction } from "./executor-poolless-ops.ts";
 import { _executeElement } from "./executor-resolve-a.ts";
 import { _resolveOne, _resolveOneWithLock, type ActLock } from "./executor-resolve-b.ts";
@@ -120,7 +122,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
      * `rehydrateRescan:true` 声明仍被接受（兼容，不再有额外效果）；settle 关闭/结论缺失
      * 时门控信号不存在，重扫永不触发。
      */
-    opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean; lock?: ActLock },): Promise<{
+    opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean; lock?: ActLock; clickSettled?: boolean },): Promise<{
     ok: boolean; how?: string; ref?: string; changed?: boolean;
     moved?: boolean; delta?: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number;
     /** A6：`"programmatic"` = 非标准滚动器回退（标准路径不出现）。 */
@@ -129,7 +131,11 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     at_bottom?: true;
     stopCode?: string; reason?: string; ambiguity?: AmbiguityView;
     /** A4：落空（`target_not_found`）判别证据；只有 `opts.diagnostics` 才出现。 */
-    diagnostics?: ActMissDiagnostics;
+    diagnostics?: ActMissDiagnostics & Partial<NoOpClickDiagnostics>;
+    /** P0-C：点击后的稳定门实测（click/check 且稳定门开着才有）。 */
+    click_settled?: ClickSettleEvidence;
+    /** P0-D：离屏自动救场事实（滚入视口后重试成功 = `"applied"`）。 */
+    auto_scroll?: AutoScrollFact;
     /** B1：失败现场（`not-actionable-or-covered` / `action-timeout` 才有）。 */
     actionability?: ActionabilityDetail;
     /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
@@ -161,7 +167,8 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
       && (scroll.to !== undefined || scroll.by !== undefined);
     // 快照 diff 只服务非 scroll 的 changed；scroll 的 changed 是实测的 moved（不做两次无用的
     // innerText/values 快照——那正是旧路径"只能硬编码 true"的原因）。
-    const pre = op === "scroll" ? null : await mw.snapshot(page);
+    // P0-C：快照按**被操作元素所属的面板**取（`loc` 就是解析到的那一个），不是全局第一个 main。
+    const pre = op === "scroll" ? null : await mw.snapshot(page, loc);
     let how: string | null = null;
     let arg: unknown = null;
     let scrollFact: { moved: boolean; delta: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number; strategy?: "programmatic"; at_bottom?: true } | null = null;
@@ -256,10 +263,11 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
         ...viaField,
       };
     }
-    const post = await mw.snapshot(page);
+    // P0-C/P0-D：动作后的取证一次装配（稳定门 → after 快照 → changed / no_op_click / auto_scroll）。
+    const after = await afterActionEvidence(mw, page, loc, op, pre, opts?.clickSettled);
     void loc;
     return {
-      ok: true, how: String(how), ref, changed: JSON.stringify(pre) !== JSON.stringify(post),
+      ok: true, how: String(how), ref, changed: after.changed, ...after.extra,
       ...(probeNavigated ? { probe_navigated: true } : {}),
       ...viaField,
     };

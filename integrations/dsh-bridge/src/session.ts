@@ -50,6 +50,8 @@ export const DEFAULT_OP_TIMEOUT_MS = BRIDGE_SESSION_TIMEOUTS.opDefaultMs
 export const DEFAULT_OPEN_TIMEOUT_MS = BRIDGE_SESSION_TIMEOUTS.openDefaultMs
 /** 返回体有界裁剪（与设计 §6 一致）。observe 的元素行 cap/截断合同在 `./element-view.ts`。 */
 export const EXTRACT_MAX_ROWS = 20
+/** P1-B：observe `format:"tree"` 的模型可见文本上限（字符；行数上限仍由 `max` 决定）。 */
+export const OBSERVE_TREE_MAX_CHARS = 6000
 /**
  * C1：`save:true` 时桥内翻页的**每页行数**（引擎 extract 的 maxItems 上限同为 500）
  * 与硬顶（2000 行 / 4MB）——超过硬顶如实标 `truncated`，不假装取全。
@@ -59,6 +61,15 @@ export const SAVE_MAX = 2000
 export const SAVE_MAX_BYTES = 4 * 1024 * 1024
 export const READ_MAX_CHARS = 2000
 export const STDERR_TAIL_BYTES = 2048
+
+/**
+ * P0-B：`config_error` 的 `problems[]` 透传上限（会话 `extract` 的 `fields` 闭集逐字段问题 /
+ * `signal`·`waitFor` 的形状问题）。逐项与数组都有界——`reason` 是整句，`problems` 是逐字段定位，
+ * 但桥不把无界结构塞进模型面。
+ */
+const PROBLEMS_MAX_ITEMS = 10
+const PROBLEM_TEXT_MAX_CHARS = 300
+const PROBLEM_FIELD_MAX_CHARS = 80
 
 /** 工具级错误（会话不可用/桥故障）；引擎结构化失败不走这里。 */
 export class SessionToolError extends Error {
@@ -149,6 +160,13 @@ export interface SessionToolArgs {
   headful?: boolean
   /** 有头窗口尺寸（open）：`maximized` | `fullscreen`；需有头（headful:true 或部署 Config.headful）。 */
   window?: BridgeWindowMode
+  /**
+   * P1-C3：declared-DOM 解析（open）。
+   * `"declared"` = 池内落空后按同一份 hint 形状在 DOM 里结构化解析（含 `within:` 容器作用域），
+   * 让 class-only 控件（无 id/data-test/aria-label）可寻址；`"off"` = 关掉这层兜底。
+   * 不传 = 引擎缺省（`declared`），且 spawn argv 与本改动前逐字节一致。
+   */
+  target_resolution?: 'off' | 'declared'
   record?: boolean
   act_op?: string
   /** act：目标 hint 字符串；drive_command `resume`：字符串 value 的显式值袋键。 */
@@ -185,6 +203,12 @@ export interface SessionToolArgs {
   include_hidden?: boolean
   /** B 批：observe 的结构证据 opt-in（透传 `includeStructure`；缺省不传 = 引擎 false）。 */
   include_structure?: boolean
+  /**
+   * P1-B：observe 的展示形态——`rows`（缺省，响应逐字节不变）| `tree`（追加 YAML 风格缩进树
+   * 文本 `tree` + `tree_chars`/`tree_bytes`）。引擎请求不变：JSON `elements` 仍是唯一事实面，
+   * `tree` 只是同一批行的可读视图。
+   */
+  format?: 'rows' | 'tree'
   screenshot?: boolean
   /** F76：tab op 的动作（缺省 'list'；非法值 = config_error 报闭集）。 */
   tab_action?: BridgeTabAction
@@ -242,6 +266,74 @@ function newSessionId(): string {
 
 function clip(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`
+}
+
+/**
+ * P1-B：`observe` 的 `format:"tree"` 渲染（纯展示面——JSON 仍是唯一事实面）。
+ *
+ * 只读 `elements`/`counts`/`frames`/`title`/`url` 这些既有键，不重算、不发明事实：按 `frame`
+ * 分组（组内保持原始行序），每行给 tag/label/text/label_source/hint_candidates，`actable`
+ * 显式化（`admitted` 为真 = 可 act；否则给既有的 `why_not_admitted` 原文，不另造判断）。
+ * 文本有界：至多 {@link OBSERVE_TREE_MAX_CHARS} 字符，行数上限仍由调用方的 `max` 决定；
+ * `chars`/`bytes` 是**整棵**文本的真实大小（截断时也如实报全量），调用方据此决定是否收窄。
+ */
+export function observeTreeText(result: Record<string, unknown>): { text: string; chars: number; bytes: number; truncated: boolean } {
+  const elements = Array.isArray(result['elements']) ? result['elements'].filter(isObj) : []
+  const counts = isObj(result['counts']) ? result['counts'] : {}
+  const frames = Array.isArray(result['frames'])
+    ? result['frames'].filter((f): f is string => typeof f === 'string')
+    : []
+  const lines: string[] = []
+  const title = typeof result['title'] === 'string' && result['title'] !== '' ? ` — ${result['title']}` : ''
+  lines.push(`observe: ${String(result['url'] ?? '')}${title}`)
+  const counter = ['elements', 'admitted', 'omitted']
+    .map((k) => (typeof counts[k] === 'number' ? `${k}=${String(counts[k])}` : ''))
+    .filter((s) => s !== '')
+    .join(' · ')
+  lines.push(`counts: ${counter === '' ? `elements=${String(elements.length)}` : counter}`)
+  let current: number | undefined
+  for (const el of elements) {
+    const frame = typeof el['frame'] === 'number' ? el['frame'] : 0
+    if (frame !== current) {
+      current = frame
+      const origin = typeof el['frame_origin'] === 'string' && el['frame_origin'] !== ''
+        ? ` · origin: ${el['frame_origin']}` : ''
+      const url = frames[frame]
+      lines.push(`- frame: ${String(frame)}${origin}${url === undefined ? '' : ` · url: ${url}`}`)
+    }
+    const source = typeof el['label_source'] === 'string' && el['label_source'] !== '' ? el['label_source'] : 'none'
+    const hints = Array.isArray(el['hint_candidates'])
+      ? el['hint_candidates'].filter((h): h is string => typeof h === 'string')
+      : []
+    lines.push(`  - ref: ${String(el['ref'] ?? '')}`)
+    lines.push(`    tag: ${String(el['tag'] ?? '')}`)
+    lines.push(`    label: ${JSON.stringify(typeof el['label'] === 'string' ? el['label'] : '')}`)
+    lines.push(`    text: ${JSON.stringify(typeof el['text'] === 'string' ? el['text'] : '')}`)
+    lines.push(`    label_source: ${source}`)
+    lines.push(`    actable: ${el['admitted'] === true ? 'true' : 'false'}`)
+    if (el['admitted'] !== true && typeof el['why_not_admitted'] === 'string' && el['why_not_admitted'] !== '') {
+      lines.push(`    why: ${JSON.stringify(clip(el['why_not_admitted'], 200))}`)
+    }
+    // P1-C3：容器链（内→外）——同 label 不同容器靠它区分：`<label> within:#<anchor>`。
+    // 只在有 id 祖先时输出（缺省不带行，与 JSON 侧同口径）。
+    const anchors = Array.isArray(el['anchor_ids'])
+      ? el['anchor_ids'].filter((a): a is string => typeof a === 'string' && a !== '')
+      : []
+    if (anchors.length > 0) lines.push(`    anchors: ${JSON.stringify(anchors)}`)
+    lines.push(`    hint_candidates: ${JSON.stringify(hints)}`)
+  }
+  const full = lines.join('\n')
+  const chars = full.length
+  const bytes = Buffer.byteLength(full, 'utf8')
+  if (chars <= OBSERVE_TREE_MAX_CHARS) return { text: full, chars, bytes, truncated: false }
+  const cut = full.lastIndexOf('\n', OBSERVE_TREE_MAX_CHARS)
+  const head = cut > 0 ? full.slice(0, cut) : full.slice(0, OBSERVE_TREE_MAX_CHARS)
+  return {
+    text: `${head}\n# … truncated at ${OBSERVE_TREE_MAX_CHARS} chars (full tree: ${chars} chars / ${bytes} bytes) — narrow with selector or lower max`,
+    chars,
+    bytes,
+    truncated: true,
+  }
 }
 
 /**
@@ -441,6 +533,14 @@ export class SessionManager {
           hint: 'without a visible window window would be a silent no-op, so it is rejected instead.',
         })
     }
+    // P1-C3：declared-DOM 解析开关。值闭集 + 非法值结构化拒绝（与 window/on_ambiguous 同一纪律）；
+    // 缺省不下发旗标（引擎缺省 = "declared"），spawn argv 与本改动前逐字节一致。
+    if (args.target_resolution !== undefined
+      && args.target_resolution !== 'off' && args.target_resolution !== 'declared') {
+      throw new SessionToolError('config_error',
+        `target_resolution must be one of off | declared (got ${JSON.stringify(args.target_resolution)})`,
+        { allowed_modes: ['off', 'declared'] })
+    }
     const id = newSessionId()
     const outDir = path.join(this.evidenceRoot, id)
     const recordPath = args.record === false ? null : path.join(outDir, 'actions.jsonl')
@@ -459,6 +559,7 @@ export class SessionManager {
       headful: args.headful === true,
       window: args.window ?? null,
       orphanIdleMs,
+      targetResolution: args.target_resolution ?? null,
     })
     const env = {
       ...buildEnv(this.options.bridge),
@@ -601,7 +702,7 @@ export class SessionManager {
     }
   }
 
-  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: BridgeWindowMode | null; orphanIdleMs?: number }): string[] {
+  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: BridgeWindowMode | null; orphanIdleMs?: number; targetResolution?: 'off' | 'declared' | null }): string[] {
     if (this.options.spawnArgv !== undefined) return this.options.spawnArgv(spec)
     // F80：CLI 侧孤儿兜底只兜"桥进程整个没了"的会话（双层 idle）——openSession 已按
     // max(600s, 2×ttl) 算好传入；spec 没带（旧测试缝/直接调用）= 既有 600s 逐字节不变。
@@ -613,6 +714,11 @@ export class SessionManager {
     if (spec.headful) args.push('--headful')
     // 有头窗口尺寸（--window）：bridge 已在 openSession 拒绝无头组合，这里只透传。
     if (spec.window !== null) args.push('--window', spec.window)
+    // declared-DOM 解析（P1-C3）：只在显式声明时透传——引擎缺省已是 "declared"，
+    // 不传旗标与本改动前 spawn argv 逐字节一致。
+    if (spec.targetResolution !== undefined && spec.targetResolution !== null) {
+      args.push('--target-resolution', spec.targetResolution)
+    }
     if (spec.recordPath !== null) {
       fs.mkdirSync(path.dirname(spec.recordPath), { recursive: true })
       args.push('--record', spec.recordPath)
@@ -783,6 +889,13 @@ export class SessionManager {
   /* ------------------------------------------------------------ 各 op */
 
   private async observe(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
+    // P1-B：展示形态只影响桥的输出（rows 缺省 = 逐字节不变；tree 追加一份可读视图）。
+    const format = args.format ?? 'rows'
+    if (format !== 'rows' && format !== 'tree') {
+      throw new SessionToolError('config_error',
+        `observe format must be one of rows | tree (got ${JSON.stringify(args.format)})`,
+        { allowed_formats: ['rows', 'tree'] })
+    }
     // 元素行投影走共享合同（element-view.ts）：与 …_inspect 同形同义（hint_candidates /
     // why_not_admitted / 同一 cap 表）。这里只决定行数钳制与信封字段，不手写字段裁剪。
     const max = clampElementMax(args.max, ELEMENT_DEFAULT_MAX)
@@ -797,7 +910,7 @@ export class SessionManager {
     if (response['ok'] !== true) return this.engineFailure(response, 'observe')
     const { elements, truncated } = projectElementViews(response['elements'], max)
     const counts = isObj(response['counts']) ? response['counts'] : undefined
-    return {
+    const result: SessionToolResult = {
       ok: true,
       op: 'observe',
       session_id: state.id,
@@ -811,6 +924,19 @@ export class SessionManager {
       // AX 证据块（引擎缺省附带，与 inspect 同口径）：原样透传——桥不发明、不重算；
       // 缺键 = 该响应没给（dry/replay 合成形状或旧引擎）。
       ...(isObj(response['ax']) ? { ax: response['ax'] } : {}),
+      // 就绪事实（引擎只在 elements 为空时给）：有才出、缺省不带键——形状与之前逐字节一致。
+      ...(isObj(response['readiness']) ? { readiness: response['readiness'] } : {}),
+    }
+    // P1-B：缺省（不传 / "rows"）不加任何键——响应形状与之前逐字节一致。
+    if (format !== 'tree') return result
+    const tree = observeTreeText(result)
+    return {
+      ...result,
+      format: 'tree',
+      tree: tree.text,
+      tree_chars: tree.chars,
+      tree_bytes: tree.bytes,
+      ...(tree.truncated ? { tree_truncated: true } : {}),
     }
   }
 
@@ -827,6 +953,16 @@ export class SessionManager {
     if ((actOp === 'fill' || actOp === 'select' || actOp === 'set_range') && args.value === undefined) {
       throw new SessionToolError('config_error', `act op '${actOp}' needs a value parameter (the tool never invents values)`)
     }
+    // P1-D-1：`selector` 在 act 面是 **CSS 查询面**，不是 hint。它只对 `scroll` 有意义
+    // （= 要滚的那个容器，与 `rows` 同一条路径）；其余 op 收到它 = 调用方把 CSS 当目标了，
+    // 必须说出来——静默忽略会让"我指定了目标"变成一个假事实。
+    if (args.selector !== undefined && actOp !== 'scroll') {
+      throw new SessionToolError('config_error',
+        `act op '${actOp}' does not take selector: selector is the CSS query surface, not a target hint — `
+        + `use target ("#id" / "tag[attr~substr]" / role word / bare token) for ${actOp}; `
+        + 'selector is only meaningful with act_op:"scroll" (the container to scroll)',
+        { allowed_act_ops_with_selector: ['scroll'] })
+    }
     const body: Record<string, unknown> = { type: BRIDGE_OP_ENGINE_TYPE.act, op: actOp, target: args.target ?? '' }
     // A2：歧义策略只在显式给值时进请求体（缺省由引擎给 fail）；引擎/CLI 仍是唯一的语义面，
     // 桥只做形状校验 + 透传。
@@ -842,6 +978,10 @@ export class SessionManager {
     if (args.value !== undefined) body['value'] = args.value
     if (args.to !== undefined) body['to'] = args.to
     if (args.by !== undefined) body['by'] = args.by
+    // P1-D-1：容器寻址的 CSS 面（引擎里与 `rows` 同一条路径、同一组几何证据）。不放进请求体
+    // 的话，引擎只能按合成目标走 `scrollDocument` 的"溢出最大元素"兜底——同一个 `by` 在每次
+    // 都被重渲染的页面（懒加载/地图面板）上会滚到不同容器，delta 与 scrollTop 对不上。
+    if (args.selector !== undefined) body['selector'] = args.selector
     // B1：失败截图 opt-in（缺省不传 = 会话不碰截图；只在动作失败时落盘）。
     if (args.screenshot === true) body['screenshot'] = true
     // F72：解析落空 + 页面未静默时的有界重扫 opt-in（true 才透传；缺省不传 = 引擎关）。
@@ -915,6 +1055,17 @@ export class SessionManager {
     // at_bottom 只增不减的解释力——它们回答"为什么没动"与"用的是哪条路径"。
     if (response['strategy'] === 'programmatic') out['strategy'] = 'programmatic'
     if (response['at_bottom'] === true) out['at_bottom'] = true
+    // P1-D-2：**容器身份**（引擎给才有）。只有 scrollTop/delta 时读者不知道滚的是哪个元素；
+    // `scroll_target_source:"fallback"` 明示"引擎在候选里替你挑了一个"，于是这件事不会被读成
+    // "按我说的滚了"；`ambiguous_candidates` 是那次挑选的候选数（>1 才出现，不阻断）。
+    const surface = response['scroll_target']
+    if (typeof surface === 'string' && surface !== '') out['scroll_target'] = surface
+    const source = response['scroll_target_source']
+    if (source === 'explicit' || source === 'rows' || source === 'fallback') out['scroll_target_source'] = source
+    const candidates = response['ambiguous_candidates']
+    if (typeof candidates === 'number' && Number.isFinite(candidates)) {
+      out['ambiguous_candidates'] = Math.max(0, Math.round(candidates))
+    }
     const raw = response['scroll']
     if (isObj(raw)) {
       const geo: Record<string, number> = {}
@@ -1166,6 +1317,8 @@ export class SessionManager {
       ...(typeof response['blank_rows'] === 'number' ? { blank_rows: response['blank_rows'] } : {}),
       ...(typeof response['settled'] === 'boolean' ? { settled: response['settled'] } : {}),
       ...(typeof response['scroll_settled'] === 'boolean' ? { scroll_settled: response['scroll_settled'] } : {}),
+      // P0-B：稳定门判不了时的失败原因（引擎有才有——稳定/超窗路径引擎不带，正常响应键集逐字节不变）。
+      ...(typeof response['settle_reason'] === 'string' ? { settle_reason: response['settle_reason'] } : {}),
       // C1：分页事实只在引擎给的时候透传（capped 或 offset>0 才出现）——旧响应键集逐字节不变。
       ...(typeof response['offset'] === 'number' ? { offset: response['offset'] } : {}),
       ...(typeof response['total'] === 'number' ? { total: response['total'] } : {}),
@@ -1277,6 +1430,8 @@ export class SessionManager {
       session_id: state.id,
       held: response['held'] === true,
       elapsed_ms: typeof response['elapsed_ms'] === 'number' ? response['elapsed_ms'] : undefined,
+      // P1-B3：超时诊断（仅 `held:false` + 单个 css 族信号时引擎才给）。有才出——成功路径形状不变。
+      ...(isObj(response['timeout_diagnostics']) ? { timeout_diagnostics: response['timeout_diagnostics'] } : {}),
     }
   }
 
@@ -1624,12 +1779,43 @@ export class SessionManager {
     }
   }
 
+  /**
+   * P0-B：`config_error` 的结构化逐字段问题（有才出，逐项有界）。
+   *
+   * 两个来源共用本键：会话 `extract` 的 `fields` 闭集（对象项 `field`/`kind`/`raw`/`attr`/`value`）
+   * 与 `signal`/`waitFor` 的形状校验（字符串项）。桥不重算、不补默认值——引擎不给 ⇒ 整键不出现，
+   * 失败面既有键集逐字节不变。`reason` 是给人读的整句，`problems` 是给机器/模型逐字段定位的。
+   */
+  private errorProblems(raw: unknown): Array<string | Record<string, unknown>> | undefined {
+    if (!Array.isArray(raw) || raw.length === 0) return undefined
+    const out: Array<string | Record<string, unknown>> = []
+    for (const item of raw.slice(0, PROBLEMS_MAX_ITEMS)) {
+      if (typeof item === 'string') {
+        out.push(clip(item, PROBLEM_TEXT_MAX_CHARS))
+        continue
+      }
+      if (!isObj(item)) continue
+      const row: Record<string, unknown> = {}
+      for (const k of ['field', 'kind', 'raw', 'attr'] as const) {
+        if (typeof item[k] === 'string') row[k] = clip(item[k], PROBLEM_FIELD_MAX_CHARS)
+      }
+      const value = item['value']
+      if (typeof value === 'string') row['value'] = clip(value, PROBLEM_FIELD_MAX_CHARS)
+      else if (typeof value === 'number' || typeof value === 'boolean' || value === null) row['value'] = value
+      if (Object.keys(row).length === 0) continue
+      out.push(row)
+    }
+    return out.length === 0 ? undefined : out
+  }
+
   private engineFailure(response: Record<string, unknown>, op: string): SessionToolResult {
     const ambiguity = this.ambiguityEvidence(response['ambiguity'])
     // A4：落空判别证据（引擎有才有；act 的 target_not_found 路径）。其它 op 的失败不带它。
     const diagnostics = this.missDiagnosticsEvidence(response['diagnostics'])
     // F6：歧义/落空的宽扫回传（引擎有才有——只在这两个停因出现；其它 op/停因缺键形状不变）。
     const wide = this.wideScanEvidence(response['wide_scan'])
+    // P0-B：逐字段结构化问题（extract 的 fields 闭集 / 信号形状；引擎有才有）。
+    const problems = this.errorProblems(response['problems'])
     return {
       ok: false,
       op,
@@ -1639,6 +1825,7 @@ export class SessionManager {
       // 其它失败面不设置 ⇒ 键集与之前逐字节一致）。桥不重算/不补键。
       ...(response['error'] === 'bad_selector' ? { error: 'bad_selector' as const } : {}),
       session_alive: true,
+      ...(problems === undefined ? {} : { problems }),
       ...(ambiguity === undefined ? {} : { ambiguity }),
       ...(diagnostics === undefined ? {} : { diagnostics }),
       // 形状判别提到顶层（与 diagnostics.shape_problem 同值）：agent 读失败面时"我写错了吗"

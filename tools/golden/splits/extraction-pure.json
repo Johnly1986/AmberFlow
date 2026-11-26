@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "extraction-pure",
-  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）；决策平面统一 P0：pageText 纯搬移到 state-text.ts（hash 不变，manifest 路径随迁）；stateText 同批搬移但新增 AMBERFLOW_STATE_TEXT_SCOPE=wide 的 opt-in 实现（非纯搬移，按 split-check 纪律从 manifest 移除）；ARIA 视图批（模型面元素接口三缺陷）：ARIA 行解析从 extraction.ts 的 `ARIA_LINE_RE` 常量改为 `aria-view.parseAriaInteractiveLine`（单引号 YAML 键 + name 还原），`ariaInteractiveLines`/`criteriaView` 的对齐判据改为逐项身份（`aria-view.ariaLinesAligned`）——均为**有意非纯搬移变更**，按 split-check 纪律把 `ARIA_LINE_RE`（已删除）与两个改动的函数从 manifest 删除，其余符号保持 hash 不动；帧门禁同主域免检批：`frameGateExcludes`（连同其新增私有助手）改为「子帧与任一声明条目同注册域即免检（双向两段近似；IP 精确相等）」，`frameGateOf` 的帧分类改走同一谓词（免检帧进 allowed、不再进 excluded）——均为有意非纯搬移变更，按 split-check 纪律把这两个符号从 manifest 删除，其余符号保持纯搬移 hash 不动",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）；决策平面统一 P0：pageText 纯搬移到 state-text.ts（hash 不变，manifest 路径随迁）；stateText 同批搬移但新增 AMBERFLOW_STATE_TEXT_SCOPE=wide 的 opt-in 实现（非纯搬移，按 split-check 纪律从 manifest 移除）；ARIA 视图批（模型面元素接口三缺陷）：ARIA 行解析从 extraction.ts 的 `ARIA_LINE_RE` 常量改为 `aria-view.parseAriaInteractiveLine`（单引号 YAML 键 + name 还原），`ariaInteractiveLines`/`criteriaView` 的对齐判据改为逐项身份（`aria-view.ariaLinesAligned`）——均为**有意非纯搬移变更**，按 split-check 纪律把 `ARIA_LINE_RE`（已删除）与两个改动的函数从 manifest 删除，其余符号保持 hash 不动；帧门禁同主域免检批：`frameGateExcludes`（连同其新增私有助手）改为「子帧与任一声明条目同注册域即免检（双向两段近似；IP 精确相等）」，`frameGateOf` 的帧分类改走同一谓词（免检帧进 allowed、不再进 excluded）——均为有意非纯搬移变更，按 split-check 纪律把这两个符号从 manifest 删除，其余符号保持纯搬移 hash 不动；P1-A 提取语义批（`label` 剔除 `style`/`script`/`noscript`/`template` 子树并加 CSS 防抖，新增 `text`/`label_source`）为**有意非纯搬移变更**，按同一纪律把 `ObserveRawRow` 从 manifest 删除（其余符号保持纯搬移 hash 不动）",
   "files": {
     "src/engine/elem-model.ts": {
       "symbols": {
@@ -54,7 +54,6 @@
         "MAX_CHOICES": "47af8724182f95c8383eefbc6fe954b694857097db21c216d63287540a8c800e",
         "MAX_ELEMENTS": "65d1cc62084a189120590259439d48f2a5ce9dba3fba15e2b445763a3d2ad73a",
         "observeElements": "4d80cc1644013f57f5be6a7d0bccd4f3e020aeea83dc1856949f68aff7c7f6d5",
-        "ObserveRawRow": "c3b168bcf43db284efac4386998ec2f506fa8cd86af9c03f3df44f8e6e237bc8",
         "poolSniff": "806b1e47c97da8ad8ce4f04caea58d951e8d0e94580553249076d44c8eee5c82",
         "probeExcludedHint": "05765154b8daed328ca695a72488d753d1b89581aa87ac117c3236c775c2da07",
         "viewportUnderload": "f96d2a759726cb0c2c52f6ec5a4e93b1db81e1788dcd3323fc371f17910336c7",

@@ -131,6 +131,13 @@ export interface ElementView {
   tag: string
   /** 完整标签（clip 到 LABEL_MAX_CHARS；引擎口径本就 ≤200）。 */
   label: string
+  /**
+   * P1-A：元素**可见文本**（去掉 style/script 子树后的内容文本；≤LABEL_MAX_CHARS）。
+   * observe 面才有：`aria-label` 优先时 `label` 是属性值，`text` 才是页面上的可见名。人读信息，不是地址。
+   */
+  text?: string
+  /** P1-A：`label` 的取值档位（闭集见引擎 `elem-model.ELEM_LABEL_SOURCES`）。observe 面才有。 */
+  label_source?: string
   /** label 被截断过（引擎报告的匹配口径截断或本层 clip）。 */
   label_truncated?: boolean
   /** 自证 hint 候选（≤HINTS_PER_ELEMENT 条）。可照抄。 */
@@ -150,6 +157,12 @@ export interface ElementView {
   href_full?: string
   /** 有界类名（≤8 × ≤40）。 */
   class_names?: string[]
+  /**
+   * E3：祖先 `id` 链（内→外、≤8 项、小写）——`within:#<id>` 的取值来源（observe 面才有）。
+   * **地址素材不是地址**：单独使用不构成 hint（写进 target 必须配合 `within:`）；桥只做有界化
+   * （≤8 项 × ≤40 字符，截断即不可寻址）；无 id 祖先时缺键。
+   */
+  anchor_ids?: string[]
   /** observe 面：bbox。 */
   bbox?: { x: number; y: number; w: number; h: number }
   /** observe 面：0 = 主 frame，frames[] 下标。 */
@@ -320,10 +333,19 @@ export function projectElementView(raw: unknown): ElementView | null {
   if (!isObj(raw)) return null
   const label = typeof raw['label'] === 'string' ? raw['label'] : ''
   const clippedLabel = label === '' ? '' : clip(label, LABEL_MAX_CHARS)
+  // P1-A：可见文本（observe 面才有；引擎侧本就 ≤LABEL_MAX_CHARS，桥只做兜底裁剪）。
+  const text = str(raw['text'], LABEL_MAX_CHARS)
+  // P1-A：label 的取值档位（闭集字符串；桥只做短标识有界化，不发明枚举值）。
+  const labelSource = str(raw['label_source'], IDENTITY_MAX_CHARS)
   const hints = strArray(raw['hint_candidates'], HINTS_PER_ELEMENT, HINT_MAX_CHARS)
   // 同一事实的两个引擎键名（observe `type` / inspect `input_type`）；桥侧统一投影成 `input_type`。
   const inputType = str(raw['input_type'], IDENTITY_MAX_CHARS) ?? str(raw['type'], IDENTITY_MAX_CHARS)
   const classNames = strArray(raw['class_names'], CLASS_NAMES_PER_ELEMENT, CLASS_NAME_MAX_CHARS)
+  // E3：祖先 id 链（≤8 项 × ≤40 字符，与引擎 ANCHOR_JS 的 ≤8 同界）。id 是地址素材，不补省略号
+  // （补了就不是 id）；非字符串项与空串丢弃，缺键/空数组 = 桥不出该键（不发明）。
+  const anchorIds = Array.isArray(raw['anchor_ids'])
+    ? raw['anchor_ids'].filter((x): x is string => typeof x === 'string' && x !== '').slice(0, 8).map((x) => x.slice(0, 40))
+    : []
   const framePath = strArray(raw['frame_path'], FRAME_PATH_MAX_ITEMS, FRAME_PATH_SEGMENT_MAX_CHARS)
   const capabilities = strArray(raw['action_capabilities'], 8, IDENTITY_MAX_CHARS)
   // F84 批 3：行上下文（仅同文案重复组元素携带；≤6 行 × ≤40 字符——引擎口径本就同界）。
@@ -348,6 +370,8 @@ export function projectElementView(raw: unknown): ElementView | null {
     tag: typeof raw['tag'] === 'string' ? raw['tag'] : '',
     label: clippedLabel,
     ...(clippedLabel.length < label.length || raw['label_truncated'] === true ? { label_truncated: true } : {}),
+    ...(text === undefined ? {} : { text }),
+    ...(labelSource === undefined ? {} : { label_source: labelSource }),
     hint_candidates: hints.items,
     ...(hints.truncated ? { hints_truncated: true } : {}),
     ...(bool(raw['admitted']) === undefined ? {} : { admitted: raw['admitted'] as boolean }),
@@ -357,6 +381,7 @@ export function projectElementView(raw: unknown): ElementView | null {
     ...(str(raw['href'], HREF_MAX_CHARS) === undefined ? {} : { href: str(raw['href'], HREF_MAX_CHARS) as string }),
     ...(str(raw['href_full'], HREF_MAX_CHARS) === undefined ? {} : { href_full: str(raw['href_full'], HREF_MAX_CHARS) as string }),
     ...(classNames.items.length ? { class_names: classNames.items } : {}),
+    ...(anchorIds.length ? { anchor_ids: anchorIds } : {}),
     ...(bbox === undefined ? {} : { bbox }),
     ...(num(raw['frame']) === undefined ? {} : { frame: num(raw['frame']) as number }),
     ...(str(raw['frame_origin'], IDENTITY_MAX_CHARS) === undefined ? {} : { frame_origin: str(raw['frame_origin'], IDENTITY_MAX_CHARS) as string }),

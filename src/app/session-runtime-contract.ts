@@ -220,6 +220,12 @@ export interface SessionOptions {
    */
   onAmbiguous?: "fail" | "act";
   /**
+   * declared-DOM 解析（`"off" | "declared"`）。`"declared"` = 池内落空后再在 DOM 里按同一份
+   * hint 形状做结构化解析（含 `within:` 容器作用域，见 engine/declared.ts），让 class-only 控件可寻址。
+   * 缺省 `"declared"`（与 app-runner 的 meta.policy.target_resolution 缺省同档）；`"off"` = opt-out。
+   */
+  targetResolution?: "off" | "declared" | null;
+  /**
    * S2/E5：稳定门（`--settle off` = 关）。关 = extract 不做滚动稳定判定
    * （响应不带 `scroll_settled`）、执行器抽池不等静默——与既有 settle 语义同源。
    */
@@ -229,6 +235,15 @@ export interface SessionOptions {
   verbose?: boolean;
   quiet?: boolean;
   env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * `SessionOptions.targetResolution` 的取值归一（**唯一缺省出处**）：只有显式 `"off"` 才关闭，
+ * 其余（缺省 / `null` / `"declared"`）一律 `"declared"`——与 app 面 meta.policy 缺省同档。
+ * 合法性校验在 CLI 入口（非法值 = 用法错误）；这里不猜、不兜底第二条路。
+ */
+export function sessionTargetResolution(opts: SessionOptions): "off" | "declared" {
+  return opts.targetResolution === "off" ? "off" : "declared";
 }
 
 /** 输出面：`respond` 一行一个 JSON 对象（stdout）；`log` 人话（stderr）。 */

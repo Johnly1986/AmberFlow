@@ -21,13 +21,24 @@
  *     draggable/hint_ref/frame），能力守门由调用方走既有 `actionCapabilities`。
  *   - 本模块不认识"模型"：不调用 provider，回捞元素不会进入 `ChoiceRequest.elems` 的
  *     模型投影（调用方在 pickInner 剥离 `declared` 旁路标记）。
+ *   - R2（in-row 行锚对等）：声明 `in-row:<token>` 时**收集面**给每个可见候选补行文本
+ *     （`row_texts`，与池/回捞/observe 同一 dup 门控 + 同一 `__rowClimb`），再由**同一个**
+ *     `rules.rowMatch` 判据过滤——行文本过滤是独立于匹配模式的**第三个 AND 条件**（attr 模式
+ *     经 `rowToElem` 透传后由 `hintCandidates` 的 inRow 限定自动消费；text 模式在宿主侧显式
+ *     过滤）。**fail-closed 对称**：没有 row_texts 的行（非重复组 / 未爬到行内容）恒不命中，
+ *     绝不退化成"祖先任意文本包含"。`row-index`（顺序行锚）仍不参与 DRF（位置性身份无法在
+ *     池外复现，见下方 declaredLookup 的门）。
  */
 import { framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
 
+// 注入页面的 pass 里用的字符上限**必须内插**（模板是 String.raw 文本，宿主的 import 进不了
+// 页面作用域；写成裸标识符就是页内 ReferenceError）。与 `pool-js-core` 的 `${FULL_LABEL_MAX}`
+// 同一条纪律（那里是 `const __TEXT_MAX = ${FULL_LABEL_MAX};`）。
+import { FULL_LABEL_MAX, MODEL_LABEL_MAX } from "./elem-model.ts";
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
-import { anchorChainMatch, hintCandidates, type HintMatchOptions } from "./rules.ts";
-import { ANCHOR_JS, compile } from "./pool-js.ts";
+import { anchorChainMatch, hintCandidates, rowMatch, type HintMatchOptions } from "./rules.ts";
+import { ANCHOR_JS, ROW_CLIMB_JS, compile } from "./pool-js.ts";
 import { parseHint } from "./hint.ts";
 
 /** P0-C：一个 DOM 侧候选（歧义/隐藏诊断用；只放人读字段，不放 locator）。 */
@@ -38,6 +49,13 @@ export interface DeclaredCandidate {
   id: string;
   frame: number;
   visible: boolean;
+}
+
+/** 页内 pass 求值失败的一帧（诊断事实；不改 eligible / total_matches 语义）。 */
+export interface DeclaredFrameEvalFailure {
+  frame: number;
+  /** 错误首行（≤120 字，有界）。 */
+  reason: string;
 }
 
 export interface DeclaredResolveResult {
@@ -56,6 +74,14 @@ export interface DeclaredResolveResult {
   hidden_matches: number;
   /** 可见匹配数。 */
   visible_matches: number;
+  /**
+   * 页内 pass **求值失败**的帧（≤3；只在真的失败时出现）。
+   *
+   * 为什么要有这条：`catch { continue }` 会把"注入脚本本身抛错"吞成"页面 0 命中"——DRF 因此
+   * 静默归零却没有任何证据（注入源码引用了页内不存在的标识符就是这样）。这里只记事实：
+   * `eligible`/`total_matches`/`hidden_matches` 的口径**不变**（失败的帧按跳过处理）。
+   */
+  frame_eval_failed?: DeclaredFrameEvalFailure[];
   /** 清理本次盖下的章（只删本批次值；候选 0/多也照清）。 */
   cleanup: () => Promise<void>;
 }
@@ -72,6 +98,16 @@ let declaredBatch = 0;
 
 type RawRow = Record<string, unknown>;
 
+/** 页内 pass 求值失败的记账上限（有界：一条落空停因不该被诊断撑爆）与 reason 首行上限。 */
+const MAX_FRAME_EVAL_FAILURES = 3;
+const MAX_FRAME_EVAL_REASON = 120;
+
+/** 异常 → 单行有界文案（Playwright 的错误首行够定位，Call log 多行不进 reason）。 */
+function errFirstLine(e: unknown): string {
+  const text = e instanceof Error ? e.message : String(e);
+  return text.split("\n")[0]!.trim().slice(0, MAX_FRAME_EVAL_REASON);
+}
+
 /**
  * attr 模式：在 ADMIT_SEL 投影上收集（含隐藏，可见性另记），一次 evaluate 每帧。
  * 返回行含 `i`（该帧 querySelectorAll 下标，盖章/回查用）与全部池同构字段。
@@ -83,7 +119,9 @@ type RawRow = Record<string, unknown>;
 const ATTR_COLLECT_BODY = String.raw`(arg) => {
   const g = globalThis;
 ${ANCHOR_JS}
+${ROW_CLIMB_JS}
   const out = [];
+  const visEls = [], visAt = [];
   let all;
   try { all = g.document.querySelectorAll(arg.sel); } catch (err) { return out; }
   for (let i = 0; i < all.length; i++) {
@@ -92,7 +130,7 @@ ${ANCHOR_JS}
     const full = String(
       e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
       || e.getAttribute("placeholder") || e.getAttribute("value") || "",
-    ).replace(/\s+/g, " ").trim().slice(0, FULL_LABEL_MAX);
+    ).replace(/\s+/g, " ").trim().slice(0, ${FULL_LABEL_MAX});
     const href = String(e.getAttribute("href") || "");
     let visible = true;
     try {
@@ -106,9 +144,10 @@ ${ANCHOR_JS}
     }
     const stamp = arg.tok + "-" + arg.frame + "-" + i;
     try { e.setAttribute("data-hintref", stamp); } catch (err) { /* 只读节点：按未盖章处理 */ }
+    if (visible) { visEls.push(e); visAt.push(out.length); }
     out.push({
       // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
-      i, stamp, tag, full_label: full, label: full.slice(0, MODEL_LABEL_MAX),
+      i, stamp, tag, full_label: full, label: full.slice(0, ${MODEL_LABEL_MAX}),
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
       dt: String(e.getAttribute("data-test") || ""),
@@ -123,6 +162,12 @@ ${ANCHOR_JS}
       ...(href ? { href_full: href } : {}),
       visible,
     });
+  }
+  // R2（in-row 对等）：只有声明 in-row 才付这份成本——可见候选做 dup 门控 + 行爬升，
+  // 非重复组/未爬到行内容 = 不出字段（fail-closed 与池面同一对称）。
+  if (arg.inRow !== undefined) {
+    const rt = __rowTextsFor(visEls);
+    for (let i = 0; i < rt.length; i++) if (rt[i] !== null) out[visAt[i]].rows = rt[i];
   }
   return out;
 }`;
@@ -139,6 +184,7 @@ const PASS_ATTR_COLLECT = compile("arg", `return (${ATTR_COLLECT_BODY})(arg);`);
 const TEXT_COLLECT_BODY = String.raw`(arg) => {
   const g = globalThis;
 ${ANCHOR_JS}
+${ROW_CLIMB_JS}
   const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
   const want = norm(arg.token);
   const doc = g.document;
@@ -168,10 +214,11 @@ ${ANCHOR_JS}
   // 优先最深：祖先候选（严格包含另一个候选）剪掉；同一元素只留一次。
   const deepest = found.filter((e) => !found.some((o) => o !== e && e.contains(o)));
   const out = [];
+  const visEls = [], visAt = [];
   for (let i = 0; i < deepest.length; i++) {
     const e = deepest[i];
     const href = String(e.getAttribute("href") || "");
-    const full = String(e.innerText || "").replace(/\s+/g, " ").trim().slice(0, FULL_LABEL_MAX);
+    const full = String(e.innerText || "").replace(/\s+/g, " ").trim().slice(0, ${FULL_LABEL_MAX});
     let visible = true;
     try {
       visible = e.checkVisibility ? e.checkVisibility({ checkVisibilityCSS: true }) : true;
@@ -184,9 +231,10 @@ ${ANCHOR_JS}
     }
     const stamp = arg.tok + "-" + arg.frame + "-" + i;
     try { e.setAttribute("data-hintref", stamp); } catch (err) { /* 只读节点：按未盖章处理 */ }
+    if (visible) { visEls.push(e); visAt.push(out.length); }
     out.push({
       // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
-      i, stamp, tag: String(e.tagName || "").toLowerCase(), full_label: full, label: full.slice(0, MODEL_LABEL_MAX),
+      i, stamp, tag: String(e.tagName || "").toLowerCase(), full_label: full, label: full.slice(0, ${MODEL_LABEL_MAX}),
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
       dt: String(e.getAttribute("data-test") || ""),
@@ -200,6 +248,11 @@ ${ANCHOR_JS}
       ...(href ? { href_full: href } : {}),
       visible,
     });
+  }
+  // R2（in-row 对等）：同 attr 模式——声明 in-row 才爬升；行文本与匹配模式无关（第三个 AND 条件）。
+  if (arg.inRow !== undefined) {
+    const rt = __rowTextsFor(visEls);
+    for (let i = 0; i < rt.length; i++) if (rt[i] !== null) out[visAt[i]].rows = rt[i];
   }
   return out;
 }`;
@@ -226,6 +279,11 @@ const rowToElem = (ref: string, frame: number, row: RawRow, fstamp: FrameStamp):
     // within（F-2：零额外代码）；text 模式在收集后按 row.anchors 显式过滤。
     ...(Array.isArray(row["anchors"]) && (row["anchors"] as string[]).length > 0
       ? { anchor_ids: (row["anchors"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
+    // R2（in-row 对等）：行文本底座透传（additive；未声明 in-row / 非重复组 = 字段省略，
+    // 合成行形状与此前逐字节一致）——attr 模式由此经 hintCandidates→limit→rowMatch **自动**
+    // 消费 in-row（零额外代码，与 anchor_ids 同一形状）。
+    ...(Array.isArray(row["rows"]) && (row["rows"] as string[]).length > 0
+      ? { row_texts: (row["rows"] as string[]).map((x) => String(x)) } : {}),
     ...(row["content_editable"] === true ? { content_editable: true } : {}),
     ...(row["draggable"] === true ? { draggable: true } : {}),
     ...(str("href") ? { href: str("href") } : {}),
@@ -246,6 +304,16 @@ const candidateOf = (frame: number, row: RawRow): DeclaredCandidate => ({
   frame,
   visible: row["visible"] === true,
 });
+
+/**
+ * R2（in-row 对等）：行文本判据走**同一个** `rules.rowMatch`（唯一出处）——`rowMatch` 只读
+ * `row_texts`，这里给它一个最小形状（不是第二个匹配实现：小写折叠 / 任一行 includes /
+ * 无 row_texts = 恒不命中全部由 rules 决定）。
+ */
+const rowTextsOk = (row: RawRow, token: string): boolean => {
+  const texts = Array.isArray(row["rows"]) ? (row["rows"] as string[]) : undefined;
+  return rowMatch({ row_texts: texts } as unknown as Elem, token);
+};
 
 /**
  * P0-C DRF：声明目标的一次 DOM 侧解析（只读；命中行在本批次盖章）。
@@ -272,10 +340,11 @@ export async function declaredLookup(
   };
   if (parsed === null) return out;
   // F82/F83 评审收口（fail-closed）：DRF 是 base 形状（attr 模式）/ base 文本（text 模式）的
-  // 恢复面——两种模式都不读 `row_texts`/`row_index` 底座。声明行锚时**不参与恢复**
-  // （eligible:false），让调用方落回既有 target_not_found + 行锚证据；绝不按 base 绕过行
-  // 约束动作（静默丢弃声明约束比显式落空更危险）。
-  if (parsed.inRow !== undefined || parsed.rowIndex !== undefined) return out;
+  // 恢复面——`row-index`（**顺序**行锚）不参与恢复（eligible:false）：位置性身份无法在池外
+  // 复现（ADMIT 收集秩序与池秩序不同），按 base 绕过序号动作比显式落空更危险。
+  // R2：`in-row`（**内容**行锚）相反——行内容是 DOM 事实、可在池外原样复算（下方收集面用同一
+  // dup 门控 + 同一 __rowClimb 补 row_texts，判据仍是同一个 rules.rowMatch），因此参与恢复。
+  if (parsed.rowIndex !== undefined) return out;
 
   const admitAll = admitSelectorWithJsFor(surfacePolicy);
   const attrSel = op === "scroll"
@@ -290,22 +359,33 @@ export async function declaredLookup(
   const frames = framesOf(page);
   const frameStamps = frames.map((fr) => elemFrameStamp(fr));
   const collected: Array<{ fi: number; row: RawRow }> = [];
+  /** 页内 pass 求值失败的有界事实（≤3 帧；只在真的失败时进结果）。 */
+  const evalFailures: DeclaredFrameEvalFailure[] = [];
   for (let fi = 0; fi < frames.length; fi++) {
     // P0-D：DRF 只在 host 信封内的 frame 上解析（排除帧不参与声明目标解析）。
     if (frameGateExcludes(fi, frames[fi]!, hosts)) continue;
     // A 批：声明链不匹配的帧不参与 DRF（frame:<origin> 声明的帧之外绝不动作）。
     if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, frames[fi]!)) continue;
     let raw: unknown;
+    // R2：in-row 声明随 arg 下发（收集面据此补 row_texts）；未声明时参数对象与今天逐字节同形。
+    const rowArg = parsed.inRow !== undefined ? { inRow: parsed.inRow } : {};
     try {
       raw = mode === "text"
-        ? await frames[fi]!.evaluate(PASS_TEXT_COLLECT, { token: bareToken, tok: stampPrefix, frame: fi })
-        : await frames[fi]!.evaluate(PASS_ATTR_COLLECT, { sel: attrSel, tok: stampPrefix, frame: fi });
-    } catch {
-      continue;                       // frame detached / 无执行上下文：跳过（与 hintLookup 同口径）
+        ? await frames[fi]!.evaluate(PASS_TEXT_COLLECT, { token: bareToken, tok: stampPrefix, frame: fi, ...rowArg })
+        : await frames[fi]!.evaluate(PASS_ATTR_COLLECT, { sel: attrSel, tok: stampPrefix, frame: fi, ...rowArg });
+    } catch (e) {
+      // 帧 detached / 无执行上下文：跳过（与 hintLookup 同口径）。**同时**把失败记成有界事实——
+      // 注入脚本自身抛错（页内自由标识符、语法版本…）时此前只能看到"DRF 跑了，0 命中"，
+      // 无法区分"页面没有"与"脚本根本没跑起来"。
+      if (evalFailures.length < MAX_FRAME_EVAL_FAILURES) {
+        evalFailures.push({ frame: fi, reason: errFirstLine(e) });
+      }
+      continue;
     }
     if (!Array.isArray(raw)) continue;
     for (const row of raw as RawRow[]) collected.push({ fi, row });
   }
+  if (evalFailures.length > 0) out.frame_eval_failed = evalFailures;
   const cleanup = async (): Promise<void> => {
     for (const fr of framesOf(page)) {
       try {
@@ -338,6 +418,11 @@ export async function declaredLookup(
           const anchors = Array.isArray(row["anchors"]) ? (row["anchors"] as string[]) : [];
           return anchorChainMatch(anchors, parsed.within!);
         });
+    // R2：行文本过滤是**独立的第三个 AND 条件**（与 text 模式的"innerText 全等 + 最深优先"
+    // 判据无关；收集面已给可见候选补 rows）。无 row_texts 的行恒不命中 = fail-closed 对称。
+    if (parsed.inRow !== undefined) {
+      matched = matched.filter(({ row }) => rowTextsOk(row, parsed.inRow!));
+    }
   } else {
     const pool: ElemPool = {};
     for (const { fi, row } of collected) {

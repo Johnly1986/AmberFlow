@@ -12,10 +12,15 @@
  * - `…_app_check` — load the script and dry-run its call sequence (no browser).
  * - `…_app_create`— generate a flow skeleton; the Agent edits the file itself.
  * - `…_run`       — run one flow app and return a compact summary of its artifacts.
- * - `…_inspect` / `…_status` / `…_online` — read-only page observation, environment facts, real-site
- *                   regression suite.
+ * - `…_status` / `…_test` — environment facts, real-site regression suite.
  * - `…_learn`     — one recording: induce signals and write a flow app only when a rules-only replay
  *                   of the generated script passes.
+ *
+ * `…_inspect` is **implemented but deliberately not registered** on the model surface: page
+ * observation belongs to `…_session` `op:"observe"`, and one-shot read-only recon (AX evidence,
+ * read-only CSS `probes`) stays on the CLI as `amber inspect --url <url> --json`. The tool body, the
+ * `ctx.amberflow.inspect` service door and the ElementView `inspect` face are all kept intact — see
+ * `EXPOSE_INSPECT_TOOL`.
  *
  * Trust boundary, stated out loud: the bridge spawns a foreign process from `repoPath`. It does not
  * route through the harness sandbox policy, so enabling this plugin means trusting that checkout.
@@ -64,6 +69,21 @@ import {
  */
 const OBSERVE_DISPLAY = 20
 const EXTRACT_DISPLAY = 20
+
+/**
+ * 模型可见工具面的开关：`…_inspect` 是否注册给模型。
+ *
+ * 产品决策（两派评估后的取舍）：`…_inspect` 与 `…_session` `op:"observe"` 都是"观察页面"，
+ * 两个入口在模型面上抢同一个槽位，描述里的能力边界会被读成重复。因此**观察入口收敛到
+ * `…_session` `op:"observe"`**；一次性只读勘察（AX 证据块、只读 CSS `probes`、`--summary`
+ * 这类一次性面）留在人类/脚本可用的 CLI：`amber inspect --url <url> --json`。
+ *
+ * 「不可见」不等于「不存在」：工具定义、`ctx.amberflow.inspect` 服务门、CLI
+ * `amber inspect`（`src/cli/commands/inspect.ts`）与合同表的 `inspect` face
+ * （`SESSION_ELEMENT_VIEW_FACES`）全部原样保留；本开关置 `true` 即把工具放回模型面，
+ * 无需改任何其它代码。类型写成 `boolean` 而不是字面量 `false`，避免 `if` 分支被判定为死代码。
+ */
+const EXPOSE_INSPECT_TOOL: boolean = false
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
@@ -818,7 +838,8 @@ export function apply(ctx: Context, config: Config): void {
     },
   }))
 
-  ctx.tools.register(defineTool({
+  // 工具体保留、注册受开关控制（模型面不再有这个工具）：见 EXPOSE_INSPECT_TOOL 的取舍说明。
+  const inspectTool = defineTool({
     name: `${toolPrefix}_inspect`,
     description:
       'Observe a live page read-only before writing a target hint: title, URL and verified hint '
@@ -902,7 +923,8 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.probes === undefined ? {} : { probes: args.probes }),
       })
     },
-  }))
+  })
+  if (EXPOSE_INSPECT_TOOL) ctx.tools.register(inspectTool)
 
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_test`,
@@ -1094,7 +1116,7 @@ export function apply(ctx: Context, config: Config): void {
       'Start a state-preserving authoring session against one live page. `open` returns `session_id`; '
         + 'then call `observe`/`act`/`goto`/`read`/`extract`/`signal`/`wait_for`/`snapshot`/`tab`; `close` ends '
         + 'it. Calls do not re-navigate, so SPA state survives. Use it to try a flow step by step or debug '
-        + 'one failing step; `*_inspect` is the one-shot read and `*_run` is completion truth: this tool '
+        + 'one failing step; `*_run` is completion truth: this tool '
         + 'never judges completion. `observe` returns verified hint candidates; `act` needs an explicit '
         + '`value`. Errors return `{ok:false, code, reason}` and keep the session alive. Sessions expire '
         + 'after an idle TTL. `drive` ops run the pilot in this session\'s page (same browser, no '
@@ -1184,10 +1206,11 @@ export function apply(ctx: Context, config: Config): void {
       },
       selector: {
         type: 'string',
-        description: 'read/observe/extract: CSS selector. read = element to read; extract = row selector; observe = the '
-          + 'observation set itself (it REPLACES the admission surface, so for controls inside a region write a '
-          + 'descendant selector such as `#region button, #region a`). Not a hint: hints are the 6-shape closed set, '
-          + 'selectors are the CSS query surface.',
+        description: 'act scroll: CSS container to scroll — same meaning as `rows` (not a hint). read/observe/extract: '
+          + 'CSS selector. read = element to read; extract = row selector; observe = the observation set itself (it '
+          + 'REPLACES the admission surface, so for controls inside a region write a descendant selector such as '
+          + '`#region button, #region a`). Not a hint: hints are the 6-shape closed set, selectors are the CSS query '
+          + 'surface.',
       },
       what: {
         type: 'string', enum: BRIDGE_READ_WHATS,
@@ -1198,7 +1221,9 @@ export function apply(ctx: Context, config: Config): void {
       rows: { type: 'string', description: 'extract: row CSS selector.' },
       fields: {
         type: 'object', additionalProperties: true,
-        description: 'extract: field map `{name: css | row text | @attr}`; same semantics as inline `ctx.extract`.',
+        description: 'extract: field map `{name: css | row text | @attr}`. `@` is a closed set: real HTML attributes + '
+          + 'pseudo-attr `@self` (visible text of the row element, same as `.`); unknown names such as `@innerText` are '
+          + 'refused with `config_error`. Session face only: inline `ctx.extract` keeps its own `@attr` semantics.',
       },
       max_items: { type: 'integer', description: 'extract: rows per page; `count` is the rows returned on this page, not the total.' },
       offset: {
@@ -1231,12 +1256,19 @@ export function apply(ctx: Context, config: Config): void {
         description: 'wait_for: poll window in milliseconds. goto: navigation timeout (integer '
           + `${BRIDGE_SESSION_TIMEOUTS.gotoMinMs}..${BRIDGE_SESSION_TIMEOUTS.gotoMaxMs}; engine default 30s).`,
       },
-      max: { type: 'integer', description: 'observe: maximum rows (same ElementView cap as `*_inspect` `max_elements`).' },
+      max: { type: 'integer', description: 'observe: maximum rows (ElementView cap, identical to the CLI `amber inspect --json`).' },
       include_hidden: { type: 'boolean', description: 'observe: include invisible elements.' },
       include_structure: {
         type: 'boolean',
         description: 'observe: include diagnostic-only `structure_path` evidence. It is unstable and not a hint; never '
           + 'copy it into a target.',
+      },
+      format: {
+        type: 'string', enum: ['rows', 'tree'],
+        description: 'observe: `rows` (default — the structured rows, response unchanged) or `tree` (adds a YAML-style '
+          + 'indented tree text: grouped by frame, one block per element with tag/label/text/label_source/'
+          + 'hint_candidates and explicit `actable`/`why`). `tree` is presentation only — the `elements` JSON stays '
+          + 'authoritative; `tree_chars`/`tree_bytes` report the full text size and the text itself is bounded.',
       },
       screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot. `act`: write a failure screenshot only when the '
         + 'action fails; only paths are returned.' },
@@ -1302,6 +1334,13 @@ export function apply(ctx: Context, config: Config): void {
         description: 'open: per-session idle TTL in milliseconds. Omit for the deployment default; `0` means '
           + `unlimited. Values 1..${BRIDGE_SESSION_IDLE.minExplicitMs - 1} are rejected with \`config_error\`; `
           + 'other ops passing it also return `config_error`. `op:"list"` rows echo the effective value.',
+      },
+      target_resolution: {
+        type: 'string', enum: ['off', 'declared'],
+        description: 'open: declared-DOM resolution. `declared` (engine default) lets a target resolve inside the DOM '
+          + 'after the pool misses — this is what makes class-only controls (no id/data-test/aria-label) addressable, '
+          + 'scoped by `within:#<container>` using the `anchor_ids` of an observe row. `off` disables that fallback. '
+          + 'Omit to keep the engine default without changing the spawn argv.',
       },
     },
     output: {
@@ -1410,8 +1449,21 @@ function renderSessionResult(value: Record<string, unknown>): string {
       ? '\ndispatch: unknown — the action may already have been dispatched (URL unchanged); '
         + 'do NOT retry a destructive action on this result, re-observe first'
       : ''
+    // P0-B：逐字段结构化问题（引擎给才有：extract 的 `fields` 闭集 / 信号形状）。`reason` 是
+    // 给人读的整句（可能被截断），`problems` 是逐字段定位——渲染成有界行，模型才能用上。
+    const problems = Array.isArray(value.problems) ? value.problems.slice(0, 10) : []
+    const problemLines = problems.map((raw) => {
+      if (typeof raw === 'string') return `  - ${raw.slice(0, 300)}`
+      const row = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+      const field = typeof row.field === 'string' ? row.field : '?'
+      const kind = typeof row.kind === 'string' ? row.kind : '?'
+      const what = typeof row.raw === 'string' ? row.raw : typeof row.attr === 'string' ? row.attr : ''
+      return `  - ${field}: ${kind}${what === '' ? '' : ` ${what}`}`
+    })
+    const problemsLine = problemLines.length === 0 ? '' : `\nproblems:\n${problemLines.join('\n')}`
     return `${tag}: ${String(value.code ?? 'error')}${value.reason === undefined ? '' : ` — ${String(value.reason)}`}`
       + (value.session_alive === true ? ' (session still alive)' : '')
+      + problemsLine
       + header
       + detail
       + blocked
@@ -1444,6 +1496,8 @@ function renderSessionResult(value: Record<string, unknown>): string {
             : 'NOT healed'} (${String(value.navigations ?? '?')} navs in ${String(value.window_ms ?? '?')}ms)`
           : '')
     case 'observe': {
+      // P1-B：format:"tree" 的展示面（JSON 事实面仍由结构化 value 承载；默认路径不变）。
+      if (value.format === 'tree' && typeof value.tree === 'string') return `${tag}\n${value.tree}`
       const el = Array.isArray(value.elements) ? value.elements : []
       // 行首 ✓/✗ 是**可寻址性**（不是好坏）：✓ = 有自证 hint，可直接抄进 act target；
       // ✗ = 这一行没有地址（容器/无唯一词面），抄它的 label 只会得到 target_not_found。

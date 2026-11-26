@@ -4,7 +4,7 @@
  * 为什么需要它：模型面剥离靠 `modelProjectionOf` 里**手写的 guard + 解构两处名单**——
  * 新增一个采集期事实字段时，只改一处或漏改都会让"诊断事实"静默进模型题面（或把核心字段
  * 静默剥掉）。本工具用一个携带全部采集期字段的合成池断言：
- *   ① 13 个采集期事实字段一个都不出现在模型面；
+ *   ① 全部采集期事实字段（含 P1-A 的 text / label_source：**带键也必须被剥离**）一个都不出现在模型面；
  *   ② 核心字段一个都不少、值不变；
  *   ③ 输入池不被改写（纯函数）；
  *   ④ 无诊断字段的行走快路径且语义不变；
@@ -21,7 +21,7 @@ import { esig, type Elem, type ElemPool } from "../src/engine/elem-model.ts";
 export const DIAGNOSTIC_FIELDS = [
   "surface", "href_full", "identity", "declared", "frame_origin", "frame_path",
   "structure_path", "structure_unstable", "row_texts", "row_index",
-  "contains_candidate", "kind", "prominence",
+  "contains_candidate", "kind", "prominence", "text", "label_source", "anchor_ids",
 ] as const;
 
 /** 核心字段（模型面必须保留；与本工具的合成池一致）。 */
@@ -30,7 +30,7 @@ const CORE: Record<string, unknown> = {
   href: "/next", input_type: "text", scan: 7, near: "结果卡",
 };
 
-/** 一行"脏"元素：核心字段 + 全部 13 个采集期字段。 */
+/** 一行"脏"元素：核心字段 + 全部采集期字段（含 text / label_source——本工具的泄漏双检面）。 */
 function dirtyElem(): Elem {
   return {
     ...CORE,
@@ -47,6 +47,9 @@ function dirtyElem(): Elem {
     contains_candidate: true,
     kind: "container",
     prominence: 1234,
+    text: "确认",
+    label_source: "aria-label",
+    anchor_ids: ["review-a", "rev"],
   } as unknown as Elem;
 }
 

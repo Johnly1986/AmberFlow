@@ -24,6 +24,7 @@
  */
 import type { Elem, ElemPool, PageLike } from "./extraction.ts";
 import { observeElements, urlOf, type ObserveRawRow } from "./extraction.ts";
+import type { ElemLabelSource } from "./elem-model.ts";
 import type { SurfacePolicy } from "./surface.ts";
 import { suggestHints } from "./rules.ts";
 import { countAxNotInPool, snapshotAx, type AxNode, type AxPageLike } from "./ax.ts";
@@ -61,6 +62,14 @@ export interface ObserveElement {
   tag: string;
   role?: string;
   label?: string;
+  /**
+   * P1-A（additive）：元素**可见文本**（去掉 style/script 子树后的内容文本，≤`labelMaxChars` 200）。
+   * 与 `label` 分开：`aria-label` 优先时 `label` 是属性值，`text` 才是页面上的可见名。
+   * 人读信息，**不是地址**（target 只认 `hint_candidates`）。
+   */
+  text?: string;
+  /** P1-A（additive）：`label` 的取值档位（闭集见 `elem-model.ELEM_LABEL_SOURCES`）；空标签为 `none`。 */
+  label_source?: ElemLabelSource;
   id?: string;
   name?: string;
   data_test?: string;
@@ -69,6 +78,14 @@ export interface ObserveElement {
   href?: string;
   /** 有界类名（≤8 个、每项 ≤40 字符）。 */
   class_names?: string[];
+  /**
+   * E3 additive：祖先 **`id`** 链（**内→外**、≤8 项、**小写**、元素自身不入链）——与 `declared.ts`
+   * 的 `anchor_ids` **同一口径**（共享 `ANCHOR_JS` 单源），所以 `within:<id>` 在池面与声明面同义。
+   * **它是地址素材，不是地址**：单独照抄不构成 hint；写进 target 必须配合 `within:`（`<label>
+   * within:#<id>`，链按**外→内**写）。无 id 祖先的行不带该键（缺键 = 该元素没有可声明的容器 id）。
+   * 实现界：≤8 项 × 每项 ≤40 字符（超出截断；截断后的 id 不可寻址）。
+   */
+  anchor_ids?: string[];
   visible: boolean;
   bbox?: ObserveBBox;
   /** 当前准入面（匹配 ADMIT_SEL + 可见 + 至少一条 hintMatch 自证 hint）可解析。 */
@@ -238,6 +255,9 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
     // A1 不变量：label === full_label 的前 40 字（同一 labelFull 截断）。
     label: labelFull.slice(0, 40),
     full_label: labelFull.slice(0, 200),
+    // P1-A：可见文本与来源档位透传（自证池与池行同构；两者都不参与 hint 匹配 / 去重签名）。
+    ...(row.text !== undefined && row.text !== "" ? { text: row.text } : {}),
+    ...(row.label_source === undefined ? {} : { label_source: row.label_source }),
     ...(row.data_test ? { data_test: row.data_test } : {}),
     ...(row.name ? { name: row.name } : {}),
     ...(row.id ? { id: row.id } : {}),
@@ -263,6 +283,15 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
 
 const orUndef = (s: string | undefined): string | undefined =>
   typeof s === "string" && s !== "" ? s : undefined;
+
+/**
+ * E3：`ObserveElement.anchor_ids` 的有界投影——≤8 项 × 每项 ≤40 字符（超出截断，空/缺 = 不带键）。
+ * 取数不在 TS 侧：OBSERVE_JS 经共享 `ANCHOR_JS` 产出（与 `declared.ts`/池面**同一份实现**，不另写一份）。
+ */
+function projectAnchorIds(ids: string[] | undefined): string[] | undefined {
+  if (!Array.isArray(ids) || ids.length === 0) return undefined;
+  return ids.slice(0, 8).map((id) => String(id).slice(0, 40));
+}
 
 /** 不可入池/不可解析的**可行动**原因（给 Agent 看的下一步，不是错误码堆叠）。 */
 function whyNotAdmitted(row: ObserveRawRow, classNames: string[] | undefined): string {
@@ -332,6 +361,8 @@ export async function observePage(
   }
   const elements: ObserveElement[] = collected.rows.map((row, i) => {
     const classNames = Array.isArray(row.class_names) && row.class_names.length > 0 ? row.class_names.slice(0, 8) : undefined;
+    // E3：祖先 id 链（内→外、≤8、小写）——`within:#id` 的地址素材；无 id 祖先 = 不带键。
+    const anchorIds = projectAnchorIds(row.anchor_ids);
     // A 批数据面 / B 批观察面：帧链两字段非空才出现（与既有可选字段同口径）；未知 origin
     // 帧两字段都缺（与池行一致，不编造 "null"/空串）。
     const frameOrigin = orUndef(row.frame_origin);
@@ -347,12 +378,16 @@ export async function observePage(
       tag: row.tag,
       ...(orUndef(row.role) === undefined ? {} : { role: row.role }),
       ...(orUndef(row.label) === undefined ? {} : { label: row.label }),
+      // P1-A：可见文本与来源档位（空文本/未知档位不出现 ⇒ 无该事实的行形状不变）。
+      ...(orUndef(row.text) === undefined ? {} : { text: row.text }),
+      ...(row.label_source === undefined ? {} : { label_source: row.label_source }),
       ...(orUndef(row.id) === undefined ? {} : { id: row.id }),
       ...(orUndef(row.name) === undefined ? {} : { name: row.name }),
       ...(orUndef(row.data_test) === undefined ? {} : { data_test: row.data_test }),
       ...(orUndef(row.type) === undefined ? {} : { type: row.type }),
       ...(orUndef(row.href) === undefined ? {} : { href: row.href }),
       ...(classNames === undefined ? {} : { class_names: classNames }),
+      ...(anchorIds === undefined ? {} : { anchor_ids: anchorIds }),
       visible: row.visible === true,
       ...(row.bbox === undefined ? {} : { bbox: row.bbox }),
       admitted: false,

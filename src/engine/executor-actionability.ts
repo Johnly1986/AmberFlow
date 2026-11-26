@@ -9,10 +9,47 @@
  */
 import { FN_HIT_RELATION } from "./eval-snippets.ts";
 import { hintCandidates } from "./rules.ts";
-import { firstLoc } from "./executor-pure.ts";
+import { firstLoc, type ActMissDiagnostics } from "./executor-pure.ts";
 import { actionCapabilities, type Elem, type ElemPool, type PageLike, frameAt, urlOf } from "./extraction.ts";
-import type { AnyLoc, AnyPage } from "./executor-types.ts";
-import type { BrowserMiddleware } from "./executor.ts";
+import { type ActionabilityDetail, type AnyLoc, type AnyPage } from "./executor-types.ts";
+import type { BrowserMiddleware, PageSnapshotEvidence } from "./executor.ts";
+
+/**
+ * P0-D：离屏目标的**自动救场**事实（`actionability.auto_scroll`）。
+ *   - `"applied"`：滚入视口后重试的那一次点击成功（动作正常返回，证据里标它做了救场）；
+ *   - `"attempted"`：滚过、重试仍失败（报原错误码，但"试过救场"是可判别事实）。
+ * 只对 offscreen 生效；covered（被第三方盖住）/zero-size 不重试——那会点在遮罩上。
+ */
+export type AutoScrollFact = "applied" | "attempted";
+
+/** 动作面注入的"滚入视口"原语（唯一实现 = executor-actions 的 `_scrollIntoViewWithEvidence`）。 */
+export type ScrollIntoView = (loc: AnyLoc) => Promise<{ ok: boolean }>;
+
+/** `not-actionable-or-covered:<什么>` 的 blocker 口径（无覆盖者时退回关系名）。 */
+function blockerOf(rel: HitRelation): string {
+  return rel.blocker ?? rel.relation;
+}
+
+/**
+ * 离屏救场：滚入视口 → **重试点击一次**（严格一次，无循环）。
+ * 返回 true = 重试那次点上了（调用方按已动作返回）；false = 没救回来（调用方报原错误码）。
+ * 注入的滚动原语缺失/自身失败都按没救回来处理——绝不因此当成功。
+ */
+async function scrollRescueClick(mw: BrowserMiddleware, loc: AnyLoc, timeoutMs: number,
+    scrollIntoView: ScrollIntoView | undefined): Promise<boolean> {
+  if (scrollIntoView === undefined) return false;   // 没注入原语 = 没救场（不写"试过"）
+  mw._lastAutoScroll = "attempted";
+  try {
+    const scrolled = await scrollIntoView(loc);
+    if (scrolled.ok !== true) return false;
+    await firstLoc(loc).click({ timeout: timeoutMs });
+    mw._lastAutoScroll = "applied";
+    return true;
+  } catch (e) {
+    mw._lastProbeError = describeActionFailure(e);
+    return false;
+  }
+}
 
 /**
  * 超时对账（**派发可能已发生**的唯一定性办法）：动作超时后，URL 与动作前不同即
@@ -126,15 +163,17 @@ export async function clickActionableAncestor(mw: BrowserMiddleware, page: AnyPa
 
 /**
  * 遮挡/可动作性预检（单动作面）：先打一次短探针真点击；超时后按中心命中关系分流——
- * 祖先命中 → 重定向到可动作祖先；第三方覆盖/零尺寸/离屏 → `not-actionable-or-covered:<blocker>`
- * + 结构化现场；自身命中 → 慢元素一次长重试，仍失败才 `action-timeout`。
+ * 祖先命中 → 重定向到可动作祖先；第三方覆盖/零尺寸 → `not-actionable-or-covered:<blocker>`
+ * + 结构化现场；**离屏 → 先滚入视口再重试一次**；自身命中 → 慢元素一次长重试，仍失败才
+ * `action-timeout`。
  * 返回 `"__clicked__"` = 探针已经完成真点击（调用方按已动作处理）。
  */
 export async function occlusionProbe(mw: BrowserMiddleware, page: AnyPage, el: Elem,
-    probeMs = 800, slowMs = 2500): Promise<string | null> {
+    probeMs = 800, slowMs = 2500, scrollIntoView?: ScrollIntoView): Promise<string | null> {
   mw._lastActionabilityDetail = null;
   mw._lastProbeError = null;
   mw._lastAncestorRetarget = null;
+  mw._lastAutoScroll = null;
   mw._lastTimeoutNavigated = false;
   const loc = await mw._locatorFor(page, el);
   if (loc === null) return "stale_ref";
@@ -160,8 +199,20 @@ export async function occlusionProbe(mw: BrowserMiddleware, page: AnyPage, el: E
       mw._lastActionabilityDetail = await mw._readActionabilityDetail(loc, reason);
       return reason;
     }
-    if (rel.relation === "covered" || rel.relation === "zero-size" || rel.relation === "offscreen") {
-      const reason = `not-actionable-or-covered:${rel.blocker ?? rel.relation}`;
+    if (rel.relation === "offscreen") {
+      // P0-D：离屏不是"点不到"，是"还没滚进来"——滚入视口后**再点一次**（严格一次）。
+      // 只救离屏：covered（被第三方盖住）时重试会点在遮罩上，零尺寸时滚了也还是点不到。
+      if (await scrollRescueClick(mw, loc, slowMs, scrollIntoView)) return "__clicked__";
+      const reason = `not-actionable-or-covered:${blockerOf(rel)}`;
+      const plain = await mw._readActionabilityDetail(loc, reason);
+      // "试过救场仍失败"是可判别事实（没注入原语 = 没试过 = 不写这个键）。
+      const detail: ActionabilityDetail & { auto_scroll?: AutoScrollFact } =
+        mw._lastAutoScroll === "attempted" ? { ...plain, auto_scroll: "attempted" } : plain;
+      mw._lastActionabilityDetail = detail;
+      return reason;
+    }
+    if (rel.relation === "covered" || rel.relation === "zero-size") {
+      const reason = `not-actionable-or-covered:${blockerOf(rel)}`;
       mw._lastActionabilityDetail = await mw._readActionabilityDetail(loc, reason);
       return reason;
     }
@@ -365,4 +416,171 @@ export function takeAncestorRetarget(mw: BrowserMiddleware): string | null {
   const out = mw._lastAncestorRetarget;
   mw._lastAncestorRetarget = null;
   return out;
+}
+
+/** 取走并清空「离屏自动救场」事实（一次动作只消费一次，与 `takeAncestorRetarget` 同纪律）。 */
+export function takeAutoScroll(mw: BrowserMiddleware): AutoScrollFact | null {
+  const out = mw._lastAutoScroll;
+  mw._lastAutoScroll = null;
+  return out;
+}
+
+/**
+ * P0-C/P0-D：**动作后取证**的一次装配（单动作面唯一入口）。
+ *
+ * 顺序有语义：先等稳定门（异步渲染落定），再拍 after 快照（此刻才是"动作之后"的页面），
+ * 然后才判 changed；`no_op_click` 只在"快照与目标子树都没动"时出现，`auto_scroll` 只回显
+ * 本次动作真的做过的离屏救场——三件事都是事实，谁也不冒充谁。
+ *
+ * 返回 `extra` = 直接展开进响应的附加键（缺事实就缺键，不动 `ok`/`stopCode` 的既有口径）。
+ */
+export async function afterActionEvidence(mw: BrowserMiddleware, page: AnyPage, loc: AnyLoc, op: string,
+    pre: PageSnapshotEvidence | null, clickSettled?: boolean): Promise<{ changed: boolean; extra: Record<string, unknown> }> {
+  const settled = await settleAfterClick(page, op, mw.clickSettled, clickSettled);
+  const post = await mw.snapshot(page, loc);
+  const changed = snapshotMoved(pre, post);
+  const noOp = noOpClickNote(op, changed, pre, post, settled);
+  const autoScroll = takeAutoScroll(mw);
+  return {
+    changed,
+    extra: {
+      ...(settled === null ? {} : { click_settled: settled }),
+      ...(autoScroll === null ? {} : { auto_scroll: autoScroll }),
+      ...(noOp === null ? {} : { diagnostics: noOp }),
+    },
+  };
+}
+
+/* ------------------------------------------------- P0-C：点击后的效果取证面 */
+
+/**
+ * P0-C：点击后的**稳定门**（页面侧单次往返）。展开/抽屉/评论加载都是异步渲染——点完立刻拍
+ * after 快照会把"真的展开了"读成 \`changed:false\`。语义 = 先过 two-frame，再等到 \`quietMs\`
+ * 内无 mutation；\`maxMs\` 是硬上限。rAF 被节流时用 setTimeout 兜底，绝不当场挂死。
+ *
+ * 与"能不能点到"（遮挡探针）同属动作面的**事实取证**：一个回答"点得到吗"，一个回答
+ * "点到了之后页面动没动"——两者共用同一套"读了就说、读不到就说不知道"的证据纪律。
+ */
+const CLICK_SETTLE_JS = async (arg: { quietMs: number; maxMs: number }): Promise<{
+  settled: boolean; waited_ms: number; mutations: number;
+}> => {
+  // 页面侧全局（本仓无 DOM lib：与其它 snippet 同一写法，运行期在页里执行）。
+  const g = globalThis as unknown as {
+    document: { documentElement: unknown } | null;
+    performance: { now(): number };
+    MutationObserver?: new (cb: () => void) => { observe(t: unknown, o: unknown): void; disconnect(): void };
+    requestAnimationFrame?: (cb: () => void) => unknown;
+    setTimeout: (cb: () => void, ms: number) => unknown;
+    clearTimeout: (t: unknown) => void;
+  };
+  const now = (): number => g.performance.now();
+  const t0 = now();
+  let last = t0;
+  let mutations = 0;
+  let mo: { observe(t: unknown, o: unknown): void; disconnect(): void } | null = null;
+  try {
+    if (g.MutationObserver !== undefined && g.document !== null) {
+      mo = new g.MutationObserver(() => { last = now(); mutations += 1; });
+      mo.observe(g.document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    }
+  } catch {
+    mo = null;
+  }
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const fire = (): void => { if (!done) { done = true; resolve(); } };
+    const timer = g.setTimeout(fire, 80);
+    if (typeof g.requestAnimationFrame === "function") {
+      g.requestAnimationFrame(() => g.requestAnimationFrame!(() => { g.clearTimeout(timer); fire(); }));
+    } else {
+      g.clearTimeout(timer);
+      fire();
+    }
+  });
+  while (now() - t0 < arg.maxMs && now() - last < arg.quietMs) {
+    await new Promise<void>((resolve) => g.setTimeout(resolve, Math.min(50, arg.quietMs)));
+  }
+  if (mo !== null) {
+    try { mo.disconnect(); } catch { /* the page may have navigated */ }
+  }
+  return { settled: now() - last >= arg.quietMs, waited_ms: Math.round(now() - t0), mutations };
+};
+
+/**
+ * P0-C：点击后的稳定门实测结论（\`actOnce\` 的 \`click_settled\` 证据）。
+ */
+export interface ClickSettleEvidence {
+  /** 等到静默（two-frame 之后 \`quietMs\` 内无 DOM mutation）= true；到 \`maxMs\` 仍在动 = false。 */
+  settled: boolean;
+  waited_ms: number;
+  /** 观察窗内数到的 mutation 批次数（页面到底动了几下）。 */
+  mutations: number;
+}
+
+/**
+ * P0-C：要不要等这一下。只服务 click/check；实例级 \`mw.clickSettled=null\` = 全局关，
+ * \`opts.clickSettled:false\` = 单次关。读不到页面结论 = null（缺键 = 没这份事实）。
+ */
+export async function settleAfterClick(page: AnyPage, op: string,
+    cfg: { quietMs: number; maxMs: number } | null, override?: boolean): Promise<ClickSettleEvidence | null> {
+  if (op !== "click" && op !== "check") return null;
+  if (override === false || cfg === null) return null;
+  try {
+    const raw = await page.evaluate(CLICK_SETTLE_JS, { quietMs: cfg.quietMs, maxMs: cfg.maxMs });
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const r = raw as Record<string, unknown>;
+    return {
+      settled: r["settled"] === true,
+      waited_ms: typeof r["waited_ms"] === "number" ? r["waited_ms"] : 0,
+      mutations: typeof r["mutations"] === "number" ? r["mutations"] : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * P0-C：\`changed\` = **页面状态内容**有没有变（url/title/正文/输入值/勾选/帧）。三个取证键
+ * （\`snapshot_scope\`/\`chars_scanned\`/\`target_text\`）说的是"怎么取的"，不算页面状态，必须排除。
+ */
+export function snapshotMoved(pre: PageSnapshotEvidence | null, post: PageSnapshotEvidence): boolean {
+  if (pre === null) return true;
+  const digest = (s: PageSnapshotEvidence): string => JSON.stringify({
+    url: s.url, title: s.title, text: s.text, vals: s.vals, checks: s.checks ?? "", frames: s.frames,
+  });
+  return digest(pre) !== digest(post);
+}
+
+/**
+ * P0-C：\`no_op_click\` 诊断块（成功但页面没动）。**不是新停因**：\`app.mjs\` 的 \`when\` 依赖既有
+ * stopCode 口径，把"点了没反应"升格为失败会破坏"点了就算完成"的流程——这里只把"确实什么都
+ * 没动"变成可判别事实，\`ok\`/\`stopCode\` 一律不动。判据 = 快照内容与目标子树文本**都**未变
+ * （两处都读得到才判）。形状不是 ActMissDiagnostics（这不是落空面），刻意只带自己的键。
+ */
+export interface NoOpClickDiagnostics {
+  /** 诊断码：点击已派发，但页面与目标子树都一字未变。 */
+  no_op_click: "snapshot_unchanged";
+  snapshot_scope: "element" | "document";
+  chars_scanned: number;
+  target_subtree_changed: false;
+  click_settled?: ClickSettleEvidence;
+}
+
+export function noOpClickNote(op: string, changed: boolean, pre: PageSnapshotEvidence | null,
+    post: PageSnapshotEvidence, settled: ClickSettleEvidence | null): (ActMissDiagnostics & Partial<NoOpClickDiagnostics>) | null {
+  if (op !== "click" && op !== "check") return null;
+  if (changed || pre === null) return null;
+  const before = pre.target_text;
+  const after = post.target_text;
+  if (before === undefined || after === undefined) return null;   // 元素子树读不到 = 不下结论
+  if (before !== after) return null;                              // 子树动了：不是空点击
+  // \`diagnostics\` 的声明类型是落空面（ActMissDiagnostics），它要求的候选清单在这里没有意义
+  // （目标解析成功了）——只带本诊断自己的键；两个类型都在别的模块，只能就地放宽。
+  return {
+    no_op_click: "snapshot_unchanged",
+    snapshot_scope: post.snapshot_scope,
+    chars_scanned: post.chars_scanned,
+    target_subtree_changed: false,
+    ...(settled === null ? {} : { click_settled: settled }),
+  } as unknown as ActMissDiagnostics & Partial<NoOpClickDiagnostics>;
 }

@@ -43,15 +43,16 @@ import { ADMIT_SEL, POOL_SEL, SURFACE_SELECTORS, admitSelectorWithJsFor, type Su
 /* ---- 纯区外搬（本轮拆分）：导出面由此处 re-export，既有 importer 零改动 ---- */
 import { firstOf, framesOf, urlOf } from "./page-shapes.ts";
 import { frameGateOf } from "./frame-scope.ts";
-import type { Elem, ElemPool } from "./elem-model.ts";
+import type { Elem, ElemLabelSource, ElemPool } from "./elem-model.ts";
 export {
-  ACTION_ADAPTERS, actionCapabilities, elemFamily, esig, extractSlots, filterElemsByFamily, firstIfSame, orderElemsByFamily,
+  ACTION_ADAPTERS, ELEM_LABEL_SOURCES, actionCapabilities, elemFamily, esig, extractSlots, filterElemsByFamily, firstIfSame, orderElemsByFamily,
 } from "./elem-model.ts";
 export type {
-  ActionAdapter, ActionCapability, ActionLocatorLike, Elem, ElemFamily, ElemPool, PoolBucket, PoolQuotas,
+  ActionAdapter, ActionCapability, ActionLocatorLike, Elem, ElemFamily, ElemLabelSource, ElemPool, PoolBucket, PoolQuotas,
 } from "./elem-model.ts";
 export { BUCKET_FILL_ORDER, BUCKET_ORDER, POOL_QUOTAS, QUOTA_MODE_QUOTAS, QUOTA_MODE_WIDE_QUOTAS, WIDE_QUOTAS } from "./elem-model.ts";
 export { firstOf, framesOf, urlOf } from "./page-shapes.ts";
+
 export {
   countAnyFrame, rowStatsAnyFrame, frameAt, frameGateOf, frameScopeEvidenceOf, framesScopedPage, locatorAnyFrame, splitFrameSuffixFromSelector,
 } from "./frame-scope.ts";
@@ -61,10 +62,6 @@ export type { FrameGate, FrameScopeEvidence, SplitSelectorFrameSuffix } from "./
 import type { FrameLike, PageLike } from "../support/page-like.ts";
 export type { FrameLike, InnerLoc, LocLike, PageLike } from "../support/page-like.ts";
 
-/**
- * P0-D：host 信封的**只读**判定（与执行器 `disallowedHost` 同一语义：hostname 精确或后缀）。
- * 帧 URL 无法解析 / about:blank / file: 等：返回 true（不可判 origin 时绝不擅自排除）。
- */
 /** 信封布尔视图：true = 在声明的 hosts 信封内。单源实现见 host-envelope.ts（L2 合并）。 */
 
 export { urlInHostsEnvelope } from "./host-envelope.ts";
@@ -151,33 +148,32 @@ export async function listenerCacheKeyOf(page: PageLike): Promise<string> {
 
 /* ------------------------------------------------------------------ discovery */
 
-/**
- * Discover the interactive elements the model and the executor may act on.
- * `jsProbe` runs the CDP listener walk first (cached per `listenerCacheKeyOf`:
- * URL + DOM fingerprint), so JS-only widgets (addEventListener divs) are stamped
- * `data-js-ref` and join the scan.
- */
-/**
- * Extract the interaction pool.
- *
- * `maxElements` defaults to the model-view budget (MAX_ELEMENTS). The executor may
- * ask for a WIDER pass once, when a decision came back below the confidence floor:
- * the pool is the model's entire world, so a target that never entered it cannot be
- * chosen no matter how good the model is (the observation bottleneck). Widening is
- * opt-in and costs one extra scan on the failure path only.
- */
 /** P0-A：一帧的原始观察行（JS 侧字段；`frame`/序号由 host 补）。 */
 export interface ObserveRawRow {
   tag: string;
   role?: string;
   label?: string;
+  /**
+   * P1-A additive：元素**可见文本**（去掉 style/script 子树后的内容文本；≤`FULL_LABEL_MAX`）。
+   * OBSERVE_JS 的 `labelInfoOf(e, tag, true)` 产出；空串由 observe 投影按缺键处理。
+   */
+  text?: string;
+  /**
+   * P1-A additive：`label` 的**取值档位**（闭集见 `elem-model.ELEM_LABEL_SOURCES`，不另定义）。
+   * 与 `label` 同一取值链、同一赋值处产出；空标签为 `none`。
+   */
+  label_source?: ElemLabelSource;
   id?: string;
   name?: string;
   data_test?: string;
   type?: string;
   href?: string;
   class_names?: string[];
-  /** E3：祖先链 id（小写、≤8、最近祖先在前）；无 id 祖先时 JS 侧不返回该字段。 */
+  /**
+   * E3 additive：祖先 **`id`** 链（内→外、≤8 项、小写；`ANCHOR_JS` 单源，与 `declared.ts` 的
+   * `anchor_ids` 同一口径）——`within:#id` 的取值来源。**地址素材不是地址**：单独使用不构成
+   * hint（写进 target 必须配合 `within:`）；无 id 祖先时 JS 侧不返回该键（缺省形状不变）。
+   */
   anchor_ids?: string[];
   /**
    * F82：行上下文文本（≤6 行 × ≤40 字符）——OBSERVE_JS **dup 门控**采集（观察集合内可见
@@ -746,10 +742,15 @@ export async function probeTextBbox(page: PageLike, token: string): Promise<{ hi
   };
 }
 
+/** class-only 处方的两面文案（会话没有 meta）：`prescription` 省略 = 既有 app 文案，逐字节不变。 */
+const CLASS_ONLY_FIX_SESSION = "retry the session with --target-resolution declared (declared-DOM resolution — already the session default; if it was on, this target has no unique visible match in the DOM either, narrow it with within:#<id> / in-row:<token>)";
+const CLASS_ONLY_FIX_APP = "enable declared-DOM resolution (meta.policy.target_resolution:\"declared\")";
+const CLASS_ONLY_FIX: Record<"session" | "app", string> = { session: CLASS_ONLY_FIX_SESSION, app: CLASS_ONLY_FIX_APP };
+
 /**
  * `target_not_found` 落定前的**只读 CSS 等价探测**——区分"池准入失败"与"页面没有"。
  *
- * 单一出处 = 本 helper（session act 诊断面与 run strict 面共用）；observe 面的人读文案
+ * 单一出处 = 本 helper（session act 诊断面与 run strict 面共用，处方经 `prescription` 按面给）；observe 面的人读文案
  * 另有镜像，不从这里取。探测口径与解析闭集对齐：
  *   - `#id` → `getElementById`；
  *   - `tag[attr=value]` / `tag[attr~substr]` → `querySelectorAll`（`~` 的 loose 子串 = CSS
@@ -764,7 +765,7 @@ export async function probeTextBbox(page: PageLike, token: string): Promise<{ hi
  * 的行锚取舍）。归一 = trim + 小写折叠两侧（bare 梯队 tier-0 同口径，不含内部空白折叠）。
  * 主帧 only（page.evaluate）；任何异常 = 返回 null（调用方 reason 逐字节不变，绝不抛栈）。
  */
-export async function probeHintInDom(page: PageLike, hint: string): Promise<HintInDomProbe | null> {
+export async function probeHintInDom(page: PageLike, hint: string, prescription?: "session" | "app"): Promise<HintInDomProbe | null> {
   let parsed: ParsedHint;
   try { parsed = parseHint(hint); } catch { return null; }
   const mode = parsed.kind === "id" ? "id"
@@ -862,12 +863,11 @@ export async function probeHintInDom(page: PageLike, hint: string): Promise<Hint
   const withId = Number(row.withId ?? 0);
   const withDataTest = Number(row.withDataTest ?? 0);
   const handle = withId > 0 && withDataTest > 0 ? "id/data-test" : withId > 0 ? "id" : withDataTest > 0 ? "data-test" : null;
+  // 处方按**面**给（`prescription` 省略 = 既有 app 文案，逐字节不变）：`meta.policy` 是 app 的概念。
   const note = handle === null
-    ? "class-only control(s) (no id/data-test stable handle) — the pool admission surface never collects "
-      + "them; give one a stable handle (id/[data-test]) or enable declared-DOM resolution "
-      + "(meta.policy.target_resolution:\"declared\")"
-    : `stable handle present (${handle}) but the matched element(s) stayed outside the pool `
-      + "(pool cap / surface policy / frame exclusion)";
+    ? "class-only control(s) (no id/data-test stable handle) — the pool admission surface never collects them; "
+      + "give one a stable handle (id/[data-test]) or " + CLASS_ONLY_FIX[prescription === "session" ? "session" : "app"]
+    : `stable handle present (${handle}) but the matched element(s) stayed outside the pool (pool cap / surface policy / frame exclusion)`;
   return { total: Number(row.total), matches, note };
 }
 

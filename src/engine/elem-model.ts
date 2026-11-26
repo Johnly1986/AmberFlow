@@ -14,11 +14,35 @@ export const FULL_LABEL_MAX = 200;
 /** 模型视图标签前缀上限（`label`；恒为 `full_label` 的前缀）。 */
 export const MODEL_LABEL_MAX = 40;
 
+/**
+ * `Elem.label_source` 的**封闭枚举**（P1-A additive；产出方 = `pool-js-core` 的 `labelInfoOf`）：
+ *   `aria-label` = `aria-label` 属性（**优先级最高且保持不变**——Google 九宫格磁贴的 aria-label
+ *   是一句位置描述，值本身正确，模型缺的是可见名，故另补 `Elem.text`）；
+ *   `label` = 表单控件标签面（`<label>` 包裹 / `label[for]` 关联 / placeholder / value 兜底）；
+ *   `text` = 可见文本（首个可见内容节点或 innerText）；`title` = `title` 属性；
+ *   `none` = 空标签（含只有 style/script 文本的元素，见池的「a/button 无标签不入池」规则）。
+ *   `name` / `id` / `data-test` 是**保留位**：当前标签链不读这三个属性（读了就改变既有 label =
+ *   行为变更），本实现不产出；将来加 identity 兜底档时才有值。
+ */
+export const ELEM_LABEL_SOURCES = ["aria-label", "label", "text", "title", "name", "id", "data-test", "none"] as const;
+export type ElemLabelSource = (typeof ELEM_LABEL_SOURCES)[number];
+
 export interface Elem {
   ref?: string;
   scan?: number;
   tag: string;
   label: string;
+  /**
+   * P1-A（additive）：元素**可见文本**——去掉 `style`/`script`/`noscript`/`template` 子树后的
+   * 内容文本（PUA 字形剥除 + 空白折叠 + trim），≤`FULL_LABEL_MAX`（= ElementView 合同
+   * `labelMaxChars` 200）。只由池行（EXTRACT_JS）产出：observe/inspect/桥面尚未透传。
+   */
+  text?: string;
+  /**
+   * P1-A（additive）：`label` 的**取值档位**（闭集见 {@link ELEM_LABEL_SOURCES}）。与 `label`
+   * 同一赋值链、同一出处落盘；标签为空时为 `none`。同样只由池行产出。
+   */
+  label_source?: ElemLabelSource;
   data_test?: string;
   /**
    * F75：A3 DOM 回退面合成行的探针句柄（`data-af-probe="<批次>-<序号>"` 的值）——run 决策步

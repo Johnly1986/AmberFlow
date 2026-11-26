@@ -409,10 +409,11 @@ ${ANCHOR_JS}
     // P0-A inspect 观察面（显式 opt-in，缺省不出字段 ⇒ 池/模型面/既有产物逐字节不变）：
     //   classNames=true → class_names（有界：≤8 个、每项 ≤40 字符，与 ctx.observe 同口径）；
     //   fullLabel=true  → label_full（**不截断**的完整标签；full_label 仍是 ≤200 的匹配口径）。
+    // Elem 的 additive 字段同在此落（同一次 labelInfoOf）：text = 可见文本、label_source = 取值来源。
     const classNames = arg.classNames && el && el.classList
       ? Array.from(el.classList).slice(0, 8).map((c) => String(c).slice(0, 40))
       : null;
-    const labelFull = arg.fullLabel && el ? labelOfRaw(el, r.tag) : null;
+    const labelInfo = el ? labelInfoOf(el, r.tag, true) : null;
     // B 批：结构证据 opt-in（缺省不出字段 ⇒ 池/模型面逐字节不变）；帧下标前缀进了
     // structure_path（截断在 JS 内完成，前缀也受同一 160 上限约束）。
     const structurePath = arg.structurePath === true && el
@@ -420,7 +421,8 @@ ${ANCHOR_JS}
       : null;
     return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label, full_label: r.full_label,
             ...(classNames && classNames.length ? {class_names: classNames} : {}),
-            ...(labelFull ? {label_full: labelFull} : {}),
+            ...(labelInfo ? {text: labelInfo.text, label_source: labelInfo.source} : {}),
+            ...(arg.fullLabel && labelInfo ? {label_full: labelInfo.label} : {}),
             ...(anchors.length ? {anchor_ids: anchors} : {}),
             ...(structurePath ? {structure_path: structurePath, structure_unstable: true} : {}),
             rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
@@ -504,7 +506,7 @@ ${ANCHOR_JS}
     rows.push({
       tag: tag,
       role: (e.getAttribute('role') || '').toLowerCase(),
-      label: labelOfRaw(e, tag),
+      ...(() => { const info = labelInfoOf(e, tag, true); return { label: info.label, text: info.text, label_source: info.source }; })(),
       id: e.id || '',
       name: e.getAttribute('name') || '',
       data_test: e.getAttribute('data-test') || '',
@@ -552,8 +554,6 @@ ${ANCHOR_JS}
   return { rows: rows, total: candidates, returned: rows.length };
 }`;
 
-
-
 /** One-pass extractor: shadow-aware collector + the row/label/visibility pass. */
 export const PASS_EXTRACT = compile("arg", `${COLLECT_JS}\nreturn (${EXTRACT_JS})(arg);`);
 /** P0-A：只有读的观察 pass（每帧一次往返；不盖章/不写 DOM）。 */
@@ -588,9 +588,9 @@ export const PASS_META = compile("sel", `return (${META_JS})(sel);`);
  *
  * F82 双累加器：爬升采集收口进共享 ROW_CLIMB_JS（本 pass 内插同一份）——`out`（near）累加序/
  * 行过滤/3 行窗口逐字符不动（near = out.slice(0,3) 逐字节相等，R1 结构性证明）；`rows`
- * （row_texts）独立行过滤（现行过滤 OR 连续数字 ≥5 位）、窗口 6 行；break 取并集
- * `(out.length>=3 && rows.length>=6)` ⇒ 新爬升 ⊇ 旧爬升。返回 `{near, rows}` 形态
- * （宿主 addNearContext：near 走既有唯一性 pick、rows 全量作 row_texts——仅重复组携带）。
+ * （row_texts）取行容器（第一层自身 dup 键唯一的内容层，R2 见该片段），窗口 6 行、长行截断 40。返回
+ * `{near, rows}` 形态（宿主 addNearContext：near 走唯一性 pick、rows 全量作 row_texts——仅重复组
+ * 携带；无 dup 页两字段都不出 ⇒ 采集形状与该页此前的池行一致）。
  */
 const NEAR_JS = String.raw`(arg) => {` + COLLECT_JS + ROW_CLIMB_JS + String.raw`
             const all = [];
@@ -618,7 +618,7 @@ const HINT_HEAD = String.raw`(arg) => {
             } catch (err) { /* 清理失败不阻断回捞：nonce 保证新章不与旧章同名 */ }
             const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
             const labelOf = (e) => {
-                const first = e.childNodes.length ? String(e.childNodes[0].textContent||'').trim() : '';
+                const first = __firstRowVisibleText(e);   // 首个可见内容节点（跳过 style/script 子树、CSS 防抖；同 VISIBLE_TEXT_BODY）
                 const live = (e) => { const t = String(e.tagName||'').toLowerCase(); return t === 'input' && /^(range|password|file|hidden)$/i.test(String(e.getAttribute('type')||'')); };  // 活值不是身份（同 LABEL_HELPERS_JS）
                 return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
                         (e.innerText||'').trim() || e.placeholder || (live(e) ? '' : e.value) || '').replace(/\s+/g,' ').trim();

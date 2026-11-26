@@ -432,7 +432,12 @@ export async function jsInteractiveWidgets(page: PageLike, maxAdd = JS_PROBE_MAX
  *
  * F82 双累加器（ROW_ANCHOR_HINT_PLAN §3.4）：与 near 共享同一次爬升（PASS_NEAR →
  * pool-js ROW_CLIMB_JS），两个累加器独立——`out`（near）累加序/行过滤/3 行窗口逐字符不动
- * ⇒ near 逐字节相等；`rows`（row_texts）独立行过滤（现行过滤 OR 连续数字 ≥5 位）、窗口 6 行。
+ * ⇒ near 逐字节相等；`rows`（row_texts）改为**独立行走**：行容器 = 与兄弟同构（`tag+id+class`
+ * 在同一父元素下出现 ≥2 次）的那一层，`rows` 取"首个产出内容行的祖先 → 行容器"为止的并集，
+ * **不越过行容器**（越过会把侧栏/面板抬头文本当成行词元）；单行截断到 40 字符、纯控件文本行
+ * （"更多 讚 回覆"）丢弃，预算仍是 ≤6 行 × ≤40 字符。网格层判定用**本元素自己的 dup 键**
+ * （tag+label），不用可见文本——两者不等时（可见文本「更多」而 dup 标签是 aria-label
+ * 「查看更多」）break 永不触发、爬升会越界。
  * row_texts **仅重复组携带**（本函数只碰 dup 元素）、不进模型面（modelProjectionOf 剥离）。
  *
  * F83（row_index 编号接线，纯宿主计算零页面往返）：dup 清单（dups，跨帧计数触发面不变）按

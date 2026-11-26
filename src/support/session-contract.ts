@@ -371,6 +371,18 @@ export const SESSION_ELEMENT_VIEW_FIELDS: readonly SessionElementViewField[] = [
     note: "人读信息：可读、不可当地址；照抄进 target 不构成寻址",
   },
   {
+    field: "text", engineObserve: "text", engineInspect: null, bridge: "text", faces: "observe",
+    caps: ["labelMaxChars"], address: false,
+    semantics: "元素**可见文本**（去掉 style/script 子树后的内容文本）——`aria-label` 优先时 label 是属性值，text 才是页面上的可见名",
+    note: "人读信息，不可寻址；引擎侧上限 = labelMaxChars（`elem-model` 的 `__TEXT_MAX`），桥再按同一界裁剪",
+  },
+  {
+    field: "label_source", engineObserve: "label_source", engineInspect: null, bridge: "label_source",
+    faces: "observe", caps: null, address: false,
+    semantics: "`label` 的取值档位（闭集 `aria-label` / `label` / `text` / `title` / `none`）",
+    note: "与 `label` 同一取值链、同一处产出（`pool-js-core` 的 `labelInfoOf`）；`name`/`id`/`data-test` 是保留位、当前不产出",
+  },
+  {
     field: "label_truncated", engineObserve: null, engineInspect: "label_truncated", bridge: "label_truncated",
     faces: "both", derived: ["observe"], caps: null, address: false,
     semantics: "`label` 被截断过（引擎匹配口径 200，或桥层按 `labelMaxChars` 再裁）",
@@ -397,6 +409,15 @@ export const SESSION_ELEMENT_VIEW_FIELDS: readonly SessionElementViewField[] = [
     field: "class_names", engineObserve: "class_names", engineInspect: "class_names", bridge: "class_names", faces: "both",
     caps: ["classNamesPerElement", "classNameMaxChars"], address: false,
     semantics: "有界类名清单",
+  },
+  {
+    field: "anchor_ids", engineObserve: "anchor_ids", engineInspect: null, bridge: "anchor_ids", faces: "observe",
+    caps: null, address: false,
+    semantics: "祖先 `id` 链（内→外、≤8 项、小写）——`within:#<id>` 的取值来源",
+    note: "**地址素材不是地址**：单独照抄不构成 hint，写进 target 必须配合 `within:`（链外→内）；"
+      + "与 `declared.ts` 的 `anchor_ids` 同一口径（共享 `ANCHOR_JS` 单源，池面/声明面 `within:` 同义）；"
+      + "无 id 祖先时缺键；实现界 ≤8 项 × 每项 ≤40 字符（截断后的 id 不可寻址），故不占 contract cap；"
+      + "只在 observe 元素行投影（inspect 元素行不带），不进模型面/`esig`/`firstIfSame`",
   },
   {
     field: "id", engineObserve: "id", engineInspect: "id", bridge: "id", faces: "both", caps: ["identityMaxChars"], address: false,

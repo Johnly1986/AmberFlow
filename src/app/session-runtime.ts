@@ -28,6 +28,7 @@ import { doActScroll } from "./session-act-scroll.ts";
 // A3 范围原语的会话面：act set_range 分支执行体在独立模块（doAct 存量行数只减不增）。
 import { doActSetRange } from "./session-act-range.ts";
 import { wideScanCandidates } from "./session-wide-scan.ts";
+import { observeReadiness } from "./session-readiness.ts";
 // F76/P3：tab 请求处理体（校验/匹配/切页）在独立模块（主文件只减不增）。
 import { doTabRequest, type TabOpDeps } from "./session-ops-extra.ts";
 // 会话内托管 pilot 驾驶：附着式 driver（状态机/响应投影在独立模块，主文件只加接线）。
@@ -44,9 +45,11 @@ import { extractElements } from "./candidate-scan.ts";
 // task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态）， 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
 import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
+import { hostsEnvelopeLogLine, normalizeHostsEnvelope, type HostsEnvelopeNormalization } from "../engine/host-envelope.ts";
 
-import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, closedSetReasonSuffix, displayHow, doRead, doSignal, doWaitFor, executionStateResponse, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, rowsSettled, rowsSettledDual, shapeProblemResponse } from "./session-runtime-evidence.ts";
-import { assertPageAlive, browserStartupProblem, FLAP_HEAL_SETTLE_MS, landedNavigationFacts, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
+import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, closedSetReasonSuffix, displayHow, doRead, doSignal, doWaitFor, executionStateResponse, extractSettleEvidence, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, shapeProblemResponse } from "./session-runtime-evidence.ts";
+import { extractFieldsReason, normalizeExtractFields } from "./session-extract-fields.ts";
+import { assertPageAlive, browserStartupProblem, FLAP_HEAL_SETTLE_MS, landedNavigationFacts, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, sessionTargetResolution, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
 export * from "./session-runtime-contract.ts";
 export { runSession } from "./session-runtime-entry.ts";
 
@@ -56,6 +59,8 @@ export class SessionRuntime {
   private readonly opts: SessionOptions;
   private readonly sink: SessionSink;
   private readonly hosts: string[] | null;
+  /** `hosts` 入参的归一化结果：`hosts` 本身只留规范形，这里保留"声明了什么、改写了什么"以便回显。 */
+  private readonly hostsNorm: HostsEnvelopeNormalization;
   private readonly maxRequestBytes: number;
 
   private readonly holder: { session: BrowserSession | null } = { session: null };
@@ -90,7 +95,8 @@ export class SessionRuntime {
     this.opts = opts;
     this.sink = sink;
     this.runId = runId ?? `${Date.now().toString(36)}-${process.pid}`;
-    this.hosts = opts.hosts && opts.hosts.length > 0 ? [...opts.hosts] : null;
+    this.hostsNorm = normalizeHostsEnvelope(opts.hosts);
+    this.hosts = this.hostsNorm.hosts.length > 0 ? this.hostsNorm.hosts : null;
     this.maxRequestBytes = intIn(opts.maxRequestBytes, 1_024, 16 * 1_048_576) ?? SESSION_DEFAULT_MAX_REQUEST_BYTES;
     this.outDir = opts.outDir && opts.outDir.trim() !== ""
       ? path.resolve(opts.outDir)
@@ -139,6 +145,7 @@ export class SessionRuntime {
         reobserve: true,
         // S2 稳定门：与 run 的缺省档一致（抽池前等页面静默）。
         settle: DEFAULT_SETTLE,
+        targetResolution: sessionTargetResolution(this.opts),
         ...(defaults.ambiguousOrdering === undefined ? {} : { ambiguousOrdering: defaults.ambiguousOrdering }),
         ...(defaults.idFallback === undefined ? {} : { idFallback: defaults.idFallback }),
         ...(defaults.actPoolCap === undefined ? {} : { actPoolCap: defaults.actPoolCap }),
@@ -281,7 +288,9 @@ export class SessionRuntime {
   /** 启动：给了 `--url` 就先 open（失败只报一行，不杀会话——人还可以再发 open）。 */
   async start(): Promise<void> {
     this.log(`session ${this.runId} — evidence dir ${this.outDir}`);
-    if (this.hosts !== null) this.log(`hosts envelope: ${this.hosts.join(", ")}`);
+    const hostsLog = hostsEnvelopeLogLine(this.hostsNorm);
+    if (hostsLog !== null) this.log(hostsLog);
+    if (this.hostsNorm.warning !== null) this.log(this.hostsNorm.warning);
     if (nonEmpty(this.opts.url)) {
       const resp = await this.dispatch({ type: "open", url: this.opts.url });
       // 自动 open 的响应没有请求 id（它不是某一行请求的回显），但形状与普通响应一致。
@@ -529,6 +538,8 @@ export class SessionRuntime {
         index, url, elements: rows.filter((e) => (e as { frame?: number }).frame === index).length,
       }));
     }
+    // 空元素时的就绪事实（additive）：有元素 = 零探测零新键，缺省响应逐字节不变。
+    Object.assign(extra, await observeReadiness(await this.page(), result));
     return { ...result, ...extra };
   }
 
@@ -721,7 +732,7 @@ export class SessionRuntime {
       ...navFacts,
       // E1-c：`#id` 直查兜底命中的解析通道证据（additive；其余路径键集不变）。
       ...(out.resolved_via === undefined ? {} : { resolved_via: out.resolved_via }),
-      ...amb,
+      ...missDiagnosticsResponse(out.diagnostics), ...amb,
       ...(await observeAfter(this.ctx(), req)),
     };
   }
@@ -743,8 +754,15 @@ export class SessionRuntime {
     }
     const fields = req["fields"];
     if (!isObj(fields) || Object.keys(fields).length === 0) {
-      return { ok: false, code: "config_error", reason: "extract needs a non-empty fields object {name: css | \".\" | \"@attr\"}" };
+      return { ok: false, code: "config_error", reason: "extract needs a non-empty fields object {name: css | \".\" | \"@attr\" | \"@self\"}" };
     }
+    // `@` 取属性是闭集（真实 HTML 属性 + 伪属性 @self，`@self` = 行可见文本并归一成 "."）：
+    // 未知名字在入口就是 config_error，不再静默给空串（区分「页面没内容」与「字段名写错」）。
+    const fieldsCheck = normalizeExtractFields(fields as Record<string, unknown>);
+    if (!fieldsCheck.ok) {
+      return { ok: false, code: "config_error", reason: extractFieldsReason(fieldsCheck.problems), problems: fieldsCheck.problems };
+    }
+    const cellFields = fieldsCheck.fields;
     const maxItems = intIn(req["maxItems"], 1, 500);
     const cap = maxItems ?? 500;
     // C1：offset = 续页起点（0-based 整数 0..10000）。非整数/越界 = config_error，
@@ -758,40 +776,21 @@ export class SessionRuntime {
       };
     }
     const offset = typeof rawOffset === "number" ? rawOffset : 0;
-    // 懒渲染稳定读（双指标缺省门）：`waitSettled` 语义默认化——双指标稳定门（行数 AND 空行数）
-    // **缺省运行**，与 E5
-    // 合并成同一个轮询循环（rowStatsAnyFrame 一次 evaluate 同时拿两个数，不另起第二个循环）：
-    //   - 缺省 / waitSettled:true（冗余兼容）：单循环双读，rows+blank 连续 2 轮相等 = 稳定
-    //     （静态页首轮即稳 ≈ 零额外等待）；`settled` 恒出现（additive 登记）；
-    //   - waitSettled:false = 请求级 opt-out：跳过双门，回到今天的 E5 单指标循环；
-    //     `settled` 不出现（无门无证据，绝不谎报稳定）；
-    //   - settle:"off"：双门与 E5 同跳（两键都不出现，键集与今天 settle-off 一致）。
-    // 超窗如实回 `settled:false`——抽取照常发生（读到的就是此刻事实），不无界等。
+    // 稳定读证据（三态编排与门本身都在 session-runtime-evidence；这里只接线）：
+    // 缺省双指标门 → settled（判不了 = false + settle_reason:"read_failed"）、opt-out → 仅
+    // scroll_settled、settle:"off" → 两键都不出现。抽取照常发生，超窗/判不了不无界等。
     if (req["waitSettled"] !== undefined && typeof req["waitSettled"] !== "boolean") {
       return { ok: false, code: "config_error", reason: `extract.waitSettled must be a boolean (got ${JSON.stringify(req["waitSettled"])})` };
     }
-    const settleOff = this.settleDisabled();
-    const dualGateOn = !settleOff && req["waitSettled"] !== false;
-    let settled: boolean | undefined;
-    let scrollSettled = true;
     this.extractStats.total = 0;
-    if (settleOff) {
-      // 双门与 E5 同跳：`settled`/`scroll_settled` 都不出现。
-    } else if (!dualGateOn) {
-      // opt-out：回到今天的 E5 单指标循环（请求级回滚出口）。
-      scrollSettled = await rowsSettled(() => this.page(), String(rows));
-    } else {
-      // 缺省门：单循环双指标（双门 + E5 口径同源）。
-      const dual = await rowsSettledDual(() => this.page(), this.hosts, String(rows));
-      settled = dual.settled;
-      scrollSettled = dual.scroll_settled;
-    }
+    const settle = await extractSettleEvidence(this.settleDisabled(), req["waitSettled"] as boolean | undefined,
+      () => this.page(), this.hosts, String(rows));
     // inline 形态：与 meta.site.listExtract 的声明走同一个 `ctx.extract` → `readRows` 实现
     //（MVP 只接 inline；named 需要 app pack，见 design §7）。
     let out: Array<Record<string, string>>;
     try {
       out = await this.ctx().extract({
-        rows, fields: fields as Record<string, string>, maxItems: cap,
+        rows, fields: cellFields, maxItems: cap,
       }, { offset });
     } catch (e) {
       // C2：非法选择器在 readRows 入口以 config_error + diagnostics.bad_selector 抛出。
@@ -810,7 +809,7 @@ export class SessionRuntime {
     // S2：空行事实（恒带——只是"本页返回行里所有字段都是空串的行数"，不猜骨架/未渲染，
     // 判读权在调用方）。先在本页行集合上数（零页面往返）；rowStats 读不到时再探测一次。
     let blankRows = out.filter((r) => Object.values(r).every((v) => String(v ?? "").trim() === "")).length;
-    if (settled === false) {
+    if (settle.settled === false) {
       const stats = await rowStatsAnyFrame(await this.page(), String(rows),
         this.hosts === null ? undefined : { hosts: this.hosts });
       if (stats !== null) blankRows = stats.blank;
@@ -820,11 +819,11 @@ export class SessionRuntime {
       // 空行事实（恒带——懒渲染页与"真没有值"的判别面；settled:false 时以全帧
       // rowStats 的空行数为准，不只数本页已 cap 的行）。
       blank_rows: blankRows,
-      // 稳定读证据（缺省路径恒出现——超窗 = false 如实回，不是失败；opt-out 与
-      // settle:"off" 无门无证据，键不出现）。
-      ...(settled !== undefined ? { settled } : {}),
-      // E5：滚动稳定证据（additive；settle:"off" 时不出现）。
-      ...(settleOff ? {} : { scroll_settled: scrollSettled }),
+      // 稳定读证据（引擎给才有：缺省门恒带 settled；判不了另带 settle_reason；opt-out 只有
+      // scroll_settled；settle:"off" 两键都不出现——键集与既有各路径一致）。
+      ...(settle.settled === undefined ? {} : { settled: settle.settled }),
+      ...(settle.settle_reason === undefined ? {} : { settle_reason: settle.settle_reason }),
+      ...(settle.scroll_settled === undefined ? {} : { scroll_settled: settle.scroll_settled }),
       // C1：分页事实只在「本页被 cap 挡住」或「offset>0」时出现——旧响应键集不变。
       ...(capped || offset > 0
         ? { offset, total, has_more: offset + count < total }

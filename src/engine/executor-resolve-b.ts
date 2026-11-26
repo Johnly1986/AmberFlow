@@ -7,6 +7,7 @@ import { type AmbiguityView, describeAmbiguity, orderCandidatesByDomPreorder } f
 import { type ActMissDiagnostics, type ActMissRow, actMissDiagnostics, actMissDiscrimination, nearCandidates, sigEq } from "./executor-pure.ts";
 import { _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
 import { foldNestedDuplicates } from "./executor-actionability.ts";
+import { _declaredActFallback, _declaredEvalFailedNote } from "./executor-resolve-declared.ts";
 import { type AnyLoc, type AnyPage } from "./executor-types.ts";
 import { PASS_DOM_FALLBACK, PASS_ID_FALLBACK, ambiguityStopReason } from "./executor.ts";
 import { type Elem, type ElemPool, type FrameLike, actionCapabilities, esig, frameHintFailureEvidence, framesOf, probeHintInDom, probeTextBbox } from "./extraction.ts";
@@ -38,6 +39,11 @@ import type { BrowserMiddleware } from "./executor.ts";
    * 命中 = `resolved_via:"rehydrate-rescan"`；仍未命中 = 既有诊断 + `rescan` 事实。
    * settle:"off"（或传感器失败）时 settle 结论为 null，门控信号不存在，重扫永不触发；
    * 显式 `rehydrateRescan:true` 声明仍被接受（兼容，不再有额外效果）。
+   *
+   * P0-C：本函数此前**没有 DRF 段**（DRF 只在 run 面 `runDeclaredTargets`/`runDeclaredHint`
+   * 的步内 resolver 里），于是 `ExecutorOptions.targetResolution` 对会话 act 面完全空转——
+   * `amber session` 里的 class-only 控件永远 target_not_found。DRF 现排在 A3 回退/重扫之后、
+   * AX 之前（见 `_declaredActFallback` 的纪律段）。
    */
 export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: string, op: string,
     onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean,): Promise<
@@ -138,6 +144,25 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
         }
         rescanFact = rescan.fact;
       }
+      // P0-C：DRF（声明目标解析）——池 / `#id` 直查 / A3 回退 / 重扫全落空后的 DOM 结构面，
+      // 排在 AX 之前（AX 是最后手段）。`off` = 第一句就 return null：零页面往返、零新键、
+      // 既有落空路径与 stopCode 逐字节不变。
+      const declaredAttempt = await _declaredActFallback(mw, page, target, op);
+      if (declaredAttempt !== null) {
+        if (declaredAttempt.kind === "hit") {
+          return {
+            ref: declaredAttempt.ref, el: declaredAttempt.el, loc: declaredAttempt.loc,
+            poolSize, fallback: true, cleanup: declaredAttempt.cleanup,
+          };
+        }
+        if (declaredAttempt.kind === "ambiguous") {
+          // 与命令步同一歧义口径：结构化 target_ambiguous + **零动作**，绝不猜。
+          return { error: declaredAttempt.reason, poolSize, stopCode: "target_ambiguous" as const };
+        }
+      }
+      /** 防御线：DRF 脚本在页内没跑起来时不留"静默归零"（无失败 = 空串，reason 不变）。 */
+      const declaredEvalNote = declaredAttempt !== null && declaredAttempt.kind === "miss"
+        ? _declaredEvalFailedNote(declaredAttempt.evalFailed) : "";
       // 第五档 AX 回退（解析链末端、全链真落空后的最后手段；本解析至多 1 次）——
       // AX 可交互有名节点与 hint 词面匹配，命中反解 DOM 盖临时探针章（FW8/A3 同纪律：
       // 身份寻址 + 用完清理）；>1 候选走同一 describeAmbiguity 谓词零动作。快照不可用/
@@ -158,11 +183,12 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
         };
       }
       const base = `target ${JSON.stringify(target)} matched nothing in a pool of ${poolSize} element(s)`;
-      if (wantDiagnostics !== true) return { error: base, poolSize };
+      if (wantDiagnostics !== true) return { error: base + declaredEvalNote, poolSize };
       // DOM 等价探测（只读，主帧；单一出处 = extraction.probeHintInDom）——命中 =
       // 元素在 DOM 却未进池的事实块 + reason 改写为"在 DOM 但未进池"级文案；未命中/探测
-      // 异常/不适用形状 = null → base 与 reason 逐字节不变。
-      const inDom = await probeHintInDom(page, target);
+      // 异常/不适用形状 = null → base 与 reason 逐字节不变。处方按**会话面**给
+      // （`--target-resolution declared`；`meta.policy` 是 app 概念，会话没有 meta）。
+      const inDom = await probeHintInDom(page, target, "session");
       const missBase = inDom === null
         ? base
         : `target ${JSON.stringify(target)} exists in the DOM (${inDom.total} match(es)) but none entered `
@@ -198,7 +224,7 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
         : `；rehydrate_rescan 已等 ${rescanFact.waited_ms}ms 重抽池（${rescanFact.pool_size} 项）仍未命中`;
       return {
         error: `${missBase}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`
-          + (frameNote ? ` — ${frameNote}` : "") + renderNote + rescanNote,
+          + (frameNote ? ` — ${frameNote}` : "") + renderNote + rescanNote + declaredEvalNote,
         poolSize, diagnostics,
       };
     }

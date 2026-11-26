@@ -61,6 +61,11 @@ export interface DeclaredMissFacts {
   mode: "attr" | "text";
   total: number;
   hidden: number;
+  /**
+   * 页内 pass **求值失败**的帧（≤3；只在真的失败时出现）。
+   * 有它 = "DRF 脚本在那些帧里根本没跑起来"，与"页面确实 0 命中"是两种事实。
+   */
+  eval_failed?: ReadonlyArray<{ frame: number; reason: string }>;
 }
 
 /** FW8 命中证据：无命中 = `{}`（trace 行键集逐字节不变）。 */
@@ -107,9 +112,15 @@ export function declaredHiddenSuffix(facts: DeclaredHiddenFacts | null): string 
 
 /** DRF 实跑且可见零命中的停因尾缀（只回显实测三数——`total`/`hidden`/`visible=0`）。 */
 export function declaredMissSuffix(facts: DeclaredMissFacts | null): string {
-  return facts === null ? ""
-    : ` — declared-DOM resolution (DRF, ${facts.mode} mode) ran: `
-      + `total=${facts.total}, hidden=${facts.hidden}, visible=0`;
+  if (facts === null) return "";
+  // 只在真的发生过页内求值失败时追加（无失败 = 尾缀与既有产物逐字节一致）。
+  const evalNote = facts.eval_failed === undefined || facts.eval_failed.length === 0
+    ? ""
+    : `; the DRF page-pass never ran in ${facts.eval_failed.length} frame(s) (`
+      + facts.eval_failed.map((f) => `frame=${f.frame} ${JSON.stringify(f.reason)}`).join("; ")
+      + ") — a collect-script error, not a page fact";
+  return ` — declared-DOM resolution (DRF, ${facts.mode} mode) ran: `
+    + `total=${facts.total}, hidden=${facts.hidden}, visible=0` + evalNote;
 }
 
 /**

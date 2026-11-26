@@ -142,6 +142,11 @@ export function executionStateResponse(state: "executed" | "unknown" | undefined
  * 时出现），会话层**原样**回显——与 `actionabilityResponse` 同一纪律：不重算、不补键。
  * 没有该字段（成功路径 / 非落空失败）= 响应键集与之前逐字节一致。
  */
+/**
+ * `diagnostics` 的原样透传（**成功面与失败面共用**）：成功面用它承载 `no_op_click`
+ * ——"动作成功但页面快照没变"的唯一载体；失败面用它承载形状/歧义诊断。
+ * 只透传不重算；`diag` 缺省时返回 `{}`，响应形状不变。
+ */
 export function missDiagnosticsResponse(diag: ActMissDiagnostics | undefined): Record<string, unknown> {
   return diag === undefined ? {} : { diagnostics: diag };
 }
@@ -246,6 +251,81 @@ export async function doSignal(ctx: Ctx, log: (line: string) => void, req: Recor
   return { ok: true, held, elapsed_ms: Date.now() - started };
 }
 
+/* ------------------------------------------------------ waitFor 超时诊断（css ≟ hint） */
+
+/**
+ * 只有**超时**才会问的那个问题：这条串其实是 act 的 `hint`，被误当成了 CSS 信号吗？
+ *
+ * 两套寻址语义互不覆盖：`css_*` 走原始 DOM / Playwright locator（`checkSignal`），而 act 的
+ * `target` 走 hint 的池字段匹配——`aria-label` 经 `poolFieldFor` 别名到提取期合成的 `label`，
+ * **不看 DOM 属性本身**。同一串于是可以"作为 hint 立即点中、作为 CSS 永远等不到"，作者只有
+ * 在等满超时之后才撞见这条差异。超时回执因此带一份可执行的对照事实。
+ *
+ * 判定只认 `ctx.waitForTarget`（observe + `hintMatch` 的唯一权威口径）。**不能**用
+ * `hint_candidates` 的成员判定：候选数组是"已自证唯一命中、可直接照抄的串"，不是"能命中的
+ * 写法"的集合——`button[aria-label="价格"]` 经 `label` 底座能命中，却永远不会出现在候选里；
+ * 拿成员判定会把"能点中"误报成"不是 hint"（反向假话），比不给诊断更坏。
+ *
+ * 触发面严格：`held === false` + **单个** css 族叶子算子 + 首参是字符串；复合信号
+ * （`all_of`/`any_of`/`not`）与 `manual`/`url_contains` 一律跳过（没有"一条选择器"可对照）。
+ * 只读、**单发**（`timeoutMs:1` 在 waitForTarget 的"至少查一次"语义下正好是一次判定，不做
+ * 二次等待）、有界；没真评过（抛错 / dry 面）就**不下结论**——绝不改写 `held:false` 这个既有事实。
+ */
+const WAITFOR_CSS_OPS: ReadonlySet<string> = new Set([
+  "css_exists", "css_visible_exists", "css_exists_text", "css_text_equals",
+  "css_text_contains", "css_value_equals", "css_count_equals", "css_count_min",
+]);
+
+/** 回执里的字符串都不得无界（与观察面 label 上限同口径；桥侧还会再截断一次）。 */
+const WAITFOR_DIAG_SELECTOR_MAX = 120;
+
+/** 结论在前：note 会被桥侧截断，第一个分句必须是"这行该怎么读"。 */
+function hintMatchableNote(count: number): string {
+  return `该串作为 hint 可命中 ${count} 个候选，但作为 CSS 不存在：css_* 走原始 DOM（Playwright locator），`
+    + "act 的 target 走 hint（池字段匹配，aria-label 已并进 label）。别把 hint 串当 CSS 信号等。"
+    // 多候选 = 这串当 act target 会歧义（缺省 on-ambiguous=fail），比"换个 CSS"更该先知道。
+    + (count > 1 ? "多候选时 act 默认报 target_ambiguous。" : "");
+}
+
+const WAITFOR_HINT_UNMATCHABLE_NOTE = "该串既不能作为 CSS 命中，也不能作为 hint 命中："
+  + "css_* 走原始 DOM，act 的 target 走 hint（池字段匹配）。"
+  + "先用 observe 抄 hint_candidates，或改用与 DOM 一致的 CSS。";
+
+function clipChars(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+/** `null` = 本次超时没有可对照的选择器（调用方据此保持既有响应形状不动）。 */
+async function waitForTimeoutDiagnostics(
+  ctx: Ctx, spec: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const ops = Object.keys(spec);
+  const op = ops.length === 1 ? ops[0]! : "";
+  if (!WAITFOR_CSS_OPS.has(op)) return null;
+  const raw = spec[op];
+  // 1 参算子可写标量或 1 项数组（同一取值口径）；2 参算子的首项才是选择器。
+  const selector = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof selector !== "string" || selector.trim() === "") return null;
+  const cssSelector = clipChars(selector, WAITFOR_DIAG_SELECTOR_MAX);
+  let probe: { found: boolean; count: number; dry?: boolean };
+  try {
+    probe = await ctx.waitForTarget(selector, { timeoutMs: 1 });
+  } catch {
+    // 判定没跑成（页面已死/参数被拒）：只有"问过什么"是事实，不给结论。
+    return { css_selector: cssSelector };
+  }
+  // dry 面合成 `{found:false, dry:true}`（没真评），与抛错同一条纪律：不冒充"不是 hint"。
+  if (probe.dry === true) return { css_selector: cssSelector };
+  const matchable = probe.found === true;
+  const count = matchable ? Math.max(0, Math.trunc(Number(probe.count) || 0)) : 0;
+  return {
+    css_selector: cssSelector,
+    hint_matchable: matchable,
+    hint_match_count: count,
+    note: matchable ? hintMatchableNote(count) : WAITFOR_HINT_UNMATCHABLE_NOTE,
+  };
+}
+
 export async function doWaitFor(ctx: Ctx, log: (line: string) => void, req: Record<string, unknown>): Promise<Record<string, unknown>> {
   const parsed = signalSpec(req);
   if (!parsed.ok) return parsed.resp;
@@ -254,6 +334,17 @@ export async function doWaitFor(ctx: Ctx, log: (line: string) => void, req: Reco
   const started = Date.now();
   const held = await ctx.waitFor(parsed.spec as never, { timeoutMs, pollMs });
   log(`waitFor held=${held} (${Date.now() - started}ms)`);
+  if (!held) {
+    // `elapsed_ms` 在诊断之前取：那段时间只属于"等"，不属于超时后的回执整理。
+    const elapsedMs = Date.now() - started;
+    const diag = await waitForTimeoutDiagnostics(ctx, parsed.spec);
+    if (diag !== null) {
+      return {
+        ok: true, held, timeout_ms: timeoutMs, poll_ms: pollMs, elapsed_ms: elapsedMs,
+        timeout_diagnostics: diag,
+      };
+    }
+  }
   return { ok: true, held, timeout_ms: timeoutMs, poll_ms: pollMs, elapsed_ms: Date.now() - started };
 }
 
@@ -284,6 +375,13 @@ export async function rowsSettled(
   return false;
 }
 
+/** 稳定门的结论：`settle_reason` 只在门**判不了**时出现（缺省 = 窗口到点仍在变）。 */
+export type SettleGateResult = {
+  settled: boolean;
+  scroll_settled: boolean;
+  settle_reason?: "read_failed";
+};
+
 /**
  * 懒渲染稳定读（双指标缺省门）：rows 选择器的**双指标**稳定判定（会话 extract 缺省门）——行数与空行数
  * （`rowStatsAnyFrame`，一次 evaluate 同时拿两个数）连续 2 轮相等即稳定；返回值同时
@@ -292,12 +390,18 @@ export async function rowsSettled(
  * 单循环双读：双门与 E5 共用同一轮询，不另起第二个循环（默认化的真实成本 ≈ 0）。
  * 空行数单独盯：懒渲染页的行数可以先稳定（骨架节点已挂载）而内容还在灌——只看行数
  * 会提前放行，代理只能用重复 extract 轮询把这笔税交出去。窗口与 E5 同款（600ms ×
- * 至多 5 轮）；读不到（替身页/帧全失联）= 稳定（让 extract 本体去报结构化结果，这里
- * 不抢答）。超窗 = `{settled:false, …}` 如实回——抽取照常发生，不无界等。
+ * 至多 5 轮）；超窗 = `{settled:false, …}` 如实回——抽取照常发生，不无界等。
+ *
+ * **读不到 ≠ 稳定**：`read()` 返回 null（替身页无帧面/帧全失联/page() 抛错）时既没有
+ * 行数也没有空行数事实，绝不能给 `settled:true`——那是「判不了」冒充「已稳定」，与
+ * `settle.ts` 的「失败即 settled:false」纪律相反（同一类矛盾会让调用方拿着"稳定"去
+ * 信任一批尚不存在的内容）。此时**必须** `settled:false` + `settle_reason:"read_failed"`；
+ * `scroll_settled` 也只按**已观测到**的连续相等回（没读到过 = false），不借「读不到
+ * 就不阻断」的旧口径谎报滚动稳定。`settle_reason` 缺席 = 窗口到点仍在变（超窗）。
  */
 export async function rowsSettledDual(
   page: () => Promise<PageLike>, hosts: string[] | null, rowsSel: string,
-): Promise<{ settled: boolean; scroll_settled: boolean }> {
+): Promise<SettleGateResult> {
   const read = async (): Promise<{ rows: number; blank: number } | null> => {
     try {
       return await rowStatsAnyFrame(await page(), rowsSel,
@@ -307,18 +411,51 @@ export async function rowsSettledDual(
     }
   };
   let prev = await read();
-  if (prev === null) return { settled: true, scroll_settled: true };
+  // 首读即判不了：没有任何双指标事实，稳定门只能给 false（不是"稳定"）。
+  if (prev === null) return { settled: false, scroll_settled: false, settle_reason: "read_failed" };
   let rowsEverStable = false;
   for (let round = 0; round < 4; round++) {
     await sleepMs(600);
     const now = await read();
-    if (now === null) return { settled: true, scroll_settled: true };
+    // 窗口内读失：已拿到的连续相等事实照记（不早退），但稳定结论只能是 false。
+    if (now === null) return { settled: false, scroll_settled: rowsEverStable, settle_reason: "read_failed" };
     const rowsStable = now.rows === prev.rows;
     rowsEverStable = rowsEverStable || rowsStable;
     if (rowsStable && now.blank === prev.blank) return { settled: true, scroll_settled: true };
     prev = now;
   }
   return { settled: false, scroll_settled: rowsEverStable };
+}
+
+/**
+ * 会话 extract 的**稳定门编排**（缺省双指标门 / 请求级 opt-out / settle off 三态）：
+ * 只决定「跑不跑门、跑哪个门」，再把门的结论摊成 extract 响应的证据键（引擎给才有）。
+ *
+ * 三态口径：
+ *   - settleOff（meta.policy.settle === 'off'）：双门与 E5 同跳——两键都不出现（无门无证据）；
+ *   - waitSettled === false：请求级 opt-out，只跑 E5 单指标滚动门 → 仅 scroll_settled；
+ *   - 其余（缺省 / waitSettled:true）：双指标门（行数 AND 空行数两轮稳定）→ settled +
+ *     scroll_settled，判不了时另带 settle_reason:'read_failed'（见 {@link rowsSettledDual}）。
+ * 抽取本体不在这里：本函数只回证据，读到的行由调用方照常抽取（超窗也照抽）。
+ */
+export type ExtractSettleEvidence = {
+  settled?: boolean;
+  settle_reason?: "read_failed";
+  scroll_settled?: boolean;
+};
+
+export async function extractSettleEvidence(
+  settleOff: boolean, waitSettled: boolean | undefined,
+  page: () => Promise<PageLike>, hosts: string[] | null, rowsSel: string,
+): Promise<ExtractSettleEvidence> {
+  if (settleOff) return {};
+  if (waitSettled === false) return { scroll_settled: await rowsSettled(page, rowsSel) };
+  const dual = await rowsSettledDual(page, hosts, rowsSel);
+  return {
+    settled: dual.settled,
+    ...(dual.settle_reason === undefined ? {} : { settle_reason: dual.settle_reason }),
+    scroll_settled: dual.scroll_settled,
+  };
 }
 
 /**

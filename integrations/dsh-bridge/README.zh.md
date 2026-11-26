@@ -11,9 +11,9 @@ kind: "package-bundle"
 
 `dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成面向模型的工具。AmberFlow 只有**一种**应用格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（或 checkout 里的夹具）里的 **flow 脚本**，导出 `meta` 与 `flow(ctx)`。控制流由脚本拥有——`if`、`for`、`while`、子函数——而每一步的目标、闸门、动作与完成信号由引擎决定，DOM 信号是唯一的完成真相。本桥不添加任何自己的浏览器或应用逻辑，只调用那个 checkout 的命令行并归纳其产物。
 
-插件提供**九个**工具：`amberflow_status`（环境/模型事实）、`amberflow_apps`（经 `amber apps list --json` 列出 flow 应用）、`amberflow_app_show`（元数据 + 当前 `app.mjs` 源码 + 版本锚点）、`amberflow_app_check`（加载 + dry 跑调用序列，不开浏览器）、`amberflow_inspect`（只读页面观察与 hint 候选）、`amberflow_session`（跨调用保持页面状态的 authoring 会话：open → observe → act → read/extract/signal → snapshot → close；**不判完成**——完成真相只在 `amberflow_run`）、`amberflow_app_create`（用 `amber apps new` 生成 flow 骨架）、`amberflow_run`（运行一个应用；`max_steps` 是执行预算）、`amberflow_learn`（把一次录制写成 flow 应用，落盘门槛是生成脚本的零模型调用回放）、以及 `amberflow_test`（真实站点回归套件）。`amberflow_inspect` 与 `amberflow_session op:"observe"` 共用**同一份元素行合同**（`src/element-view.ts`：同字段名——`hint_candidates` 不是 `hints`——同截断策略、同一 60/200 行数 cap、准入诊断原样透传；`ref` 只是展示锚，act 地址是 hint 字符串）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）设置统一决策服务三项（服务 URL、Token Key、ModelName——与引擎 CLI `amber config set` 写的是同一组 `AMBERFLOW_DECISION_*` 键）与执行参数两项（步间距、HEADFUL 开关）。
+插件提供**九个**工具：`amberflow_status`（环境/模型事实）、`amberflow_apps`（经 `amber apps list --json` 列出 flow 应用）、`amberflow_app_show`（元数据 + 当前 `app.mjs` 源码 + 版本锚点）、`amberflow_app_check`（加载 + dry 跑调用序列，不开浏览器）、`amberflow_session`（跨调用保持页面状态的 authoring 会话：open → observe → act → read/extract/signal → snapshot → close；**不判完成**——完成真相只在 `amberflow_run`）、`amberflow_app_create`（用 `amber apps new` 生成 flow 骨架）、`amberflow_run`（运行一个应用；`max_steps` 是执行预算）、`amberflow_learn`（把一次录制写成 flow 应用，落盘门槛是生成脚本的零模型调用回放）、以及 `amberflow_test`（真实站点回归套件）。**`amberflow_inspect` 刻意不对模型注册**——它与 `op:"observe"` 抢同一个"观察页面"槽位：模型面的观察走 `amberflow_session` `op:"observe"`，一次性只读勘察（AX 证据块、只读 CSS `probes`、`--summary`）走 CLI 的 `amber inspect --url <url> --json`。工具本身保留——工具体、`ctx.amberflow.inspect` 服务门、`amber inspect` CLI 与共享元素行合同的 `inspect` face 都在，只是注册面关掉（`EXPOSE_INSPECT_TOOL`）。CLI `amber inspect --json` 与 `amberflow_session op:"observe"` 共用**同一份元素行合同**（`src/element-view.ts`：同字段名——`hint_candidates` 不是 `hints`——同截断策略、同一 60/200 行数 cap、准入诊断原样透传；`ref` 只是展示锚，act 地址是 hint 字符串）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）设置统一决策服务三项（服务 URL、Token Key、ModelName——与引擎 CLI `amber config set` 写的是同一组 `AMBERFLOW_DECISION_*` 键）与执行参数两项（步间距、HEADFUL 开关）。
 
-Agent 的作者回路是 `amberflow_status` → `amberflow_apps` → `amberflow_app_show`（读 `path` 与当前源码）→ **用文件工具编辑 `app.mjs`** → `amberflow_app_check` → `amberflow_inspect`（写 hint 前先看真实页面）→ 带 `max_steps`/`trace` 的 `amberflow_run` 取结构化反馈 → 完整 `amberflow_run` → `amberflow_test`。没有“按步骤序号编辑”的接口：脚本没有静态步骤表，步骤是运行期事实，脚本版本就是唯一的流程版本。
+Agent 的作者回路是 `amberflow_status` → `amberflow_apps` → `amberflow_app_show`（读 `path` 与当前源码）→ **用文件工具编辑 `app.mjs`** → `amberflow_app_check` → `amberflow_session` `op:"observe"`（写 hint 前先看真实页面；一次性只读勘察含 AX 证据与只读 CSS `probes`，用 CLI `amber inspect --url <url> --json`）→ 带 `max_steps`/`trace` 的 `amberflow_run` 取结构化反馈 → 完整 `amberflow_run` → `amberflow_test`。没有“按步骤序号编辑”的接口：脚本没有静态步骤表，步骤是运行期事实，脚本版本就是唯一的流程版本。
 
 ## 目录
 
@@ -123,7 +123,7 @@ LLM 门是命令行层的可选项，需要运行 checkout 的机器上有 `OPEN
 | 面 | 怎么开 |
 |---|---|
 | 引擎 CLI | `amber run <app> --headful`；`amber inspect --url <URL> --headed`；`node tools/learn.ts --headful` |
-| DSH 工具 | `…_run` 传 `headful: true`、`…_inspect` 传 `headful: true`、`…_learn` 传 `headful: true`（或用 `cdp` 直接驱动你已经开着的浏览器） |
+| DSH 工具 | `…_run` 传 `headful: true`、`…_session` `op:"open"` 传 `headful: true`、`…_learn` 传 `headful: true`（或用 `cdp` 直接驱动你已经开着的浏览器） |
 
 两点要知道：
 
@@ -202,7 +202,7 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 ## 模型体验
 
 模型看到的是一组 schema 很窄的工具：列/读（`apps` / `app_show`）、校验（`app_check`）、观察
-（`inspect`）、编写（`app_create` + 自己对 `app.mjs` 的文件编辑）、运行（`run`，可带执行预算）、
+（`session` `op:"observe"`）、编写（`app_create` + 自己对 `app.mjs` 的文件编辑）、运行（`run`，可带执行预算）、
 录制（`learn`）、回归（`test`）。`amberflow_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
 的失败步骤，以及报告路径；完成的步骤只是计数而不是逐行，所以六十步的流程只用一行而不是一页。
 每个回答还带一行**模型层级**（`model: on` / `off(missing)` / `off(rules-only)`），以及产物里有时的
