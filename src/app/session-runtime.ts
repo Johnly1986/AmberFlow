@@ -27,7 +27,8 @@ import { createCtx, StopError, type Ctx } from "./ctx.ts";
 import { doActScroll } from "./session-act-scroll.ts";
 // A3 范围原语的会话面：act set_range 分支执行体在独立模块（doAct 存量行数只减不增）。
 import { doActSetRange } from "./session-act-range.ts";
-import { wideScanCandidates } from "./session-wide-scan.ts";
+// act 失败面的证据组装在独立模块（doAct 存量行数只减不增）。
+import { actFailureEvidence, missDiagRecord } from "./session-act-failure-evidence.ts";
 import { observeReadiness } from "./session-readiness.ts";
 // F76/P3：tab 请求处理体（校验/匹配/切页）在独立模块（主文件只减不增）。
 import { doTabRequest, type TabOpDeps } from "./session-ops-extra.ts";
@@ -47,7 +48,7 @@ import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
 import { hostsEnvelopeLogLine, normalizeHostsEnvelope, type HostsEnvelopeNormalization } from "../engine/host-envelope.ts";
 
-import { actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, closedSetReasonSuffix, displayHow, doRead, doSignal, doWaitFor, executionStateResponse, extractSettleEvidence, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions, shapeProblemResponse } from "./session-runtime-evidence.ts";
+import { actAmbiguity, ambiguityMode, ambiguityRecord, displayHow, doRead, doSignal, doWaitFor, extractSettleEvidence, missDiagnosticsResponse, navProbeFacts, observeAfter, RecentResolutions } from "./session-runtime-evidence.ts";
 import { extractFieldsReason, normalizeExtractFields } from "./session-extract-fields.ts";
 import { assertPageAlive, browserStartupProblem, FLAP_HEAL_SETTLE_MS, landedNavigationFacts, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, sessionTargetResolution, type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit, type SessionOptions, type SessionSink } from "./session-runtime-contract.ts";
 export * from "./session-runtime-contract.ts";
@@ -665,6 +666,9 @@ export class SessionRuntime {
         : {}),
       ok: out.ok === true,
       ...(out.ok === true ? {} : { code: String(out.stopCode ?? "action_failed") }),
+      // 落空判别（有界；失败面才有）——轨迹里只有 code 的话，"写法错"与"目标不在页/已滚出
+      // 视口"事后不可分，只能重跑或读源码。
+      ...missDiagRecord(out.diagnostics),
       ref: out.ref ?? null,
       how: out.how ?? null,
       changed: out.changed === true,
@@ -673,36 +677,13 @@ export class SessionRuntime {
       ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
     });
     if (out.ok !== true) {
-      // E4：落空/被遮挡失败时的 overlay 证据（只读一次；不消散——是否关遮罩由作者决定）。
-      // 仅这两个停因做归因探测：target_not_found（目标可能被遮罩挡在池外/视口外）、
-      // not-actionable-or-covered（中心点已被盖住）。其余停因（stale_ref、action_failed…）
-      // 与遮罩无归因关系，不多付这次页面往返。
-      const wantOverlay = out.stopCode === "target_not_found" || out.stopCode === "not-actionable-or-covered";
-      const overlay = wantOverlay ? await this.mw().overlayEvidence(page) : null;
-      // S4：落空时的最近命中提示（纯内存；独立键 recently_resolved，不覆盖引擎 A4 的
-      // diagnostics；无记录 = 键不出现，响应键集不变）。
-      const recent = out.stopCode === "target_not_found" ? this.recentResolutions.hint(target, this.actionCount) : { diag: {}, reasonLine: "" };
-      // F6：歧义/落空时**一次**有界宽扫（≤128；零动作）——把全量候选与自证 hint 回传给作者
-      // 再决定（收窄 hint / 换锚点 / 滚动取证）。additive 证据面：键只在这两个停因出现，
-      // 其余响应键集与旧产物逐字节不变；绝不点击/滚动/重试（宽扫不是动作，不改变页面）。
-      const wantWide = out.stopCode === "target_not_found" || out.stopCode === "target_ambiguous";
-      const wide = wantWide ? await wideScanCandidates(page, this.hosts) : null;
-      return {
-        ok: false, code: String(out.stopCode ?? "action_failed"),
-        reason: String(out.reason ?? "") + recent.reasonLine + closedSetReasonSuffix(out.stopCode),
-        op: actOp, target, executed: false,
-        ...actionabilityResponse(out.actionability),
-        ...executionStateResponse(out.execution_state),
-        ...(out.ref === undefined ? {} : { ref: out.ref }),
-        url: urlOf(page), elapsed_ms: Date.now() - started,
-        ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
-        ...(overlay !== null && overlay.length > 0 ? { overlay } : {}),
-        ...(wide !== null ? { wide_scan: wide } : {}),
-        ...amb,
-        ...ambiguityResponse(out.ambiguity),
-        ...missDiagnosticsResponse(out.diagnostics), ...shapeProblemResponse(out.diagnostics?.shape_problem),
-        ...recent.diag,
-      };
+      return actFailureEvidence(out, {
+        page, target, actOp, req, startedAt: started, actionCount: this.actionCount,
+        outDir: this.outDir, hosts: this.hosts,
+        mw: () => this.mw(), log: (l) => this.log(l),
+        recentHint: () => this.recentResolutions.hint(target, this.actionCount),
+        amb,
+      });
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
     // S4：成功解析进 LRU——同 target 后续落空时的"最近命中过"引导事实。

@@ -86,6 +86,34 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 `act scroll` 的程序化回退/`at_bottom`/会话面 `page` 合成目标、`set_range` 的
 `handle_index`/`peers`/`row_index` 多柄事实。
 
+## [Unreleased] — act 失败面的证据供给（遮挡宽扫 / 落空诊断归档）
+
+> 一次真实站点走查（google.com → Maps → 餐厅筛选 → 逐家详情页）暴露的证据缺口：会话
+> `act` 一次失败只带回一个停因码，调用方不知道"还能做什么"，只能靠先验知识猜目标
+> （实测出现对 `ucc-*` 控件族的下注）。判定面本身是对的，缺的是证据的发放与寿命。
+
+- **遮挡停因也发宽扫**（**对外响应形状变化**）：`not-actionable-or-covered` 此前不在
+  `wide_scan` 的发放集合里，而遮挡恰恰最需要"页面上还有哪些可点的"——遮罩上的关闭控件
+  是唯一解阻路径，调用方却拿不到它的候选。现在 `actionability.blocker` 为**真实第三方
+  元素**（非空且非 `offscreen` / `zero-size`）时同样发放；后两类处置分别是滚入视口与
+  换目标/等渲染，与"视野不够"无关，**不付这次往返**。其余停因（`stale_ref` /
+  `action_failed` / `needs_value` / `action-timeout`）响应键集逐字节不变。
+  引擎仍**绝不**替作者点"同意 cookies"——只把可点控件变成候选事实。
+- **落空诊断进轨迹**（`--record` 的 `actions.jsonl` 新增有界 `diag` 键）：响应面本来就有
+  完整 `diagnostics`，但轨迹面此前只留一个 `code` 字符串，事后复盘分不清"hint 写法不对"
+  与"目标真的不在页/已滚出视口"，只能重跑或读源码。现在归档
+  `shape_problem.kind` / `pool_size` / `in_dom_but_not_admitted{total,note}` /
+  `candidates`≤3 / `near`≤3；低频字段（`rejected` / `ax_weak_rejected` / `rescan` /
+  `settle_*`）各有专门键，不重复记入。**`diag` 只进轨迹，响应键集不变。**
+
+失败面证据组装同时抽到 `src/app/session-act-failure-evidence.ts`（`doAct` 是只减不增的
+存量基线）：`wide_scan` 发放判据单点 = `wantsWideScan`，`diag` 有界投影单点 =
+`missDiagRecord`。契约 F87 ③ / F72 ③ 同步修订。
+
+测试：新增 lane `verify:act-failure-evidence`（遮挡 → 有 `wide_scan` 且候选含遮罩上的
+可点控件；`offscreen` / `zero-size` / `stale_ref` 三条反向断言不发；`diag` 落盘
+`pool_size` 且无相近候选时不造键），已进 `verify:lanes` 聚合（20 → 21 条）。
+
 ## [Unreleased] — 帧门禁同主域免检（iframe 解析面）
 
 > `hosts` 此前在帧解析面是"逐条声明制"：子帧 origin 必须被 `meta.hosts` 的子域包含
