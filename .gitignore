@@ -41,3 +41,6 @@ travel/*
 
 # 私有方向分析文档（项目所有者指定不入库）
 /docs/direction/
+
+# CodeGraph 本地索引（32M 二进制缓存，非源码）
+.codegraph/

@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "executor-middleware-pure",
-  "note": "executor-types 纯类型拆分：BrowserSession + MiddlewareOptions 逐字节搬到 executor-middleware-types.ts（executor-types 保 facade re-export）。P2-2.1 候选契约（BACKLOG #2 第一步）在 MiddlewareOptions 上新增可选 candidateProducer 字段——这是**有意的非纯搬移**（契约 seam 是本批交付物），故 MiddlewareOptions 移出纯搬移 manifest，由本批 PR 说明承载变更；BrowserSession 保持纯搬移 hash。P0-4（F72 缺省自动触发）使 RunOptions.rehydrateRescan / RunReport.rehydrate_rescan 的 JSDoc 文本变更（语义由 opt-in 改为缺省自动），两符号按 split-check 文档纪律从 manifest 删除",
+  "note": "executor-types 纯类型拆分：BrowserSession + MiddlewareOptions 逐字节搬到 executor-middleware-types.ts（executor-types 保 facade re-export）。P2-2.1 候选契约（BACKLOG #2 第一步）在 MiddlewareOptions 上新增可选 candidateProducer 字段——这是**有意的非纯搬移**（契约 seam 是本批交付物），故 MiddlewareOptions 移出纯搬移 manifest，由本批 PR 说明承载变更；BrowserSession 保持纯搬移 hash。P0-4（F72 缺省自动触发）使 RunOptions.rehydrateRescan / RunReport.rehydrate_rescan 的 JSDoc 文本变更（语义由 opt-in 改为缺省自动），两符号按 split-check 文档纪律从 manifest 删除；P0（元素求值限时）给 `AnyLoc.evaluate` 增加可选 `opts.timeout` 并补 JSDoc——**有意的非纯搬移**（契约新增可选参数是本批交付物，调用点须能显式限时，否则吃 Playwright 默认 30s），AnyLoc 按 split-check 文档纪律从 manifest 删除；弃权事实面给 `PickProposal` 增加可选 `abstained`（模型侧判断，与 `choiceRef===null` 的引擎侧事实分开），PickProposal 按 split-check 文档纪律从 manifest 删除",
   "files": {
     "src/engine/executor-middleware-types.ts": {
       "symbols": {
@@ -11,7 +11,6 @@
     "src/engine/executor-types.ts": {
       "symbols": {
         "ActionabilityDetail": "4965f482dc3a483c7da00b0cbd53a17edcca5a2a56c8ba209a47b6b3a8df3d62",
-        "AnyLoc": "a5d46f2889fb22d9c26bf38b60a91e1f5d407e250b8cc3f0d725064022800426",
         "AnyPage": "20ce036be9da034c31a15ca40dad6ff1a36b5e29364174c70c26a90077a7e518",
         "AuditVerdictLike": "09fe26e619b756e8a7a89ebfa79c5557e435dc5ef21c6cb421866ea86fb7379a",
         "BrowserHandle": "955675862d4ab90e8a2400fd4ece90edd4750a0df139fc9e38b6572a57240be1",
@@ -27,7 +26,6 @@
         "OutcomeMemoryLike": "fd10c5ef78663218b3adf99791b35a04e25baa0ff05ba3c74558a07e5e4c6691",
         "OverlayEvidenceRow": "b97f86e4503c4423b2755d5b49e934d86492262b335ee65fbc6906bc394444a8",
         "PageSnapshot": "a18e76e93181ed8189a4e4f1f97de415cecf3bae577ca48f6928294eb59528dc",
-        "PickProposal": "a6c4addc6591a745176fb5f09ce3cb8c5a147ba509dbab3f897135c249353b51",
         "PwLike": "4965f3bd07c4ca21d333f68305bbe22d05cff959f123da438d385a38421d9100",
         "Readiness": "c172055df68720a48b855af1888071b1005b55851484a9cdede0d57ca30d794f",
         "ReadinessVerdict": "bf1687c8c7c78b17326acd7adcc324c5eefdf7f3acb6ffd7709b5cc8c429efdd",

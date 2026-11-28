@@ -57,11 +57,12 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       { key: "AMBERFLOW_DECISION_MODEL", usedAt: "`src/model/decision-service.ts` / `src/model/checkpoint.ts`（无地址时选本地 checkpoint）", description: "线上模型名；无服务地址时是本地 checkpoint（空 = english；可填 multilingual）" },
       { key: "AMBERFLOW_DECISION_API_KEY", usedAt: "`src/model/decision-service.ts`（鉴权；掩码展示）", secret: true, description: "线上服务密钥；本地自托管可空" },
       { key: "AMBERFLOW_DECISION_PROTOCOL", usedAt: "`src/model/decision-service.ts`（协议推断覆盖）", description: "systemone 或 openai-decisions；空 = 按 URL 自动推断" },
-      { key: "AMBERFLOW_DECISION_FLOOR", usedAt: "`src/model/decision-service.ts`（闸门刻度）", description: "闸门刻度；空 = 不覆盖 provider 自报/全局 0.25；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖" },
+      { key: "AMBERFLOW_DECISION_FLOOR", usedAt: "`src/model/decision-service.ts`（闸门刻度）", description: "闸门刻度；空 = 不覆盖 provider 自报/全局缺省（0.5）；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖" },
       { key: "AMBERFLOW_DECISION_SCORE_KIND", usedAt: "`src/model/decision-service.ts`（score 语义）", default: "calibrated_prob", description: "score 语义：calibrated_prob/entropy_conf/rank_only" },
       { key: "AMBERFLOW_DECISION_TIMEOUT_MS", usedAt: "`src/model/decision-service.ts`（单请求超时）", default: "30000", description: "单次请求超时（毫秒）" },
       { key: "AMBERFLOW_DECISION_STATE_CONTEXT", usedAt: "`src/model/decision-service.ts`（choice 题上下文）", default: "1", description: "1 = choice 题带 url/title/正文；0 = 只带 goal" },
       { key: "AMBERFLOW_DECISION_MIN_OPTIONS", usedAt: "`src/model/decision-service.ts`（choice 选项下限）", default: "1", description: "choice 选项下限；自托管 JevK5 用 2" },
+      { key: "AMBERFLOW_DECISION_HEADERS", usedAt: "`src/model/decision-service.ts`（额外请求头）", description: "额外请求头（JSON 对象，如 {\"x-opencode-session\":\"…\"}）；空/坏 JSON = 不带头。路由头与 Authorization 分开：前者路由，后者身份", secret: true },
     ],
   },
   {
@@ -92,7 +93,7 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
     group: "运行参数（CLI 旗标的配置默认值）",
     keys: [
       { key: "AMBERFLOW_HEADFUL", usedAt: "`src/cli/start.ts` / `src/cli/test.ts`（CLI 旗标默认值）", default: "0", description: "1 = 显示浏览器窗口" },
-      { key: "AMBERFLOW_CONF_FLOOR", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（闸门刻度覆盖）", description: "闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局 0.25" },
+      { key: "AMBERFLOW_CONF_FLOOR", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（闸门刻度覆盖）", description: "闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局缺省（0.5）" },
       { key: "AMBERFLOW_TIERED_HINT", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（P1 实验）", default: "0", description: "1 = 打开 tiered hint 实验" },
       { key: "AMBERFLOW_CONFIRM_SAFE", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（干跑证据确认）", default: "1", description: "1 = 危险动作仍逐次确认（默认，安全）；0 = 放行（旧行为，需显式）" },
       { key: "AMBERFLOW_NO_SOURCES", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner-cli.ts`（跳过数据腿）", default: "0", description: "1 = 跳过应用数据腿" },
@@ -112,7 +113,7 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       },
       {
         key: "AMBERFLOW_ACT_POOL_CAP", usedAt: "`src/engine/executor.ts`（act 落空归因的池帽回显）",
-        description: "act 池上限（decision.act_pool_cap；空 = 引擎默认 40）。仅观测面可配；默认值调整需另行变更",
+        description: "act 池上限（decision.act_pool_cap；空 = 引擎默认 64）。仅观测面可配；默认值调整需另行变更",
       },
       {
         key: "AMBERFLOW_POOL_QUOTA_MODE", usedAt: "`src/engine/extraction.ts`（池配额模型）", default: "legacy",
@@ -147,7 +148,7 @@ export const DECISION_SERVICE_KEYS: readonly string[] = keysOfGroup("决策服�
 export const RUN_DEFAULT_KEYS: readonly string[] = keysOfGroup("运行参数（CLI 旗标的配置默认值）");
 
 /** 决策闸门刻度的全局兜底（provider 自报 / 包策略 / CLI 覆盖都没有时的缺省值）。单源。 */
-export const DEFAULT_CONF_FLOOR = 0.25;
+export const DEFAULT_CONF_FLOOR = 0.5;
 
 /** 统一决策服务的缺省单请求超时（毫秒）。`AMBERFLOW_DECISION_TIMEOUT_MS` 未设时生效。单源。 */
 export const DEFAULT_DECISION_TIMEOUT_MS = 30_000;
@@ -190,7 +191,7 @@ export function maskValue(key: string, value: string): string {
 
 export const CONFIG_DOC = [
   "把它复制成同目录的 amberflowrc.json 就是无害的：本模板的值就是引擎的内建默认值。",
-  "空串 = 自动/不覆盖（例如服务地址为空表示用本地模型，闸门刻度为空表示让 provider 自报或全局 0.25），不是“关闭”。",
+  "空串 = 自动/不覆盖（例如服务地址为空表示用本地模型，闸门刻度为空表示让 provider 自报或全局缺省），不是“关闭”。",
   "线上决策服务只填三件套：AMBERFLOW_DECISION_BASE_URL + AMBERFLOW_DECISION_MODEL + AMBERFLOW_DECISION_API_KEY；",
   "没有 BASE_URL 时 AMBERFLOW_DECISION_MODEL 选本地 checkpoint：空 = english，multilingual 需显式填写。",
   "凭据只留在本机这个文件里（已被 .gitignore 排除），绝不进计划/包/报告等被审计的产物。",

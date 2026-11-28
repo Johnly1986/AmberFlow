@@ -14,15 +14,21 @@
  * 本 playbook 压的就是那 42% 的规划期信息获取成本）。v2.1（六步、走查先行）并入 12 轮
  * 真站实测的结论：骨架正确但覆盖不全，最贵的返工全部发生在「静态看页面 → 直接写正式
  * 应用」的缺口里——②走查先行就是补这个缺口（走查工具与产出物详见
- * docs/APP_SCRIPT_AUTHORING.md「走查先行」节）。叶子模块：零 import。
+ * docs/APP_SCRIPT_AUTHORING.md「走查先行」节）。
+ *
+ * 数字单源 = `src/support/tuning.ts`：③ 的候选窗口容量从 `POOL_CAP_ELEMENTS` /
+ * `WIDE_SCAN_POOL_ELEMENTS` 渲染（同一纪律见 `grammar-prompt.ts` 的 `CANDIDATE_WINDOW_TEXT`）。
+ * 改容量常量必须重录 prompt-hit 快照并同步 `docs/APP_SCRIPT_AUTHORING.md` §0 的逐字嵌入段。
  */
+
+import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 
 /** 六步法 v2.1 全文（文档逐字嵌入 + apps new 骨架注释逐字插入，prompt-hit 校验）。 */
 export const PLAN_PLAYBOOK_TEXT = `高效规划六步法 v2.1（走查先行）
 目标：先用引擎按真实步序走通一遍，再写正式应用；禁止先写完整应用再反复修。
 ① inspect 先看：\`amber inspect --url <页> --json\`。hint_candidates 有候选就照抄；核对目标 op 在 \`amber schema ctx --topic commands\` 能力面内，且词面真的在池里（probe/DOM 命中 ≠ hint 可命中）。
 ② 全流程走查：四选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（\`amber run <id> --walk\`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。模型驾驶走查（\`amber session\` 的 drive 系列 op：决策模型逐步投票驾驶 + 停因交接 Agent 兜底，规则档先行零模型）；走通后 \`amber session export --record\` 还原 app.mjs 骨架，只出骨架不归纳 done。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
-③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 40（宽扫 120），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
+③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 ${POOL_CAP_ELEMENTS}（宽扫 ${WIDE_SCAN_POOL_ELEMENTS}），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy.done_timeout_ms；\`amber apps check <id> --slot k=v\` 离线验分支，改掉两条信号 lint（裸 not / any 含 not(exists)）再进 ⑤。
 ⑤ 真跑留证：\`amber run <id> --trace\`。失败先看 stopCode/reason（reason 自带池快照判别与决策源降级原因）；再看 executed/changed、skipped_actions、done_preheld——done=true 但零执行时先查跳过原因，别把「信号本来就成立」当成动作推进；被 kill 时看 run-killed.json 部分证据。
 ⑥ 失败取证：最小探针先区分引擎缺陷/产品事实/任务口径——A/B（单变量重跑）、对照（--provider 换源或 rules-only）、双腿取数（数据腿核产品事实）；判别不了就上报，不靠反复重跑收敛。`;

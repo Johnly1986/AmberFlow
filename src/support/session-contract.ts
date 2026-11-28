@@ -158,7 +158,8 @@ export const SESSION_TIMEOUTS = {
  * 它们都是「同一字段在不同面的上限」，这才是本表要冻结的事实。
  *
  * 逐列出处：引擎列 = `src/app/session-driver.ts` 的 `projectHandoff`/事件投影；桥列 =
- * `BRIDGE_HANDOFF_CAPS` 生成物（消费侧在桥 `session.ts` 的 `driveHandoff`）；
+ * `BRIDGE_HANDOFF_CAPS` 生成物（消费侧在桥 `session.ts` 的 `driveHandoff`；只有带
+ * `bridgeKey` 的字符界行进生成物，**键数类**行没有字符界可生成——桥按固定键重建形状）；
  * `why_stuck.evidence` 只存在于引擎响应（桥面整体丢弃，故 `exposed:null`）——桥不是超集。
  *
  * 改一个值 = 改本表 + `tools/session-contract-gen.ts --write`；生成器会拿引擎投影的
@@ -168,6 +169,26 @@ export const SESSION_HANDOFF_CAP_TABLE = [
   // 停因闭集字段：值域有界（`PILOT_STOP_CODES` / 步号），三层都不裁剪。
   { field: "step_id", exposed: "step_id", producer: null, engine: null, bridge: null, note: "步号（整数，值域有界）" },
   { field: "stop_code", exposed: "stop_code", producer: null, engine: null, bridge: null, note: "停因闭集（`PILOT_STOP_CODES`，不裁剪）" },
+  // 低置信三义分类：值域是闭集（`LOW_CONFIDENCE_KINDS`），桥面只做有界化（闭集外的值原样透传）。
+  { field: "low_confidence_kind", exposed: "low_confidence_kind", bridgeKey: "lowConfidenceKindMaxChars", producer: null, engine: null, bridge: 32, note: "低置信三义分类（闭集；仅 low_confidence 停因出现）" },
+  // 停因专属事实：文本项 300 三层同界（producer 界 = `pilot-evidence` 的 HANDOFF_FACT_TEXT_MAX）；
+  // 整数项登记**键数**界（值域天然有界，无字符界；只登记这几个键 = 桥面不补键）。
+  { field: "nav_error", exposed: "nav_error", bridgeKey: "navErrorMaxChars", producer: 300, engine: 300, bridge: 300, note: "导航失败原文（字符；仅 unreachable/config_error 出现）" },
+  { field: "off_envelope", exposed: "off_envelope", bridgeKey: "offEnvelopeMaxChars", producer: 300, engine: 300, bridge: 300, note: "走出信封的落地 URL（字符；仅 host_not_allowed 出现）" },
+  { field: "model_abstain", exposed: "model_abstain", producer: 2, engine: 2, bridge: 2, note: "模型显式弃权的键数（pool_size/asks 两个整数；仅 low_confidence 且真弃权时出现）" },
+  { field: "observation", exposed: "observation", producer: 3, engine: 3, bridge: 3, note: "观测体检的键数（pool_size/forbidden/empty_labels 三个整数；仅 low_confidence 出现）" },
+  // 现场定位键（期望页 / 值需求 / 落空点名）：与停因专属事实同一顶层纪律——只在对应情形出现、
+  // 桥面不补键；文本项 300 三层同界（producer 界 = `topLocatorFacts`），对象登记**键数**界。
+  { field: "expect_url", exposed: "expect_url", bridgeKey: "expectUrlMaxChars", producer: 300, engine: 300, bridge: 300, note: "任务页期望 URL 子串（字符；声明时出现，任何停因）" },
+  { field: "needs_value", exposed: "needs_value", producer: 3, engine: 3, bridge: 3, note: "未决值需求的键数（target/key/ref 三键；仅 needs_value 停因出现）" },
+  { field: "needs_value[]", exposed: "needs_value", bridgeKey: "needsValueItemMaxChars", producer: 300, engine: 300, bridge: 300, note: "单条值需求文本（target/key/ref 各自；字符）" },
+  { field: "resume_hint", exposed: "resume_hint", producer: 2, engine: 2, bridge: 2, note: "落空点名事实的键数（hint/missed 两键；仅落空后第一次交接出现）" },
+  { field: "resume_hint[].hint", exposed: "resume_hint", bridgeKey: "resumeHintMaxChars", producer: 300, engine: 300, bridge: 300, note: "落空的 resume 点名原文（字符）" },
+  // 被排除 frame：`started` 事件与交接块顶层**共用**一份有界投影（引擎 `projectFrameExclusions`）。
+  // 条数 producer ≤6（`frameExclusionsOf`；同一份数组也进 `why_stuck.evidence`，那处 ≤6 的旧承诺
+  // 不变）→ 引擎/桥投影界 8 条；单条 origin 未设生成侧界 → 120 → 120 字符。
+  { field: "frames_excluded", exposed: "frames_excluded", bridgeKey: "framesExcludedMaxItems", producer: 6, engine: 8, bridge: 8, note: "被 hosts 信封排除的子 frame 条数（`started` 事件与交接块顶层；无排除 = 键不出现）" },
+  { field: "frames_excluded[].origin", exposed: "frames_excluded", bridgeKey: "frameExcludedOriginMaxChars", producer: null, engine: 120, bridge: 120, note: "单条被排除 frame 的 origin（字符；`index` 是池内真实 frame 下标，排除不重编号）" },
   // 字符界：goal_digest 200 → 200 → 300。
   { field: "goal_digest", exposed: "goal_digest", bridgeKey: "goalDigestMaxChars", producer: 200, engine: 200, bridge: 300, note: "总目标摘要（字符）" },
   { field: "why_stuck.summary", exposed: "summary", bridgeKey: "summaryMaxChars", producer: null, engine: 400, bridge: 300, note: "卡住原因摘要（字符；producer 由值域拼装）" },
@@ -187,19 +208,26 @@ export const SESSION_HANDOFF_CAP_TABLE = [
 ] as const;
 
 /**
- * 会话响应**证据块**的白名单与 cap（桥面 `session.ts` 的五个投影：滚动 / 范围 / 歧义
- * 诊断 / 落空判别 / 宽扫）。每块的 `fields` 是白名单（引擎给了才出现，桥不补键），
- * 数值项是各块字段的上限。
+ * 会话响应**证据块**的白名单与 cap（桥面 `session.ts` 的七个投影：滚动 / 范围 / 歧义
+ * 诊断 / 落空判别 / 宽扫 / 驾驶 started / pilot_end 摘要）。每块的 `fields` 是白名单
+ * （引擎给了才出现，桥不补键），数值项是各块字段的上限。
  *
- * `frame_origin` 的引擎界（120）与本批的桥界（60）**有意不同**：桥对候选帧 origin 只做
+ * 每个块的 `fields` 与桥投影方法发的键**双向**相等（`tools/session-contract-gen.ts` 按
+ * 源码扫描交叉校验：桥发而未登记、或登记而桥不发，都判红）——白名单漏登记会让事实
+ * 静默消失，多登记会让 Agent 预期一个永不到来的键。
+ *
+ * `frame_origin` 的引擎界（120）与桥界（60）**有意不同**：桥对候选帧 origin 只做
  * 短标识，对齐引擎界属可见变化，需单独成批。
  */
 export const SESSION_EVIDENCE_CAP_TABLE = {
   scroll: {
     bridgeKey: "scroll",
-    fields: ["moved", "delta", "scroll", "strategy", "at_bottom"],
+    fields: ["moved", "delta", "scroll", "strategy", "at_bottom",
+      "scroll_target", "scroll_target_source", "ambiguous_candidates", "container"],
     strategies: ["programmatic"],
-    note: "滚动实测读数（三件套全在才出现；像素取整非负，无字符界）；strategy 只在非标准滚动器回退时出现，at_bottom 只在已到底时出现",
+    scrollTargetMaxChars: 300,
+    containerMaxChars: 120,
+    note: "滚动实测读数（三件套全在才出现；像素取整非负）；strategy 只在非标准滚动器回退时出现，at_bottom 只在已到底时出现；scroll_target 点名滚的是谁、scroll_target_source 是 explicit|rows|fallback，container 只在引擎回退到内部容器时出现，ambiguous_candidates 只在兜底候选 >1 时出现",
   },
   range: {
     bridgeKey: "range",
@@ -246,6 +274,33 @@ export const SESSION_EVIDENCE_CAP_TABLE = {
     labelMaxChars: 40,
     hintMaxChars: 200,
     note: "宽扫回传（带自证 hint 的行优先、组内保持引擎序）",
+  },
+  started: {
+    bridgeKey: "started",
+    fields: ["ok", "attached", "url", "out_dir", "expect_url", "frames_excluded", "code", "reason"],
+    urlMaxChars: 300,
+    outDirMaxChars: 300,
+    expectUrlMaxChars: 300,
+    codeMaxChars: 120,
+    reasonMaxChars: 300,
+    note: "驾驶起步现场（`drive` 首轮 `started` 块与 `events[]` 的 type:'started' 行共用一份投影）：attached 只在附着模式出现、out_dir/expect_url 只在非空时出现、frames_excluded 复用交接块同一份有界投影",
+  },
+  summary: {
+    bridgeKey: "summary",
+    fields: ["ok", "pilot", "attached", "driver", "stop_code", "aborted",
+      "steps", "max_steps", "conf_floor", "model_asks", "rule_picks", "model_picks",
+      "handoffs", "fallbacks", "failed_asks", "cache", "url", "out_dir", "expect_url",
+      "code", "reason", "last_error"],
+    driverMaxChars: 60,
+    stopCodeMaxChars: 60,
+    urlMaxChars: 300,
+    outDirMaxChars: 300,
+    expectUrlMaxChars: 300,
+    codeMaxChars: 120,
+    reasonMaxChars: 300,
+    lastErrorMaxChars: 300,
+    cacheKeys: 2,
+    note: "`drive_close` 的 pilot_end 摘要（有界白名单；cache 固定只投影 hits/misses 两个整数，异常路径另带 code/reason，last_error 只在有值时出现）",
   },
 } as const;
 

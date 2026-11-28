@@ -23,6 +23,8 @@ export interface StubTurn {
   /** true = 全池询问（shape full）；false = 子集询问（shape shortlist）。 */
   passthrough?: boolean;
   options?: number;
+  /** 模型**显式弃权**（与"没拿到选择"分开；两臂投影与 handoff evidence 依赖它）。 */
+  abstained?: boolean;
 }
 
 /** `pick()` 入口的请求快照（可比投影；用于 golden 与双臂差分）。 */
@@ -92,6 +94,7 @@ export function makeStubProvider(
         options: turn.options ?? allowed.length,
         passthrough: turn.passthrough ?? true,
         probs: { ...probs },
+        ...(turn.abstained === true ? { abstained: true as const } : {}),
       };
       responses.push({ ...out, signals: { ...out.signals }, probs: { ...out.probs } });
       return out;

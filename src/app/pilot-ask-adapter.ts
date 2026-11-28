@@ -21,6 +21,7 @@ import { decisionAskPortsOf } from "./middleware-factory.ts";
 import type { AnyPage, BrowserMiddleware } from "../engine/executor.ts";
 import type { ProviderPage } from "../support/decision-provider-contract.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
+import { askViewOf } from "./pilot-tree.ts";
 import { loadSiteFacts, matchSiteFacts, renderModelFence } from "./site-facts.ts";
 
 /** 一次 pilot 驾驶的询问入口（modelVote 委托面；池/禁选/注记由引擎自取）。 */
@@ -136,8 +137,9 @@ export class PilotAskAdapter {
           quotas: WIDE_QUOTAS, candidatePriority: "bucketed", hosts: this.hostsRef() ?? undefined,
         });
       },
+      // 提问视图：空标签行补身份 token（浏览器树的注入段）；ref/顺序/执行面不变。
       pick: async (goal, page, pool: ElemPool, forbidden: Set<string>, notes: Record<string, string> | null) =>
-        await this.mwRef().pickProposal(goal, page as unknown as AnyPage, pool, forbidden, notes),
+        await this.mwRef().pickProposal(goal, page as unknown as AnyPage, askViewOf(pool), forbidden, notes),
       filter: (pool: ElemPool): ElemPool | null => PilotLedger.filterAggregate(pool),
       scoreKind: () => this.mwRef().decision?.capabilities.score_kind ?? "entropy_conf",
       contextCapability: () => this.mwRef().decision?.capabilities.context ?? null,

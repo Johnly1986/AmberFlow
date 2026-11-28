@@ -54,8 +54,8 @@ export interface ProviderInfo {
   /**
    * provider 自报的**闸门刻度**（可选）：它的 `score` 落在哪个值以上才算"够把握"。
    * 为什么必须由 provider 说：闸门比的是 `score`，而 `score_kind` 不同的两支不可比
-   * （laya 的归一化熵 vs 在线服务的标定概率）——0.25 在两种刻度上不是同一件事。
-   * 缺省不声明 = 用全局缺省 0.25（既有行为逐字节不变）。优先级：CLI > pack.policy > 本字段 > 0.25。
+   * （laya 的归一化熵 vs 在线服务的标定概率）——同一个数在两种刻度上不是同一件事。
+   * 缺省不声明 = 用全局缺省 `DEFAULT_CONF_FLOOR`（单源，缺省值以它为准）。优先级：CLI > pack.policy > 本字段 > 全局缺省。
    */
   floor?: number;
 }
@@ -119,6 +119,20 @@ export interface ChoiceOutcome {
    * 是 token 安全网兜底，两者互不重叠。
    */
   evidence_truncated?: EvidenceTruncation;
+  /**
+   * **显式弃权**（可选；缺省不出现 = 模型没弃权）。
+   *
+   * 与 `ref: null` 的差别是承重的，两者**不得归一**：
+   *   - `ref: null` = 这次没拿到可用选择（候选为空 / 答复在池外被判无效 / 没答）——
+   *     这是**引擎侧的事实**，模型并没有对页面发表意见；
+   *   - `abstained: true` = 模型**看了候选并明确表示「这些都不是下一步」**——
+   *     这是**模型侧的判断**，是可归因的负面证据。
+   *
+   * 为什么必须分开：两者都会落到 `low_confidence` 停因交 Agent 兜底，但只有后者能回答
+   * 「模型看着 N 个候选说不行」，是调计策树的输入；前者只说明「题没问出结果」。
+   * provider 只有声明能力后才需要填它——不填的 provider 语义逐字节不变。
+   */
+  abstained?: boolean;
 }
 
 /** 一个证据面的裁剪事实：字符级预算裁剪与 token 安全网分开记，互不重叠。 */

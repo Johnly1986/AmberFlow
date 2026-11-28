@@ -197,10 +197,10 @@ export interface PackPolicy {
    */
   browser?: (typeof BROWSER_CHANNELS)[number];
   /**
-   * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
+   * 置信度闸门（缺省 = `DEFAULT_CONF_FLOOR`，当前 0.5）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
    * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
-   * 换 provider 时 0.25 的含义就变了（实测：token-plan 在 camera-entry 上有一枪 0.20
-   * 被硬阻塞，而 0.20 是它自己的"把握"刻度）。优先级：CLI > pack.policy > provider 自报 > 0.25。
+   * 换 provider 时同一个数的含义就变了（实测：token-plan 在 camera-entry 上有一枪 0.20
+   * 被旧缺省 0.25 硬阻塞，而 0.20 是它自己的"把握"刻度）。优先级：CLI > pack.policy > provider 自报 > 全局缺省。
    */
   conf_floor?: number;
   /** action 后 done 信号的总等待窗口（毫秒；缺省 2000）。 */

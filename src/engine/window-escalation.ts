@@ -9,27 +9,30 @@
  * 证据共享同一份）。
  */
 import { WIDE_QUOTAS, type ElemPool } from "./extraction.ts";
+import { introducesNewIdentity } from "./elem-model.ts";
 import { WIDER_ELEMENTS_MAX, type WindowChainFact } from "./executor-pure.ts";
 import type { AnyPage, Sig } from "./executor-types.ts";
 import type { BrowserMiddleware } from "./executor.ts";
 
-/** 硬顶档重问的结果：grew=240 档带来新候选（调用方应换本步视图）；adopted=重问意见过了 floor。 */
+/**
+ * 硬顶档重问的结果：grew=该档带来新候选（调用方应换本步视图）；adopted=重问意见过了 floor；identityFlat=抽取成功但没引入新身份（本轮恢复就此止损，调用方按此归因）。
+ */
 export type WindowRungOutcome =
   | { grew: true; pool: ElemPool; adopted: boolean; ref: string | null; conf: number }
-  | { grew: false; pool: null; adopted: false; ref: null; conf: 0 };
+  | { grew: false; pool: null; adopted: false; ref: null; conf: 0; identityFlat: boolean };
 
 /**
  * 窗口递增链第二档：扩到硬顶（WIDER_ELEMENTS_MAX）重抽池 → 同一排序取前 K → 重问一次。
  *
- * 门控：`stepTimeoutLeft() > 0` 且新窗比传入的当前视图（上一档窗口）**确有增长**——页面
- * 本来就只有那些候选时不增长，直接零动作返回：不付这次抽取、不记事实、不留日志。命中
- * （意见过 floor）后的"命中即停"由调用方落地（本函数只如实回结果，不推进 recovered/
- * widePick 等调用方状态）。widgets:true 与 120 档同款——伪按钮通道随扩窗轮次按既有规则
- * 展开；quotas 沿用 WIDE_QUOTAS 预算档（分桶配额 + BUCKET_FILL_ORDER 顺延可达硬顶）。
+ * 门控：`stepTimeoutLeft() > 0` 且新窗比传入的当前视图（上一档窗口）**引入了新的元素身份**
+ * ——页面本来只有那些候选时新窗只是重编号，就此停止加码（不付询问、不记窗口链事实，
+ * `identityFlat` 交调用方归因）。命中（意见过 floor）后的"命中即停"由调用方落地（本函数只
+ * 如实回结果，不推进 recovered/widePick 等调用方状态）。widgets:true 与宽扫档同款——伪按钮
+ * 通道随扩窗轮次按既有规则展开；quotas 沿用 WIDE_QUOTAS 预算档（分桶 + 顺延可达硬顶）。
  */
 export async function runWindowEscalationRung(mw: BrowserMiddleware, a: {
   pg: AnyPage; stepNo: number; instruction: string; verbose: boolean;
-  /** 增长判据基准 = 上一档窗口（调用方当前视图）。 */
+  /** 身份基准 = 上一档窗口（调用方当前视图）。 */
   elems: ElemPool;
   /** 过闸线（与调用方 floor 同一值）。 */
   floor: number;
@@ -49,10 +52,10 @@ export async function runWindowEscalationRung(mw: BrowserMiddleware, a: {
   /** 未命中行 "window <硬顶档> ->" 之后的尾段。 */
   missNote: (pick: { ref: string | null; conf: number }) => string;
 }): Promise<WindowRungOutcome> {
-  if (!(a.stepTimeoutLeft() > 0)) return { grew: false, pool: null, adopted: false, ref: null, conf: 0 };
+  if (!(a.stepTimeoutLeft() > 0)) return { grew: false, pool: null, adopted: false, ref: null, conf: 0, identityFlat: false };
   const wider = await mw.candidates!.extract({ page: a.pg, jsProbe: true, maxElements: WIDER_ELEMENTS_MAX, widgets: true, quotas: WIDE_QUOTAS, candidatePriority: a.candidatePriority, hosts: a.frameHosts });
-  if (!(Object.keys(wider).length > Object.keys(a.elems).length)) {
-    return { grew: false, pool: null, adopted: false, ref: null, conf: 0 };
+  if (!introducesNewIdentity(wider, a.elems)) {
+    return { grew: false, pool: null, adopted: false, ref: null, conf: 0, identityFlat: true };
   }
   a.pruneForbids(wider);
   const [ref2, conf2] = await a.pickElement(a.instruction, a.pg, a.orderedPool(wider), new Set(Object.keys(a.forbidden)), a.noted);

@@ -24,12 +24,12 @@ import type {
   DecisionAccounting, DecisionAsk, DecisionAskIntent, DecisionAskLadderCode, DecisionAskOutcome,
   DecisionAskPorts, DecisionLayerReceipt, DecisionLifetime, DecisionPickProfile, DecisionSegment,
 } from "./decision-ask-contract.ts";
-import { esig, type ElemPool } from "./elem-model.ts";
+import { esig, introducesNewIdentity, type ElemPool } from "./elem-model.ts";
 import type { PickProposal } from "./executor-types.ts";
 import { urlOf } from "./page-shapes.ts";
 import { effectiveNotes, hasSiteFactsNotes } from "./decision-request.ts";
 import { WIDE_QUOTAS, ariaInteractiveLines, criteriaView } from "./extraction.ts";
-import { WIDER_ELEMENTS, describeActionError } from "./executor-pure.ts";
+import { WIDER_ELEMENTS, WIDER_ELEMENTS_MAX, describeActionError } from "./executor-pure.ts";
 import { runWindowEscalationRung } from "./window-escalation.ts";
 import type { BrowserMiddleware } from "./executor.ts";
 import { drivingGoalText, type DecisionHistoryStep } from "./decision-goal-text.ts";
@@ -242,15 +242,18 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       let notes = await enrichNotes(accounting.notesFor(pool, { url: urlOf(page), instruction }));
 
       // ③ 窄问：弃权（choiceRef=null）与执行期 abstain 同源——直接停，不付宽扫重问。
+      //    `proposal.abstained` 区分"模型说这些都不行"与"引擎没拿到可用选择"：两者同样不付
+      //    宽扫（重问同一批候选不会让模型改主意），但 detail 让调用方能把两者分开归因。
       let asked = 1;
       let proposal = await host.pick(goal, page, pool, forbidden, notes);
       if (proposal.choiceRef === null) {
-        return abstained(null, [], asked, receipts(pool, notes));
+        return abstained(null, [], asked, receipts(pool, notes),
+          proposal.abstained === true ? "model-abstained: 模型看过候选后明确表示都不推进目标" : undefined);
       }
 
-      // ④ floor 闸门不过 = 低置信回流：先付一次宽扫，宽池**真变大**才重问；否则如实弃权
-      //    （同一视图重问只会再烧一次询问，不产生新信息）。`profile.reobserve === false`
-      //    = 面显式关闭低置信宽扫（执行期同档），闸门结果直接成为弃权。
+      // ④ floor 闸门不过 = 低置信回流：先付一次宽扫，宽池**真引入新身份**才重问；计数变大
+      //    只可能是同一批元素重编号（身份集合不变）——那一样只是再烧一次询问，如实弃权。
+      //    `profile.reobserve === false` = 面显式关闭低置信宽扫（执行期同档），闸门结果直接成为弃权。
       let via: "ask" | "reobserve" = "ask";
       const ladder: DecisionAskLadderCode[] = [];
       const gated = !passesFloor(proposal, confFloor);
@@ -261,8 +264,9 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
         const wideRaw = await extractWide(host, page);
         const wide = wideRaw === null ? null : (host.filter(wideRaw) ?? wideRaw);
         ladder.push("wide_reobserve");
-        if (wide === null || Object.keys(wide).length <= Object.keys(pool).length) {
-          return abstained(null, ladder, asked, receipts(pool, notes));
+        if (wide === null || !introducesNewIdentity(wide, pool)) {
+          return abstained(null, ladder, asked, receipts(pool, notes),
+            wide === null ? undefined : "wide_reobserve_flat: 宽池没有引入新的元素身份，重问只会看到同一批候选");
         }
         // 宽池重编号：账本禁选按 esig 平移（策略在工厂），注记按新池重投影后重问。
         accounting.prune(wide);
@@ -350,15 +354,17 @@ export async function askPick(
 
 
 /**
- * 分支⑤c：低置信宽扫（OBSERVATION-BOTTLENECK RECOVERY）。宽视图**成为本步视图**，
- * 即使本地提问仍不过闸；第二档由共享的窗口递增链 helper 扩到硬顶重问一次（命中即停）。
+ * 分支⑤c：低置信宽扫（OBSERVATION-BOTTLENECK RECOVERY）。宽视图**成为本步视图**，即使本地
+ * 提问仍不过闸；第二档由共享的窗口递增链 helper 扩到硬顶重问一次（命中即停）。两档都只在
+ * 宽池**真引入新身份**时才付询问——计数变大不算新信息。
  */
 export async function runWideReobserve(host: RunPickHost, ctx: RunPickCtx, st: PickAcc, mm: string, floor: number, rec: GateRecovery): Promise<void> {
   if (!(ctx.reobserve && !st.reobserved && st.ref !== null && host.stepTimeoutLeft() > 0)) return;
   st.reobserved = true;
   await host.settleBeforeExtract(ctx.pg);
   const wide = await host.candidatesExtract({ page: ctx.pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority: ctx.candidatePriority, hosts: host.frameHosts });
-  if (!(Object.keys(wide).length > Object.keys(st.elems).length)) return;
+  // 宽化止损：宽池没引入任何新身份（只是同一批元素重编号/邻近重复）→ 本轮恢复立即结束。
+  if (!introducesNewIdentity(wide, st.elems)) { rec.identityFlat = WIDER_ELEMENTS; return; }
   // refs are positional: re-prune forbids whose ref now names a different element.
   host.pruneForbids(wide);
   // 宽视图同样只做**排序先验**（不丢元素：加宽看到的东西不该被族过滤掉）。
@@ -381,15 +387,14 @@ export async function runWideReobserve(host: RunPickHost, ctx: RunPickCtx, st: P
   }
   ctx.windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: false });
   if (ctx.verbose) console.log(`  step ${ctx.stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> still below floor`);
-  // 窗口递增链第二档：120 档重问仍未过 floor → 扩到硬顶再重问一次（命中即停）；
-  // widePick/"最后一次观察到的意见"语义随档位滚动（硬顶档成为最后一次观察）。
+  // 窗口递增链第二档（硬顶）：widePick/"最后一次观察到的意见"随档位滚动（硬顶档成为最后一次观察）。
   const rung = await runWindowEscalationRung(rungCarrierOf(host), { pg: ctx.pg, stepNo: ctx.stepNo, instruction: askGoalOf(ctx), verbose: ctx.verbose, elems: st.elems, floor, forbidden: ctx.forbidden, noted: ctx.noted, candidatePriority: ctx.candidatePriority, frameHosts: host.frameHosts, stepTimeoutLeft: host.stepTimeoutLeft, pickElement: (g, _page, pool, blocked, notes) => askPick(host, ctx, st, g, pool, blocked, notes), orderedPool: host.orderedPool, pruneForbids: host.pruneForbids, windowChainFacts: ctx.windowChainFacts, logTag: "re-observed wider",
     hitNote: (poolSize, ref3, conf3) => `(${poolSize} elements) -> ${ref3} conf=${conf3.toFixed(2)}`, missNote: () => "still below floor" });
   if (rung.grew) {
     st.elems = rung.pool;
     if (rung.adopted && rung.ref !== null) { st.ref = rung.ref; st.conf = rung.conf; st.method = `${mm}:reobserve`; rec.recovered = true; }
     else if (rung.ref !== null) { rec.widePick = { ref: rung.ref, conf: rung.conf }; rec.gateRejected.push(rung.conf); }
-  }
+  } else if (rung.identityFlat) rec.identityFlat = WIDER_ELEMENTS_MAX;
 }
 
 /**

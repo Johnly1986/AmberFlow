@@ -1122,7 +1122,7 @@ export function apply(ctx: Context, config: Config): void {
         + 'after an idle TTL. `drive` ops run the pilot in this session\'s page (same browser, no '
         + 're-navigation; state kept); evidence carries `pilot:true`/`attached:true`, never a run verdict. '
         + 'A `drive` while a handoff is already open does not silently continue: it returns '
-        + '`code:"handoff_open"` with `reused:true`, the echoed `handoff` and `goal_ignored?` — use '
+        + '`code:"handoff_open"` with `reused:true`, the echoed `handoff_open` and `goal_ignored?` — use '
         + '`drive_command` to continue that run, or start a new session for a different goal.',
     parameters: {
       op: {
@@ -1608,8 +1608,10 @@ function renderSessionResult(value: Record<string, unknown>): string {
     case 'drive_status':
     case 'drive_close': {
       const status = String(value.status ?? value.stop_code ?? '?')
-      const h = typeof value.handoff === 'object' && value.handoff !== null
-        ? value.handoff as Record<string, unknown>
+      // `handoff` = 本次新开的交接；`handoff_open` = 已开交接的回显（拒绝回执/只读状态）。
+      const raw = value.handoff ?? value.handoff_open
+      const h = typeof raw === 'object' && raw !== null
+        ? raw as Record<string, unknown>
         : undefined
       const unlock = h !== undefined && Array.isArray(h.what_would_unblock)
         ? h.what_would_unblock.filter((x): x is string => typeof x === 'string').slice(0, 3)

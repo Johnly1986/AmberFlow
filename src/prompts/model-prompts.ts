@@ -57,10 +57,10 @@ export const SAMPLE_GOAL = "TEST_GOAL_123";
 /** 11 条唯一模型提示词的元数据（顺序即 prompt-hit model 组输出顺序）。 */
 export const PROMPT_SPECS: readonly PromptSpec[] = [
   {
-    id: "decision.choice", version: 1, role: "model", lang: "en",
+    id: "decision.choice", version: 2, role: "model", lang: "en",
     budget: { maxChars: 400 },
     consumers: ["src/model/decision-service.ts", "src/model/decision-bailian.ts", "src/model/decision-jevk5.ts", "src/model/decision-tokenplan.ts", "src/model/decision-provider.ts", "src/model/decision-openai.ts"],
-    outputContract: { mustInclude: ["Ignore branding, navigation and decoration unless the goal requires them."] },
+    outputContract: { mustInclude: ["Ignore branding, navigation and decoration unless the goal requires them.", "answer none instead of guessing"] },
   },
   {
     id: "picker.choice", version: 1, role: "model", lang: "en",
@@ -125,7 +125,7 @@ export const PROMPT_SPECS: readonly PromptSpec[] = [
 
 /** 选目标（choice）：6 个 provider 共用。 */
 export const choiceInstructions = (goal: string): string =>
-  "Goal: " + goal + ". Which single element should be interacted with next to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.";
+  "Goal: " + goal + ". Which single element should be interacted with next to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them. If no candidate would make real progress, answer none instead of guessing — a wrong pick that looks plausible is worse than an explicit abstain.";
 
 /** 风险票短句：SystemOne 四家 + OpenAI Decisions 共用。 */
 export const RISK_INSTRUCTIONS_SHORT = "Judge ONLY the action itself: would performing it trigger an irreversible or externally-visible effect (payment, order placement, deletion, sending a message, final submission)? Typing into a form field, opening pages, or navigating is NOT risky.";

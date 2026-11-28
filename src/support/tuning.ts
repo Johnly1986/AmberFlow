@@ -26,6 +26,20 @@ export const DECISION_REQUEST_TIMEOUT_MS = DEFAULT_DECISION_TIMEOUT_MS;
 export const DONE_POLL_INTERVAL_MS = 120;
 
 /**
+ * 元素级只读求值（`locator.evaluate`）的缺省超时（毫秒）。
+ *
+ * 为什么必须有这个数：不传 timeout 时 Playwright 吃默认 `DEFAULT_PLAYWRIGHT_TIMEOUT = 3e4`。
+ * 动作后的取证读取（面板正文 / hit-test / 锁身份复核）常常发生在元素**已把自己卸载**之后
+ * （点击关弹层、React 重渲染换节点），于是"读不到"要等满 30s 才抛，调用方再 `catch` 成 null
+ * —— 表现为"这一步慢了 30 秒但结果正确"。实测 150 次驾驶动作中 15 次恰好 30.6s，占动作
+ * 总时间的 94%，全部是这类目标。
+ *
+ * 取值 1500：与同文件既有 `innerText({ timeout: 1500 })` 的取证口径一致；正常页面往返
+ * 是毫秒级，1.5s 足够覆盖慢元素，又不是 30s 黑洞。
+ */
+export const ELEMENT_EVAL_TIMEOUT_MS = 1500;
+
+/**
  * 默认元素池名额（每页 64）：`extraction.MAX_ELEMENTS` 与 `executor.actPoolCap` 缺省值共用。
  * 档位依据（公理 0）：一个真人浏览一屏会扫过 60+ 个控件，窗口应覆盖"一屏 + 邻近"；
  * 40 帽在长列表页会把主目标挤到窗口外（flights.ctrip.com 列表页 scrollTop=0 实测 40 帽
@@ -71,13 +85,14 @@ export const SESSION_IDLE_TIMEOUT_MS = 300_000;
 export const CLI_COMMAND_DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * 门禁视图：本模块收口的 13 个概念 → 值（供 `tools/maintain/constants.ts` 派生 token，
+ * 门禁视图：本模块收口的 14 个概念 → 值（供 `tools/maintain/constants.ts` 派生 token，
  * 不复制字面量）。新增/调整常量时同步本表，门禁与单源保持同一步。
  */
 export const TUNING_VALUES = {
   NAVIGATION_GOTO_TIMEOUT_MS,
   DECISION_REQUEST_TIMEOUT_MS,
   DONE_POLL_INTERVAL_MS,
+  ELEMENT_EVAL_TIMEOUT_MS,
   POOL_CAP_ELEMENTS,
   WIDE_SCAN_POOL_ELEMENTS,
   WIDE_SCAN_POOL_ELEMENTS_MAX,

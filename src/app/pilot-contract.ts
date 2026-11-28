@@ -53,10 +53,95 @@ export type PilotAgentCommand = (typeof PILOT_AGENT_COMMANDS)[number];
 export const PILOT_AWAIT_PICK = "await_pick";
 
 /**
+ * `low_confidence` 停因背后的三种处境（闭集，单源 = `pilot-evidence` 的 `lowConfidenceKindOf`）。
+ *
+ * 同一个码的处置方向相反：池里没有候选要查抽取/等渲染，全被排除要查为什么都被排除，
+ * 只有「有可用候选、模型没把握」才该调题面。
+ */
+export const LOW_CONFIDENCE_KINDS = ["observation-empty", "observation-all-forbidden", "model-unsure"] as const;
+export type LowConfidenceKind = (typeof LOW_CONFIDENCE_KINDS)[number];
+
+/**
+ * 被 hosts 信封排除出解析面的子 frame（**显式现场事实**，不是推断）：`index` 是池内真实
+ * frame 下标（排除只影响解析面，不重编号），`origin` 是它的 origin。
+ */
+export interface FrameExclusion {
+  origin: string;
+  index: number;
+}
+
+/**
+ * 观测体检事实（`low_confidence` 三义分类的取数口，全部取自当场读数而非推断）：
+ * `pool_size = 0` 与 `forbidden >= pool_size` 是两种"根本没什么可问"，与"模型看过可用候选
+ * 仍不确定"处置方向相反。
+ */
+export interface ObservationFacts {
+  pool_size: number;
+  /** 被禁选/已证明无效的候选数（含本轮与账本累积）。 */
+  forbidden: number;
+  /** 池内空标签候选数（渲染兜底前的读数；有身份字段的行仍可能可读）。 */
+  empty_labels: number;
+}
+
+/**
+ * 模型**显式弃权**的事实（看过多少候选之后说都不行）：唯一能把
+ * 「模型看着 N 个候选说不行」与「引擎根本没拿到选择」分开的取数口——两者同落
+ * `low_confidence`，没有它摘要可能对第二种说"该调题面"，方向是错的。
+ */
+export interface ModelAbstainFacts {
+  /** 本轮驾驶池的候选数（与 `ObservationFacts.pool_size` 同一份读数）。 */
+  pool_size: number;
+  /** 本轮决策询问次数（含低置信宽扫重问）。 */
+  asks: number;
+}
+
+/**
+ * 停因专属的现场事实（**只在对应停因出现**）：同一个对象既进 `why_stuck.evidence`，
+ * 也展开进交接块顶层。桥面整体丢弃 evidence（只投影交接块白名单字段），只放 evidence
+ * 等于 Agent 永远读不到——而这几项恰是分辨同码不同处境的判据。
+ */
+export interface PilotHandoffStopFacts {
+  /** 观测体检计数（仅 `low_confidence`）：档位在 `low_confidence_kind`，计数在这里才能核对。 */
+  observation?: ObservationFacts;
+  /** 模型显式弃权（仅 `low_confidence` 且真弃权）。 */
+  model_abstain?: ModelAbstainFacts;
+  /** 导航失败原文（仅 `unreachable`/`config_error`）：错误页事后读不到，这是唯一原文来源。 */
+  nav_error?: string;
+  /** 走出 hosts 信封的落地 URL（仅 `host_not_allowed`）：「该加 host 还是换入口」的唯一判据。 */
+  off_envelope?: string;
+}
+
+/**
+ * 未决值需求的交接投影（`PilotHandoff.needs_value`）：仅 `needs_value` 停因出现。
+ * 只带目标/键/ref，**不带值**——值是 Agent 显式给定的，引擎不猜也不回显。
+ */
+export interface HandoffValueNeed {
+  /** 目标描述（可读提示；与驾驶步 `target` 同口径）。 */
+  target: string;
+  /** 值袋键（`resume.value` 字符串形式的确定性绑定键）。 */
+  key: string;
+  /** 池内 ref（证据定位，不是动作地址）。 */
+  ref: string;
+}
+
+/**
+ * 落空的 resume 点名（`PilotHandoff.resume_hint`）：仅 `missed` 为真时出现。
+ * `missed` 是字面量类型：出现即落空，读方不必再判第二种取值。
+ */
+export interface HandoffMissedHint {
+  /** 落空时 Agent 给的点名原文（不含值）。 */
+  hint: string;
+  /** 恒 `true`（本键的存在本身就是"上次点名落空了"的证据）。 */
+  missed: true;
+}
+
+/**
  * 停因交接块（PW1 冻结面）：pilot 停止时向 Agent 投影的结构化现场。
  * 借 intervention 合同的证据形状（why_stuck / what_would_unblock），不接 rescue 通道。
+ * 可选事实继承自 {@link PilotHandoffStopFacts}（停因专属、只在对应停因出现）；现场定位键
+ * （{@link HandoffValueNeed} / {@link HandoffMissedHint} / `expect_url`）同样只在对应情形出现。
  */
-export interface PilotHandoff {
+export interface PilotHandoff extends PilotHandoffStopFacts {
   /** 停因闭集（`PilotStopCode`）。 */
   stop_code: PilotStopCode;
   /** 停在第几驾驶步（0-based；budget_exceeded 时 = max_steps）。 */
@@ -77,11 +162,41 @@ export interface PilotHandoff {
   /** 停驶页 URL（Agent resume/redirect 的现场锚点）。 */
   url: string;
   /**
+   * 任务页期望 URL 子串（可选；**已声明时出现，任何停因**）：Agent 拿它核对「偏到哪去了」。
+   * 顶层字段——`why_stuck.evidence` 有同一份原始值，但桥面整体丢弃 evidence；而
+   * `off_task_page` 的解锁建议正说「偏离 --expect-url」，不给值就无法判断偏离了多少。
+   */
+  expect_url?: string;
+  /**
+   * 未决值需求（可选；**仅 `needs_value` 停因出现**）：`{target,key,ref}`。
+   * 顶层字段——桥面丢弃 evidence，只读 `what_would_unblock` 的建议文本就只剩键名可猜，
+   * `target`/`ref` 全丢（Agent 无从核对停驶现场是哪个控件要值）。
+   */
+  needs_value?: HandoffValueNeed;
+  /**
+   * 落空的 resume 点名（可选；**仅落空后第一次交接出现**）：`{hint,missed:true}`。
+   * 顶层字段——"你上次的点名落空了"正是 Agent 被再问的原因，只在 evidence 里等于不可见。
+   */
+  resume_hint?: HandoffMissedHint;
+  /**
+   * 被 hosts 信封排除的子 frame（可选，无排除则键不出现）：`[{origin,index}]`。
+   * 顶层字段——`why_stuck.evidence` 有同一份原始值，但桥面整体丢弃 evidence；
+   * `what_would_unblock` 已按它给出「把 origin 加进 hosts」的建议，Agent 需要同一份结构化事实。
+   */
+  frames_excluded?: FrameExclusion[];
+  /**
    * 低置信模型票（可选，≤6；**无则键不出现**）。纯 evidence-only：只报票面事实，
    * 不判错、不阻断、不新增停因。必须放顶层而不是 `why_stuck.evidence`——桥面整体丢弃
    * evidence（只投影交接块白名单字段），只有顶层才到得了 Agent 面前。
    */
   weak_picks?: WeakPick[];
+  /**
+   * 低置信三义分类（`LOW_CONFIDENCE_KINDS`）：**仅 `low_confidence` 停因时出现**，
+   * 其它停因缺键（旧形状逐字节不变）。必须放顶层而不是 `why_stuck.evidence`——桥面整体
+   * 丢弃 evidence（只投影交接块白名单字段），只有顶层才到得了 Agent 面前。
+   * 同一档位的人话处置方向写在 `why_stuck.summary`（`low_confidence` 前缀之后）。
+   */
+  low_confidence_kind?: LowConfidenceKind;
   /**
    * 结束态校验声明（显式 fact）：`null` = 本 run **没有声明完成信号**，结束态**未被验证**
    * （`budget_exceeded`/`needs_value` 不是"做完了"）；有声明时是有界摘要。与 `stop_code`
@@ -92,7 +207,7 @@ export interface PilotHandoff {
 
 /**
  * 低置信模型票的票面事实（`PilotHandoff.weak_picks`）。
- * 只收 **model** 票且 `conf < DEFAULT_CONF_FLOOR`（全局缺省 0.25）：这是"这一票低于文档
+ * 只收 **model** 票且 `conf < DEFAULT_CONF_FLOOR`（全局缺省，单源）：这是"这一票低于文档
  * 默认刻度却过了闸"的可复现解释——闸门刻度可被 provider 自报/CLI 下调，票面本身不撒谎。
  */
 export interface WeakPick {
@@ -185,7 +300,7 @@ export interface PilotOptions {
   expectUrl?: string | null;
   /** 驾驶步预算（缺省 12；与 run --max-steps 同名同义）。 */
   maxSteps?: number;
-  /** 置信闸门覆盖（CLI --conf-floor > provider 自报 floor > 0.25 缺省）。 */
+  /** 置信闸门覆盖（CLI --conf-floor > provider 自报 floor > 全局缺省 `DEFAULT_CONF_FLOOR`）。 */
   confFloor?: number;
   /** 预声明槽位值（决策 fill/select 的值袋；缺省空）。 */
   slots?: Record<string, string>;
@@ -289,11 +404,11 @@ function baseUnblockHints(stop: PilotStopCode, ctx?: PilotUnblockContext): strin
     case "unreachable":
       return [
         "先验证站点可达（curl/fetch）：不可达就等站点恢复或换入口，不是改 hosts/声明",
-        "可达则放宽 --timeout 或稍后重试（reason 带浏览器原文 net::ERR_*）",
+        "可达则放宽 --timeout 或稍后重试（交接块顶层的 nav_error 带浏览器原文 net::ERR_*）",
       ];
     case "config_error":
       return [
-        "核对 reason 里的 net::ERR_*：端口被拒（ERR_UNSAFE_PORT）/URL 畸形 = 改入口 URL，不要重试",
+        "核对交接块顶层的 nav_error：端口被拒（ERR_UNSAFE_PORT）/URL 畸形 = 改入口 URL，不要重试",
         "确认声明的 hosts 与实际入口一致后 redirect 回可用页面",
       ];
     case "browser_dead":

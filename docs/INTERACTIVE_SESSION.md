@@ -60,18 +60,18 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts`；落地路径形状被站点改写时另有 `requested_url`/`landed_url`/`landed_path_shape_changed:true` + `reason`（`ok` 语义不变） | `host_not_allowed` / `unreachable` / `config_error`（含浏览器启动期环境错误：headed 但没有可用的 XServer/DISPLAY — 会话**不终结**，可改 headless 重试） |
 | `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；**候选为空时**另有 `readiness`——见「observe 的 readiness：空页 vs 还没加载完」节；元素行的字段全集见 [AGENT_INTERFACE §3.2](AGENT_INTERFACE.md) 的唯一权威表——本文只记信封：`frame` 下标、多 frame 时的 `frame_counts`） | `bad_selector` |
-| `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；`target` 支持 `within:#<id>` 容器作用域（`<id>` 取自 observe 行的 `anchor_ids`，同 label 不同容器时唯一区分手段）；命中池外的 declared-DOM 目标时 `ref` 形如 `drf:0`（**不是**池 ref）；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；`ambiguous` **只在歧义停时出现**（恒等式 `ambiguous === (code === "target_ambiguous")`，`ok:true` 不可能带它），`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` 是弱档旁路 advisory（成功也回显）；scroll 成功另可带 `strategy:"programmatic"`（非标准滚动器回退）与 `at_bottom:true`（已到底）；set_range 多柄另带 `handles`/`handle_index`/`peers`/`row_index`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
-| `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
+| `act` | `op`(`click/check/fill/select/hover/scroll/set_range`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `rows?`/`selector?`(scroll 的行/容器选择器，与 `target` 互斥), `navProbeMs?`(100..3000；同标签页导航探测), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；`target` 支持 `within:#<id>` 容器作用域（`<id>` 取自 observe 行的 `anchor_ids`，同 label 不同容器时唯一区分手段）；命中池外的 declared-DOM 目标时 `ref` 形如 `drf:0`（**不是**池 ref）；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）、`scroll_target`/`scroll_target_source`（`explicit`\|`rows`\|`fallback`）、兜底时的 `container` 与 `ambiguous_candidates`（>1 才出现）；`ambiguous` **只在歧义停时出现**（恒等式 `ambiguous === (code === "target_ambiguous")`，`ok:true` 不可能带它），`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` 是弱档旁路 advisory（成功也回显）；scroll 成功另可带 `strategy:"programmatic"`（非标准滚动器回退）与 `at_bottom:true`（已到底）；set_range 多柄另带 `handles`/`handle_index`/`peers`/`row_index`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics`/`shape_problem`；`action-timeout` 且 URL 未变时**另带** `execution_state:"unknown"`（派发与否都可能，**不得据此重试破坏性动作**） | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
+| `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`）；`text`/`value` 另带命中数事实 `matched_count?`（count 读不到则缺键）与 `matched_zero?`（命中 0 时 `true`，用来区分"不存在"与"存在但值为空"）；桥面 `read` 同样投影这两个事实（有界化后原样到达 Agent） | `config_error` |
 | `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性（**闭集**，见「extract 的 fields 闭集与 `@self`」节）；`"@self"` = 行元素可见文本（等价 `"."`）；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
 | `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms`；**超时且信号是单个 `css_*` 算子时**另有 `timeout_diagnostics`——见「waitFor 超时诊断：css 与 hint 不是一回事」节 | `config_error`（坏信号形状） |
 | `signal` | `signal` | `held,elapsed_ms` | `config_error` |
 | `snapshot` | `screenshot?`(缺省 true), `poolMax?`(120) | `snapshot_file,pool_file,screenshot_file?,counts` | `io_error` |
 | `mark` | `note` | `note`（只进 `--record` 轨迹，不动页面） | `config_error` |
 | `tab` | `action?`(`list` 缺省 \| `switch`), `match?`(`{index}` \| `{urlContains}` \| `{titleContains}`，多键 AND) | `list`：`action:"list",tabs:[{index,url,title,active}],active`（免费只读，**不写轨迹、不记动作**）；`switch`：`action:"switch",switched:{index,url,title}`（写一条 JSONL record） | `config_error`（缺/空/未知 match 键、0 个或多于 1 个匹配）/ `host_not_allowed` |
-| `drive` | `goal`(必填), `max_steps?`(1..200), `final_signal?`(对象), `conf_floor?`(0..1), `expect_url?`, `driver?`(`model`\|`agent`), `slots?`(`{k:v}` 字符串) | `status,stop_code?,url?,steps?,model_asks?,out_dir?,attached?,handoff?{…},events?≤20`（有界投影；不回池/候选/槽值） | 引擎停因（`low_confidence`/`needs_value`/`target_*`/`off_task_page`/`budget_exceeded`…，交接结构化返回）/ `config_error` |
-| `driveCommand` | `cmd`(`resume/redirect/finish/abort`), `hint?`, `value?`, `skip?`, `goal?`, `url?`, `note?` | 同 `drive`（继续一轮驾驶后的结果） | 同上（单行失败 = 结构化回执，会话继续） |
-| `driveStatus` | — | `status,url?,steps?,model_asks?,out_dir?,handoff?` | — |
-| `driveClose` | — | 同 `driveStatus`（驾驶面已收尾；浏览器仍归 session） | — |
+| `drive` | `goal`(必填), `max_steps?`(1..200), `final_signal?`(对象), `conf_floor?`(0..1), `expect_url?`, `driver?`(`model`\|`agent`), `slots?`(`{k:v}` 字符串) | `pilot:true,attached:true,status,stop_code?,url,steps,model_asks,out_dir,terminal,handoff?{…},handoff_open?{…},started?（仅首次＝引擎 started 事件；桥面同样投影该块与其 `events[]` 行）,reused?,goal_ignored?,next?,events?≤20`（有界投影；不回池/候选/槽值；`handoff` = 本次新开交接，`handoff_open` = 交接未决时再 `drive` 的拒绝回显；完整形状见下「drive 系列响应形状」） | 引擎停因（`low_confidence`/`needs_value`/`target_*`/`off_task_page`/`budget_exceeded`…，交接结构化返回；`handoff_open` 拒绝也走 `ok:false`）/ `config_error`（参数形状错，不消费驾驶面） |
+| `driveCommand` | `cmd`(`resume/redirect/finish/abort`), `hint?`, `value?`, `target?`, `skip?`, `goal?`, `url?`, `note?` | 按 outcome 三形（见下）：`outcome:"drive"` = 继续一轮驾驶后的 drive 形状 + `cmd/outcome/command(null|object)`；`outcome:"close"` = `cmd,outcome,command(null|object),pilot,attached,status,stop_code?,steps,model_asks,out_dir,events?`；`outcome:"stay"` = `cmd,outcome,command(null|object),pilot,attached,status,code?,reason?`；终态短路 = `ok:false,cmd,outcome:"stay",code,reason,stop_code?,status` | 同上（单行失败 = 结构化回执，会话与驾驶面继续） |
+| `driveStatus` | — | `pilot:true,attached:true,active,terminal,status,stop_code?,url?,steps,model_asks,out_dir,handoff_open?`（已开交接的回显，键名同拒绝回执） | — |
+| `driveClose` | — | `pilot:true,attached:true,closed,stop_code?,steps,model_asks,out_dir,summary(null|object),events?≤20`（驾驶面已收尾；浏览器仍归 session）。未起驾驶 = `{closed:false,note}`、重复关闭 = `{closed:true,already:true,out_dir}`（桥面同样保留 `note`/`already`/`out_dir`，不再只留 `closed`/`out_dir`）。**不含交接回显**：`handoff_open` / `handoff` 都不在这里——需要交接事实用 `driveStatus` | — |
 | `close` | — | `closed,requests,actions,snapshots,duration_ms,urls,evidence_dir` | — |
 
 会话级异常会补发一行 `{"type":"session_end","unsolicited":true,"ok":false,"code":…}`（`idle_timeout` /
@@ -100,13 +100,13 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 
 ### drive：在会话现场驾驶（与 pilot 共用同一 page）
 
-- `{"type":"drive","goal":"…","max_steps?":8,"final_signal?":{…},"conf_floor?":0.25,"expect_url?":
+- `{"type":"drive","goal":"…","max_steps?":8,"final_signal?":{…},"conf_floor?":0.5,"expect_url?":
   "/maps","driver?":"model","slots?":{…}}`：在**当前会话页**上开始一轮 pilot 驾驶（附着式
   `PilotRuntime`：`ownsSession:false`、`skipStartNavigation:true`，不新开浏览器、不重新导航）。
   驾驶到下一个停因交接处返回；`driver:"agent"` = 每步等 `resume` 点名（零模型票，便于验收）。
 - `{"type":"driveCommand","cmd":"resume","hint":"Open the detail page"}`：交接后继续；`cmd` 闭集
-  `resume/redirect/finish/abort`，字段 `hint?/value?/skip?/goal?/url?/note?` 与引擎 pilot 驾驶协议的
-  stdin 指令同一套语义。`resume`/`redirect` 成功会继续驾驶并返回下一步结果。
+  `resume/redirect/finish/abort`，字段 `hint?/value?/target?/skip?/goal?/url?/note?` 与引擎 pilot
+  驾驶协议的 stdin 指令同一套语义。`resume`/`redirect` 成功会继续驾驶并返回下一步结果。
 - `{"type":"driveStatus"}` / `{"type":"driveClose"}`：只读回显 / 收尾驾驶面（结束 pilot、保留
   证据；**不关闭宿主浏览器**，session 仍可 `act/observe/close`）。
 - 语义：pilot 在**同一 page** 上驾驶，产物 `pilot:true`/`attached:true`（证据目录独立）；session
@@ -114,6 +114,29 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
   先 `act` 人工补一步，再 `driveCommand{cmd:"resume"}` 交给模型继续——**切换互证**的入口。
 - 红线与边界：`drive` 走 pilot face（危险动作 `default-deny`）；`drive` 是独立请求类型，不改变
   session `act` 的零模型口径；不新增工具/命令（桥面 `amberflow_session` 的 `drive` 系列 op 同源）。
+
+#### drive 系列响应形状（引擎面）
+
+- `drive` 首轮带 `started`（引擎 `started` 事件原样：`{ok:true,attached:true,url,out_dir,
+  expect_url?,frames_excluded?}`；附着失败 = `{ok:false,code,reason}`）。`events[]` 是本轮新增
+  事件的有界列表，其中可能有 `type:"started"` 与 `type:"handoff"`（后者带**完整**交接块：
+  `{type:"handoff",unsolicited:true,pilot:true,handoff:{…}}`；桥面按交接块同一有界白名单投影
+  `handoff` 键，`why_stuck.evidence` 仍整体丢弃）。
+- `driveCommand` 三形：`outcome:"drive"`（`resume`/`redirect` 继续跑了一轮）= drive 的驾驶字段 +
+  `cmd`/`outcome`/`command(null|object)`；`outcome:"close"`（`finish`/`abort` 收尾）=
+  `cmd/outcome/command(null|object)` + `pilot/attached/status/stop_code?/steps/model_asks/out_dir/events?`；
+  `outcome:"stay"`（单行被拒或指令只更新状态）= `cmd/outcome/command(null|object)` +
+  `pilot/attached/status/code?/reason?/events?`。
+  `resume/redirect` 在终态被短路 = `ok:false` + `drive_terminal`（或 `budget_exhausted`）+
+  `outcome:"stay"` + `stop_code?` + `status`，不带驾驶字段。
+- `driveClose` 的两种无驾驶面形态：从未驾驶 = `{ok:true,closed:false,note}`；重复关闭 =
+  `{ok:true,closed:true,already:true,out_dir}`。正常收尾的 `summary` 是引擎 `pilot_end` 摘要
+  （`pilot/stop_code/steps/max_steps/conf_floor/model_asks/rule_picks/model_picks/handoffs/
+  fallbacks/aborted?/driver?/url/out_dir`，laya 档另带 `cache`，异常路径另带 `code/reason`；
+  桥面 `drive_close.summary` 同一白名单投影，另保留 `failed_asks`/`expect_url`/`last_error`，
+  `cache` 只留 `hits`/`misses`；未拿到摘要时显式 `null`）。
+- 单行失败纪律与 session 同源：`{ok:false,code,reason}` 不杀会话（驾驶面状态保留）；参数形状错
+  在消费驾驶面**之前**拒绝。
 
 ### 分页：extract 有 offset，observe 没有
 
@@ -335,6 +358,12 @@ SPA 的失败路径补偿：声明 hint 真落空（`hintMatch` 零命中）**�
   `document` 处理（不进池、不做 hint 匹配）。flow 面的 `ctx.scrollList` 合成名集合**不变**
   （`document/body/html/window`）——代价是会话面无法再用裸词 `page` 点名 label 恰为 "page"
   的元素，那类元素用 `#id`/`[data-test=…]`/完整 label 寻址。
+- **滚动面身份与来源**：合成/元素滚动成功时响应带 `scroll_target`（滚的是谁）与
+  `scroll_target_source`（`explicit` = 调用方点名、`rows` = 按行选择器派生、`fallback` = 引擎
+  在候选里替你挑了一个）；只有真的发生过 `fallback` 挑容器时才带 `ambiguous_candidates`（候选数，
+  >1 才出现）。引擎回退到内部容器时另有 `container`（实际滚动容器的稳定描述，仅兜底路径出现）。
+  桥面 `act` 四个事实全部投影（`scroll_target` ≤300 字符、`container` ≤120 字符，其余原样）；
+  响应里的 `target` 仍保留调用方原拼写——两条事实同时可见，不会被读成「按我说的滚了」。
 - **错误码沿用既有闭集**：`config_error`（`to` 非法值）/ `target_not_found` / `not_scrollable` /
   `stale_ref` / `action_failed`；A2 歧义仍先停（`target_ambiguous` + `ambiguity`），**不新增 stopCode**。
 - **`--record` 只记事实**：滚动没走通不记 `to`/`by`；没请求 `to/by` 的元素滚动不再伪记
@@ -355,9 +384,10 @@ B2 的容器滚动需要**先命中一个元素 hint**（`target` + `to/by`）�
 
 | 请求 | 语义 |
 |---|---|
-| `rows` + `to`（或 `by`） | 滚动**匹配行的最近可滚动祖先**（无则主滚动器）到方向/像素——与 `ctx.collect` 内部滚动**同一份容器判定**（最近可滚动祖先、帧序、信封、` frame:` 尾缀剥离），不是第二套语义 |
+| `rows`（或同名字段 `selector`）+ `to`（或 `by`） | 滚动**匹配行的最近可滚动祖先**（无则主滚动器）到方向/像素——与 `ctx.collect` 内部滚动**同一份容器判定**（最近可滚动祖先、帧序、信封、` frame:` 尾缀剥离），不是第二套语义 |
 
-- `rows` 与 `target` **互斥**（同给 = `config_error`）；`rows` 需要 `to`/`by` 至少其一。
+- `rows` 与 `selector` 是**同一条容器路径的两个名字**（同一字段的两种拼写；同给 = `config_error`）；
+  两者都与 `target` **互斥**（同给 = `config_error`），且需要 `to`/`by` 至少其一。
 - `to:"bottom"` 是**有界循环步进**（每轮 ~0.9 屏 + 150ms settle，≤50 轮，滚到 `atBottom` 即停）：
   懒加载页滚到中途会加载新行，单次直写到底会跳过中途内容；无限流 50 轮上限防挂死。
   `top`/`page`/`by` 是单步直写。

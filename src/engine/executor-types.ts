@@ -41,6 +41,8 @@ export interface PickProposal {
   /** 今天的 `conf`：passthrough=1−归一化熵；shortlist=max(子集概率)。**只作诊断，别跨 shape 比。** */
   entropyConf: number;
   probs: Record<string, number>;
+  /** 模型**显式弃权**（看候选后说都不是下一步）；与 `choiceRef === null`（引擎侧没拿到选择）不是一回事。 */
+  abstained?: boolean;
 }
 
 export interface PwLike {
@@ -155,12 +157,17 @@ export interface AnyLoc {
   setInputFiles?(files: unknown, opts?: Record<string, unknown>): Promise<void>;
   count(): Promise<number> | number;
   all(): Promise<unknown[]>;
-  evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
+  /**
+   * 元素上的只读求值。`opts.timeout` 直接透传 Playwright 的 `locator.evaluate(fn, arg, options)`
+   * ——**不传就吃 Playwright 默认 30s**（`DEFAULT_PLAYWRIGHT_TIMEOUT`）。P0：元素在读取前被
+   * 自己卸载（点击后关面板 / 重渲染换节点）时，无 timeout 的调用会等满 30s 才抛，而调用方
+   * 通常 `catch` 成 null —— 于是一次"读不到"被记成一次"慢了 30 秒"。取值面一律显式传 timeout。
+   */
+  evaluate(fn: unknown, arg?: unknown, opts?: { timeout?: number }): Promise<unknown>;
   innerText(opts?: Record<string, unknown>): Promise<string> | string;
   inputValue(opts?: Record<string, unknown>): Promise<string> | string;
   /** Read-only actionability questions (the dry-run probe uses only these). */
-  isVisible?(): Promise<boolean>;
-  isEnabled?(): Promise<boolean>;
+  isVisible?(): Promise<boolean>; isEnabled?(): Promise<boolean>;
   first?: unknown;
 }
 

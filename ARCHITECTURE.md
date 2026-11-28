@@ -161,7 +161,7 @@ docs/             当前有效的设计/接入文档（docs/MAINLINE.md 为依�
 
 ## 6. 验证
 
-- PR：`npm run check`（typecheck + 配置示例一致性 + `test:validate`），不访问外网。
+- PR：`npm run check`（完整链路唯一出处 = `package.json` 的 `scripts.check`），不访问外网。
 - 作者回路：用用户作用域临时应用跑 `apps new → apps check → apps explain → run --dry-run → run --max-steps`。
 - 手动/定时：`npm run test -- --tier smoke`、`core`，有网络与模型时再跑 `deep`；`probe` 单独跑并按 3 退出。
 - 离线等价验证（**非门禁**）：`fixtures/engine/*.html` 是零依赖静态页，供本地确定性重放/消融对比；`verify:offline` / `verify:runtime:offline` lane 已接入（P0 0.8），仍不进 `npm run check`。

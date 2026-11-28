@@ -144,9 +144,9 @@ export interface AppRunOptions {
   /** sidecar 的落点（仅报告用；`--hint-memory FILE` / 默认 `$AMBERFLOW_HOME/hint-memory/<app>.json`）。 */
   hintMemoryPath?: string | null;
   /**
-   * 置信度闸门的**本次覆盖**（`--conf-floor N`）。不传 = 让 pack.policy / provider 自报 / 0.25 接管。
+   * 置信度闸门的**本次覆盖**（`--conf-floor N`）。不传 = 让 pack.policy / provider 自报 / 全局缺省接管。
    * 为什么需要它：闸门比的是 provider 的 `score`，换 provider（score_kind 不同）时缺省刻度不再成立——
-   * 实测 token-plan 在 camera-entry 上有一枪 0.20 被 0.25 硬阻塞。
+   * 实测 token-plan 在 camera-entry 上有一枪 0.20 被旧缺省 0.25 硬阻塞。
    */
   confFloor?: number;
   /** provider 自报的闸门刻度（`ProviderInfo.floor`；CLI 装了 provider 就传进来）。 */

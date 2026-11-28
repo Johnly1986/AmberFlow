@@ -82,8 +82,8 @@ if (!r.ok) ctx.fail(r.stopCode ?? "step_failed", r.reason);
 
 ## 2. CLI 契约
 
-CLI 的 `--json` 输出仍是统一 envelope（`schema_version / command / ok / code / data / next / error`）。
-以下是 `data` 的关键字段。
+CLI 的 `--json` 输出仍是统一 envelope（`schema_version / command / ok / exit_code / data? /
+error?（错误码在 error.code） / diagnostics / next`）。以下是 `data` 的关键字段。
 
 ### `amber apps list --json`
 
@@ -189,7 +189,7 @@ CLI 的 `--json` 输出仍是统一 envelope（`schema_version / command / ok / 
 }
 ```
 
-`status`: `passed | partial | failed | blocked | needs_human | dry`（当前运行视图实际会产生这几种；`invalid`/`infra_error` 只用于将来预留，不应作为当前契约使用）。
+`status`: `passed | partial | failed | blocked | needs_human | dry`（当前运行视图实际只会产生这几种；类型里的 `invalid` / `skipped` / `infra_error` 是预留位，不应作为当前契约使用）。
 `verified` 只在完整运行且所有不变量成立时为 true。
 `--max-steps N` 用满预算时 `status=partial`、`verified=false`，`steps` 保留已执行事实。
 `--dry-run` 不打开浏览器，返回 `status=dry` 和 dry 调用序列。
@@ -229,7 +229,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/drive/drive_command/drive_status/drive_close/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作；`drive` 系列在**同一 page** 上跑 pilot 驾驶（`pilot:true`/`attached:true`，见下） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
-| `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
+| `amberflow_learn` | `tools/learn.ts --json --yes`（`npm run learn` 同入口） | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
 | `amberflow_test` | `amber test … --json` | 真实站点回归；`max_steps` / `timeout_sec` 与 CLI 对齐 |
 
 **`amberflow_inspect` 存在，但不再对模型暴露**（两派评估后的产品决策：它与 `op:"observe"`
@@ -242,7 +242,7 @@ amber apps remove <id> [--yes] [--force]
 **不再提供** `amberflow_plan`、`amberflow_app_set_step`、`amberflow_app_set_invariant`、
 `amberflow_app_remove_step`。Agent 用文件系统读取/编辑 `app.mjs`；桥不写任意代码。
 
-工具描述约定（82 条 description 的产品口径，由 `npm run prompt-hit` 的 bridge_desc 组观测）：目标先行——首句 ≤120 字符说明「何时用 + 做什么」；总长目标 ≤600 字符（硬上限 800）；`*_<name>` 参数前缀约定只在 `amberflow_app_check` 描述里声明一次，其它工具不重复；`amber <cmd>` 必须存在于 registry；不写站点/业务专名。
+工具描述约定（条数与长度预算由 `npm run prompt-hit` 的 bridge_desc 组观测，本文不抄数字）：目标先行——首句 ≤120 字符说明「何时用 + 做什么」；总长目标 ≤600 字符（硬上限 800）；`*_<name>` 参数前缀约定只在 `amberflow_app_check` 描述里声明一次，其它工具不重复；`amber <cmd>` 必须存在于 registry；不写站点/业务专名。
 
 `amberflow_run` 参数：
 
@@ -302,7 +302,7 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 
 `on_ambiguous`（`fail` | `act`，缺省 `fail`）：目标 hint 命中多个**不同**候选时——`fail` = **零动作**，
 返回 `{ok:false, code:"target_ambiguous", executed:false, ambiguity}`；`ambiguity` 是有界证据
-（候选 ≤5；label/class/near ≤40、ref/tag ≤16、`suggested_hint` ≤200（B 批：可容 4 段
+（候选 ≤5；label/class/near ≤40、ref/tag/role ≤16、`suggested_hint` ≤200（B 批：可容 4 段
 `frame:` 链）、候选另有 `frame_origin`（≤60，引擎给才有）；另有 `would_act_ref`/
 `candidates_total`/`truncated`；`source:"dom_fallback"` 时不给 near/suggested_hint）。判据与
 `amber run` 命令步的 `target_ambiguous` **同一份**（`hintCandidates` 非空 && `decided === null` &&
@@ -412,7 +412,7 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 - 清单唯一出处：`src/app/session-extract-fields.ts` 的 `EXTRACT_ATTR_WHITELIST` /
   `EXTRACT_ATTR_CLOSED_SET_TEXT`；文档不复述清单（防两处漂移）。
 - 作用面：**仅会话 `extract`**；应用脚本面 `ctx.extract` 的 `@attr` 口径未变（见
-  `docs/APP_SCRIPT_AUTHORING.md` §extract）。
+  `docs/APP_SCRIPT_AUTHORING.md` §5 的 extract 口径）。
 
 `amberflow_session` 的 `observe` 树视图（`format:"tree"`，P1-B）：
 
@@ -540,48 +540,69 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   `note?` = 指令备注（非空字符串、≤300 字符）：只随该指令记入 pilot 自身 trace/record
   （`out_dir/pilot-trace.jsonl` 的 `command` 行 `args.note`），**不回显**在响应/run 结果里；
   空串或超长 = `config_error`。
-  `resume.value` 是字符串时：值的键序 = 显式 `target` → 交接 evidence `needs_value.key`（引擎记录的
-  未决目标键）→ 历史兜底 `resumed`；同时带 `hint` 时值跟着 **hint 命中目标** 走（值绑定到该目标的
-  键）。对象值（`{"<key>":"<值>"}`）= 多槽并入值袋，语义不变。`needs_value` 交接的
-  `what_would_unblock[0]` 给出可直接照抄的 `resume 带 value：{"<key>":"<值>"}` 形状。
-- `{"op":"drive_status"}`：只读回显（`status,url,steps,model_asks,out_dir,handoff?`）。
+  `resume.value` 是字符串时：值的键序 = 显式 `target` → 交接块顶层的 `needs_value.key`（引擎记录的
+  未决目标键；evidence 里另有一份原始值，但桥面不投影 evidence）→ 历史兜底 `resumed`；同时带
+  `hint` 时值跟着 **hint 命中目标** 走（值绑定到该目标的键）。对象值（`{"<key>":"<值>"}`）= 多槽
+  并入值袋，语义不变。`needs_value` 交接的 `what_would_unblock` 里有**一条**可直接照抄的
+  `resume 带 value：{"<key>":"<值>"}` 形状：基础建议按停因查表顺序给（value 形状是基础建议的
+  第一条），**存在被排除 frame 时** frame 建议固定插在最前，value 形状随之为第二条——按形状找
+  那一条，不要死认 `[0]`（生成规则唯一出处 = `unblockHintsFor`，总条数 ≤3）。
+- `{"op":"drive_status"}`：只读回显（`status,url,steps,model_asks,out_dir,pilot:true,
+  attached:true,active,terminal,stop_code?,handoff_open?`）。已开交接
+  的回显走 `handoff_open`（与下面「交接不是终态」同一键名），`handoff` 只表示**本次新开**的交接。
 - `{"op":"drive_close"}`：收尾驾驶面（结束 pilot、保留证据；**不关闭宿主浏览器**，session 仍可
   `act/observe/close`）。
-- 响应（有界投影）：`{ok, op, session_id, status, stop_code?, url?, steps?, model_asks?, out_dir?,
-  attached?, handoff?{step_id,stop_code,goal_digest?,summary,url,what_would_unblock≤3,evidence_refs,
-  final_signal?,weak_picks?≤6}, events?≤20}`；**不回**池/候选/槽值/完整 DOM。`session_id` 是三面
-  join key；pilot 证据目录经 `out_dir` 给出。
-- 结束态可见性（**evidence-only**；不改驾驶行为、不新增停因、不阻断）：
-  - `handoff.weak_picks`（可选，≤6；无则键不出现）：`[{step,target,conf,picked_by}]`，只收
-    **model 票且 `conf < 0.25`**（文档默认刻度；本次实际闸门刻度见 `conf_floor`）。它只解释
-    "这一票低于默认刻度却过了闸"，**不判错**；页面合法变化不产生它（只来自票面，与 DOM 无关）。
-  - `handoff.final_signal`：`null` = 本 run **没有声明完成信号**，结束态**未被验证**
-    （`budget_exceeded`/`needs_value` **不是**"做完了"）；有声明时为有界摘要。结束态真值仍只认
-    `stop_code:"final_signal_held"`（引擎 `checkSignal`）或调用方自己的信号声明。
-  - `drive_close.summary.conf_floor`：本次驾驶的**有效闸门刻度**（CLI > provider 自报 > 0.25），
-    用来解释 `weak_picks` 的阈值事实。
+- 响应（有界投影）：`{ok, op, session_id, status?, stop_code?, steps?, model_asks?, out_dir?, cmd?,
+  outcome?, pilot?, attached?, terminal?, active?, closed?, already?, note?, reused?, goal_ignored?, next?≤3,
+  url?, started?{ok,attached?,url?,out_dir?,expect_url?,frames_excluded?,code?,reason?},
+  handoff?{step_id,stop_code,low_confidence_kind?,observation?,model_abstain?,nav_error?,off_envelope?,
+  expect_url?,needs_value?{target,key,ref},resume_hint?{hint,missed},frames_excluded?≤8,goal_digest?,
+  summary,url,what_would_unblock≤3,evidence_refs,final_signal?,weak_picks?≤6}, handoff_open?{…同上},
+  command?{ok,code?,reason?,resumed?,skipped?,closed?}, summary?{ok?,pilot?,attached?,driver?,stop_code?,
+  aborted?,url?,out_dir?,expect_url?,steps?,max_steps?,conf_floor?,model_asks?,rule_picks?,model_picks?,
+  handoffs?,fallbacks?,failed_asks?,cache?{hits,misses},code?,reason?,last_error?},
+  events?≤20（每行 type,step?,stop_code?,op?,target?,ok?,changed?,url?,conf?,attached?,out_dir?,expect_url?,
+  frames_excluded?,handoff?{…同上}）}`；
+  失败分两种：**引擎失败** = `{ok:false, code, reason, session_id, op, session_alive:true}`（`code`
+  是自由字符串、additive；`next` 只在引擎给时出现）；**桥面参数错** = `{ok:false, op,
+  code:"config_error", reason}`（未建/未消费驾驶面，因此没有 `session_id`/`session_alive`）。
+  **不回**池/候选/槽值/完整 DOM。
+  在成功回执与引擎失败回执里，`session_id` 都是三面 join key；桥面参数错没有它，用 `op` +
+  `reason` 定位是哪个请求。pilot 证据目录经 `out_dir` 给出。两个交接键名分工见下：`handoff` =
+  本次停驶**新开**的交接，`handoff_open` = 已开交接的**回显**（拒绝回执与只读状态）。
+- 交接块字段口径（**evidence-only**；不改驾驶行为、不新增停因、不阻断）：**唯一权威表是下方
+  「`PilotHandoff` 交接块」**（字段冻结，单源 `src/app/pilot-contract.ts`），本节不逐字段复述。
+  桥面视角只记三条：可选字段**一律只在对应情形出现**（其它停因的顶层键集与投影结果逐字节不变）；
+  桥面整体丢弃 `why_stuck.evidence`，所以停因判据（低置信三义 / 观测计数 / 模型弃权 / 导航原文 /
+  越界落地 URL / 期望页 / 值需求 / 落空点名 / 被排除 frame）必须在**顶层**才到得了 Agent；
+  `drive_close.summary.conf_floor` 是本次驾驶的**有效闸门刻度**（CLI > provider 自报 > 全局缺省），
+  用来解释 `weak_picks` 的阈值事实。
 - **交接不是终态**（`handoff_open`）：停在交接处返回后，再次 `op:"drive"` **不会静默续驾驶**——
   回执是显式拒绝 `{ok:false, code:"handoff_open", reused:true, goal_ignored?, status:"handoff",
-  stop_code, handoff_open{step_id,stop_code,goal_digest,…}, next}`，且**不执行任何动作**
+  stop_code, handoff_open{step_id,stop_code,goal_digest,…}, next}`（桥面**保留 `handoff_open`
+  键名**，不改写成 `handoff`——后者只表示本次停驶新开的交接），且**不执行任何动作**
   （`steps` 不变、页面不动）。继续这个 run 必须用 `drive_command resume|redirect|finish|abort`；
   换目标 = 起新 session。`reused:true` 只表示"同一 driver 被复用"，**不表示**新 `goal` 被采纳
   （被忽略时 `goal_ignored:true` 显式可见）。
-- 终态与拒绝码（`code` 是自由字符串，additive；全部带顶层 `reason`，桥/渲染直接可读）：
-  - `drive_terminal` —— driver 已终态（`final_signal_held`/`aborted`/`browser_dead`）：终态后
-    `drive` 以及 `drive_command{cmd:"resume"|"redirect"}` 都返回它（`outcome:"stay"` + `stop_code`）。
-    `next` = **起新 session** 重新驾驶（同一 driver 不可续）。
-  - `budget_exhausted` —— 预算终态（`stop_code:"budget_exceeded"`）后的续驾驶拒绝；保留该专属码
-    以便调用方区分「预算用尽」与「其它终态」。`next` = 起新 session 并增大 `max_steps`（或缩小目标）。
+- 终态与拒绝码（`code` 是自由字符串，additive；全部带顶层 `reason`，桥/渲染直接可读）。
+  **只有 `handoff_open` 带 `next[]`**（≤3 条）——其余四类的继续方式写在这里，回执本身不带
+  `next`：
+  - `drive_terminal` —— driver 已终态（`final_signal_held`/`aborted`/`browser_dead`，以及预算终态的
+    `drive` 入口）：`drive` 返回它（`outcome:"stay"` + `stop_code`）；`drive_command{cmd:"resume"|
+    "redirect"}` 也返回它——**预算终态例外**：resume/redirect 走下面的 `budget_exhausted`。
+    继续方式 = **起新 session** 重新驾驶（同一 driver 不可续）。
+  - `budget_exhausted` —— 预算终态（`stop_code:"budget_exceeded"`）后 `drive_command{cmd:"resume"|
+    "redirect"}` 的专属码（`drive` 入口本身仍报 `drive_terminal` + `stop_code:"budget_exceeded"`）；
+    保留该专属码以便调用方区分「预算用尽」与「其它终态」。继续方式 = 起新 session 并增大
+    `max_steps`（或缩小目标）。
   - `drive_closed` —— 已 `drive_close` 终结的驾驶面：`drive`/`drive_command` 均拒绝（`drive_status`
-    仍可只读回显、`drive_close` 幂等收尾）；session 本身仍可 `act/observe`，`next` = 起新
+    仍可只读回显、`drive_close` 幂等收尾）；session 本身仍可 `act/observe`。继续方式 = 起新
     session（或继续用 session 手工步）。
-  - `handoff_open` —— 交接未决（`handoff_open` 存在）时再次 `op:"drive"` 的显式拒绝：**不静默
-    续驾驶**（旧行为会重放同一交接且不显眼），回执带 `reused:true`、`handoff_open` 回显、
-    `goal_ignored?`（请求 goal 未被采纳）与 `next`；继续本 run 用
-    `drive_command{cmd:"resume"|"redirect"|"finish"|"abort"}`，换目标起新 session。
+  - `handoff_open` —— 交接未决时再次 `op:"drive"` 的显式拒绝（完整语义见上方「交接不是终态」）：
+    它是本节**唯一带 `next`** 的码（回执另带 `reused:true`、`handoff_open` 回显、`goal_ignored?`）。
   - `config_error` —— 参数形状错（未知 cmd、`hint`/`target`/`url`/`goal`/`note` 空串、`note`
-    超 300 字符、`max_steps`/`conf_floor` 越界等）；不消费会话、session 仍可用，`next` = 按
-    `reason` 改参数重发。
+    超 300 字符、`max_steps`/`conf_floor` 越界等）；不消费会话、session 仍可用。继续方式 =
+    按 `reason` 改参数重发（回执不带 `next`）。
   - `finish`/`abort` 在终态保持幂等收尾；`finish` 信号不成立 = `signal_not_held` 单行拒绝（顶层
     `reason`），交接保持打开。
 - 红线：`drive` 走 pilot face（`default-deny` 危险闸门），session 的 `act/observe` 仍零模型；两者
@@ -768,12 +789,15 @@ inspect 面叫 `input_type`，桥投影**两个键名都读**（先 `input_type`
 
 ### 3.3 pilot 驾驶协议（引擎库面；CLI 入口已移除，agent 面经 `amberflow_session` 的 drive 系列 op）
 
-stdout 纯 JSONL：`started` / `drive` / `handoff` / `command_result` / `pilot_end` 每行一个
+stdout 纯 JSONL：`started` / `drive` / `handoff` / `command_result` / `log`（unsolicited
+诊断行，`{type:"log",unsolicited:true,line}`；桥面投影只留 `type`）/ `pilot_end` 每行一个
 JSON 对象（`drive` 行在值键漂移回放步另带 `value_target_drift:{from,to}`——只两个键名，
 不含值；无回放则键不出现）；`pilot_end` 只发一条（idle/中断/异常的 `code`/`reason` 并进汇总行），摘要恒含
 `steps`/`stop_code`/`conf_floor`/`model_asks`/`rule_picks`/`model_picks`/`handoffs`/`fallbacks`
-（laya 档另带 `cache:{hits,misses}`），恒带 `pilot:true`。`conf_floor` 是本次驾驶的**有效闸门
-刻度**（CLI > provider 自报 > 0.25），与 `weak_picks`（固定按 0.25 静态阈值筛票面）分工不同：
+（laya 档另带 `cache:{hits,misses}`），恒带 `pilot:true`。桥面 `events[]` 的 `type:"handoff"` 行按交接块
+同一有界白名单投影（键名 `handoff`，`why_stuck.evidence` 仍整体丢弃）；`drive` 首轮的 `started`
+块与 `events[]` 的 `type:"started"` 行共用一份有界投影。`conf_floor` 是本次驾驶的**有效闸门
+刻度**（CLI > provider 自报 > 全局缺省），与 `weak_picks`（固定按全局默认刻度筛票面）分工不同：
 前者说"闸门实际在哪"，后者说"哪些票低于文档默认刻度"。退出码：0 = `final_signal_held`；
 1 = `browser_dead`；3 = 被停因挡住（含 abort / idle 超时）。
 
@@ -782,11 +806,16 @@ JSON 对象（`drive` 行在值键漂移回放步另带 `value_target_drift:{fro
 **已执行 + outcome**，不写"已完成"——no-op 点击若被当成进展，模型会复读烧预算。
 
 `--expect-url <子串>`（可选）：每轮驾驶前检查当前 URL 是否包含它；不包含 = 确定性停
-`off_task_page`，不继续在漂移页上抽池/问模型。`started` 事件与 handoff 证据都回显
-`expect_url`；`started`/`handoff` 证据还回显 `frames_excluded:[{origin,index}]`（被 hosts
-信封排除的**跨注册域**子 frame——与声明条目同注册域的子帧免检进池，见下）——桥面把它们
-投影给 Agent，`what_would_unblock` 第一条给出
-"把 origin 加入 hosts 后重试"的确定性建议。
+`off_task_page`，不继续在漂移页上抽池/问模型。`started` 事件（引擎面）与 handoff **顶层**（以及
+evidence）都回显 `expect_url`；桥面 `events[]` 的 `started` 行投影
+`type/ok/url/attached/out_dir/expect_url/frames_excluded`（`attached` 只在附着模式出现，
+`out_dir`/`expect_url` ≤300 字符），`drive` 首轮的 `started` 块走同一投影——Agent 既能读交接块
+顶层，也能读起步现场。`started`/`handoff` 证据还回显 `frames_excluded:[{origin,index}]`（被 hosts
+信封排除的**跨注册域**子 frame——与声明条目同注册域的子帧免检进池，见下）。这一份事实的
+可见性由**两道白名单**共同兑现：引擎的会话投影（`started` 事件与交接块顶层）与桥面投影都放行它
+（条数 ≤8、单条 `origin` ≤120 字符，共用同一份有界投影；无排除帧 = 两处都不出现该键，旧形状
+逐字节不变），Agent 因此能拿结构化事实核对 `what_would_unblock` 第一条那句
+"把 origin 加入 hosts 后重试"。桥面仍整体丢弃 `why_stuck.evidence`——读顶层那个。
 
 `hosts` 信封（声明才生效）：判定的唯一来源是发起方声明，`null`/`[]`/全空串 = **不设防**（不按
 入口 URL 推断）。声明后信封在驾驶中途生效，与 run 面 `hostGate` 同一谓词（`disallowedHost`，
@@ -796,11 +825,12 @@ JSON 对象（`drive` 行在值键漂移回放步另带 `value_target_drift:{fro
 只有跨注册域子帧被排除出解析面（`frames_excluded`）：
 - 轮首：当前页 URL 越界 = 确定性停 `host_not_allowed`——在抽池/问模型**之前**，且在最终信号判定
   **之前**（越界页上的信号成立不算完成）；
-- 步尾：动作把主页面带出信封即停，交接 `why_stuck.evidence.off_envelope`（= 落地 URL，区别于
-  `handoff.url` 的停驶页锚点）写明是哪一步走出的；
+- 步尾：动作把主页面带出信封即停，交接**顶层** `off_envelope`（= 落地 URL，区别于
+  `handoff.url` 的停驶页锚点）写明是哪一步走出的；engine 面 `why_stuck.evidence.off_envelope`
+  有同一份原始值，但桥面丢弃 evidence，读顶层那个。
 - `finish` 在越界页 = `code:"host_not_allowed"` 单行拒绝（既有码），交接保持打开，先 `redirect` 回内。
-`started` 不新增字段；生效信封在会话 `open`/`goto` 响应的 `hosts` 与 `drive_status` 的
-`stop_code` 上可见。CLI `amber session --url` 不带 `--host` 时由 CLI 从 `--url` 推断入口 host
+`started` 不新增**信封字段**（被排除 frame 的 `frames_excluded` 见上段，信封本身不另立字段）；
+生效信封在会话 `open`/`goto` 响应的 `hosts` 与 `drive_status` 的 `stop_code` 上可见。CLI `amber session --url` 不带 `--host` 时由 CLI 从 `--url` 推断入口 host
 并显式传给 pilot——所以**那条默认路径的信封是生效的**（与"引擎库面未声明 = 不设防"是两层口径）。
 
 stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 session 同源——坏 JSON/未知/被拒
@@ -808,7 +838,7 @@ stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 sess
 
 | 指令 | 形状 | 语义 |
 |---|---|---|
-| `resume` | `{hint?, value?, target?, skip?}` | `value` 对象 = 多槽 k:v 并入值袋；字符串 = 单值，键序 `target` → 交接 `needs_value.key`（引擎记录的未决目标键）→ `resumed`（历史兜底；真实标签永不命中它），带 `hint` 时值跟 hint 命中目标走；**值键跨轮漂移**（同控件的抽池 label 形状变了，如首轮 `label="Search Google Maps"`、次轮只剩 `name=q`）不必照最新交接键重发：引擎按 name/id 稳定身份把已给过的值回放到本轮键（池内该身份唯一才回放；身份变了/无法证明则不粘，如实再要值）；`hint` 唯一命中即确定性执行（零模型），撞歧义（多候选签名互异）= `target_ambiguous` 只停不选，落空 = 下次交接 evidence 带 `resume_hint.missed`；`skip:true` 把最近一次驾驶选中的目标加入禁选后继续 |
+| `resume` | `{hint?, value?, target?, skip?}` | `value` 对象 = 多槽 k:v 并入值袋；字符串 = 单值，键序 `target` → 交接块顶层 `needs_value.key`（引擎记录的未决目标键）→ `resumed`（历史兜底；真实标签永不命中它），带 `hint` 时值跟 hint 命中目标走；**值键跨轮漂移**（同控件的抽池 label 形状变了，如首轮 `label="Search Google Maps"`、次轮只剩 `name=q`）不必照最新交接键重发：引擎按 name/id 稳定身份把已给过的值回放到本轮键（池内该身份唯一才回放；身份变了/无法证明则不粘，如实再要值）；`hint` 唯一命中即确定性执行（零模型），撞歧义（多候选签名互异）= `target_ambiguous` 只停不选，落空 = 下次交接**顶层**带 `resume_hint:{hint,missed:true}`（evidence 里有同一份原始值）；`skip:true` 把最近一次驾驶选中的目标加入禁选后继续 |
 | `redirect` | `{url? \| goal?}` | 换入口或换目标；步史与禁选清段重新累计，**预算不清零**（预算重置请起新 pilot） |
 | `finish` | `{signal}` | 声明最终信号（或复用预声明的 `--final-signal`）；引擎 `checkSignal` 验证成立才记 `final_signal_held`；不成立 = `code:"signal_not_held"` 单行拒绝，交接保持打开 |
 | `abort` | `{}` | 终止，落已走轨迹（exit 3） |
@@ -816,7 +846,8 @@ stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 sess
 `--driver agent`（消融对照臂）：每步投影 `step_request`（有界候选：`ref`/`tag`/`label`/
 `hint_candidates`，≤40 行——hint_candidates 经引擎 `hintMatch` 自证唯一命中，照抄进
 `resume.hint` 即确定性执行）后等待点名，零模型票；`resume` 无需 open handoff；
-`pilot_end` 摘要带 `driver:"agent"`。
+`pilot_end` 摘要带 `driver:"agent"`；桥面 `drive_close.summary` 投影同一白名单
+（`failed_asks`/`cache`/`expect_url`/`code`/`reason`/`last_error` 都保留，`cache` 只留 `hits`/`misses`）。
 
 危险闸门：每个待执行动作过 `DESTRUCTIVE_PATTERNS` 关键词闭集（单源 rules.ts，与桥
 denyDestructive 同源）——命中 = `risk_declined` 结构化失败 + 禁选，绝不静默执行；连续
@@ -833,13 +864,22 @@ lane 直接驱动）。交互式常驻驾驶（跨调用同现场、逐交接喂
 | 字段 | 口径 | 说明 |
 |---|---|---|
 | `stop_code` | 闭集 12 码 | `final_signal_held` / `budget_exceeded` / `off_task_page` / `host_not_allowed` / `unreachable` / `config_error` / `low_confidence` / `target_ambiguous` / `needs_value` / `stuck_inert` / `no_model_runtime` / `browser_dead` |
+| `low_confidence_kind` | 可选，仅 `low_confidence` | 三义分类闭集 `observation-empty` / `observation-all-forbidden` / `model-unsure`：池里没候选 / 抽到但全被排除 / 有可用候选但模型没把握。同一码的三种处置方向相反；`summary` 里带同档位的人话方向（"先查抽取/等渲染，不要调题面" / "先查为什么都被排除" / "这才该调题面或换问法"）。其它停因**键不出现**（旧形状不变）；必须放顶层（桥面丢 `why_stuck.evidence`） |
+| `observation` | 可选，仅 `low_confidence` | `{pool_size,forbidden,empty_labels}`（三个整数，取自当场池与禁选集）：档位说处境，计数说"是不是真的"——两者必须一起读。必须放顶层（理由同 `low_confidence_kind`） |
+| `model_abstain` | 可选，仅 `low_confidence` 且模型显式弃权 | `{pool_size,asks}`：区分「模型看了 N 个候选说都不行」与「引擎根本没拿到选择」——两者同落一个码，没有它摘要可能对第二种说"该调题面"。`pool_size` 与 `observation.pool_size` 同一份读数，`asks` 与 `drive_close.summary.model_asks` 同口径 |
+| `nav_error` | 可选，仅 `unreachable` / `config_error`，≤300 字符 | 落在 Chrome 错误页时还原的浏览器原文（`net::ERR_*`）。错误页事后读不到正文，这是唯一原文来源；`what_would_unblock` 的对应两条直接指向它 |
+| `off_envelope` | 可选，仅 `host_not_allowed`，≤300 字符 | 走出 hosts 信封的**落地 URL**：「该加 host 还是换入口」的唯一判据 |
+| `expect_url` | 可选，已声明即出现（任何停因），≤300 字符 | 任务页期望 URL 子串：`off_task_page` 的建议说「偏离 --expect-url」，这里给出**值**。必须放顶层（桥面丢 `why_stuck.evidence`）；evidence 与 `started` 事件（引擎面）另有同名副本；桥面 `events[]` 的 `started` 行与 `drive` 首轮 `started` 块同样投影它（≤300 字符） |
+| `needs_value` | 可选，仅 `needs_value` 停因，3 键 | `{target,key,ref}`：哪个目标要值（`target` 可读、`key` 是 `resume.value` 字符串形式的绑定键、`ref` 是池内定位），**不含值**。必须放顶层：桥面丢 evidence 时只剩建议文本可猜，`target`/`ref` 全丢 |
+| `resume_hint` | 可选，仅落空后第一次交接，2 键 | `{hint,missed:true}`：上次 `resume.hint` 落空的原文（**不含值**）——这正是 Agent 被再问的原因。必须放顶层（理由同 `needs_value`） |
+| `frames_excluded` | 可选，≤8（无排除帧则键不出现） | `[{origin,index}]`：被 hosts 信封排除出解析面的**跨注册域子 frame**（`index` = 池内真实 frame 下标，排除不重编号；`origin` ≤120 字符）。生成侧 ≤6（`why_stuck.evidence.frames_excluded` 同一份数组、同一旧承诺），引擎/桥投影界 8 条。必须放顶层：桥面整体丢弃 evidence，而 `what_would_unblock` 已按它给出「把某 origin 加进 hosts」的建议。`started` 事件（`events[]` 里 `type:"started"`）与 `drive` 首轮 `started` 块回显同一形状与同一上界（桥面两处都投影） |
 | `step_id` | 0-based 驾驶步号 | `budget_exceeded` 时 = `max_steps` |
 | `goal_digest` | ≤200 字符 | 总目标有界投影 |
-| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40；`frames_excluded` ≤6；声明时 `expect_url`；`off_envelope` = 越出 hosts 的落地 URL（仅 `host_not_allowed` 且越界时出现）；`needs_value:{target,key,ref}` = 哪个目标/键要值（仅 `needs_value` 且已知）；`resume_hint:{hint,missed:true}` = 上次 resume hint 落空（仅落空后第一次交接，不含值）；`nav_error` = 落在 Chrome 错误页时还原的浏览器原文 `net::ERR_*`（仅 `unreachable`/`config_error` 且原文可得）） |
+| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40；`frames_excluded` ≤6（同顶层那份数组，顶层界更宽）；声明时 `expect_url`；`needs_value:{target,key,ref,sig,targetId}`（**证据面 5 键**：前 3 键同顶层投影，`sig` = 停驶现场池身份签名（同池定位用）、`targetId` = 稳定身份（跨轮键漂移回放的取数口）；桥面只收到顶层那 3 键）；`resume_hint:{hint,missed:true}`；`off_envelope` / `nav_error` / `model_abstain` / `observation` 各带一份原始值）。**桥面整体丢弃 evidence**：Agent 只读**本表列出的顶层键**（`summary` 是 `why_stuck.summary` 的桥面字段名），evidence 里的同名键只对引擎侧有用 |
 | `what_would_unblock` | ≤3 条 | 按停因查表确定性生成，不是模型建议 |
 | `evidence_refs` | 四件套落盘路径 | 截图 `.png` / DOM `.dom.html`（>2MB 截断）/ 池快照 `.pool.json` / observe `.observe.json`；各自独立失败、独立缺字段 |
 | `url` | — | 停驶页现场锚点 |
-| `weak_picks` | 可选，≤6 | 低置信模型票票面事实 `[{step,target,conf,picked_by}]`：只收 **model** 票且 `conf < 0.25`（静态默认刻度）；无则键不出现。**evidence-only**：不判错、不阻断、不新增停因；桥只投影顶层字段（`why_stuck.evidence` 被整体丢弃），故它必须是交接顶层字段 |
+| `weak_picks` | 可选，≤6 | 低置信模型票票面事实 `[{step,target,conf,picked_by}]`：只收 **model** 票且 `conf < DEFAULT_CONF_FLOOR`（全局默认刻度）；无则键不出现。**evidence-only**：不判错、不阻断、不新增停因；桥只投影顶层字段（`why_stuck.evidence` 被整体丢弃），故它必须是交接顶层字段 |
 | `final_signal` | 可选 | `null` = 无完成信号声明（本 run 的结束态**未被验证**）；有声明 = 有界摘要。结束态真值仍只认 `stop_code:"final_signal_held"`（引擎 `checkSignal`）或调用方信号声明 |
 
 ---

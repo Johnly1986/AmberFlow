@@ -31,7 +31,7 @@ npm run check                          # precheck + 契约生成物一致性 + t
 npm run verify:offline                 # 非门禁等价验证（fixtures 抽取面；需 chromium，不进 check）
 npm run verify:runtime:offline         # 非门禁运行期等价 lane（fixtures + BrowserMiddleware.run；需 chromium）
 npm run verify:pilot                  # 非门禁：PILOTED_WALKTHROUGH §3.2 走查验收矩阵（停因/兜底/危险拒绝/降级；需 chromium）
-npm run verify:lanes                   # 非门禁：顺序跑本批证据面 21 条 lane（需 chromium；清单见「测试」节）
+npm run verify:lanes                   # 非门禁：顺序跑本批证据面 23 条 lane（需 chromium；清单见「测试」节）
 npm run test -- --tier smoke         # 真实站点快速可达性
 npm run test -- --tier core          # 短流程
 npm run test -- --tier deep          # 长流程
@@ -93,10 +93,10 @@ online/cases/probe/*.json
 - 抽取/运行期：`verify:offline`（15 个夹具页的抽取面，比较按元素身份归一、ref 编号漂移不算差异）、`verify:runtime:offline`（唯一执行循环 8 场景）
 - 编排/话术：`verify:run-execution`（四源归一化产物 vs golden；池构成/排序/容量变更后须重录基线）、`golden-manual`（六条人工路径话术基线；静态源码扫描，毫秒级）
 - 会话/动作面：`verify:act-lock`、`verify:session-range`、`verify:session-drive`、`verify:poolless-actions`、`verify:dedup-controls`、`verify:frame-budget`、`verify:frame-exempt`、`verify:walk-r1`
-- 决策/结果面：`verify:app-stop-context`、`verify:decision-accounting`、`verify:decision-ask-parity`、`verify:decision-endpoint-parity`（端点归一化差异白名单）、`verify:run-view-parity`（agent/桥 run 视图差异白名单）
+- 决策/结果面：`verify:app-stop-context`、`verify:decision-accounting`、`verify:decision-ask-parity`、`verify:decision-endpoint-parity`（端点归一化差异白名单）、`verify:decision-headers`（额外请求头真的上路：路由头与 Authorization 分离、坏配置降级不崩）、`verify:run-view-parity`（agent/桥 run 视图差异白名单）
 - 规则/词面：`verify:rule-vocab`（规则词面归一单源 + 泛化/过拟合护栏：正向命中、明确内容词反例、无关场景反例、纯通用按钮反例、无新词面）
-- 失败路径/校验：`verify:record-failure`（`--record` 写失败不崩）、`verify:ctx-validate`（extract maxItems 等入参）、`verify:rehydrate-rescan`（strict-miss 重扫证据）、`verify:act-failure-evidence`（遮挡宽扫发放正反向 + 落空 diag 有界归档）
-- 聚合：`npm run verify:lanes` 顺序跑上述 21 条（不含较重的 `verify:runtime:offline`），任一红即停。
+- 失败路径/校验：`verify:record-failure`（`--record` 写失败不崩）、`verify:ctx-validate`（extract maxItems 等入参）、`verify:rehydrate-rescan`（strict-miss 重扫证据）、`verify:act-failure-evidence`（遮挡宽扫发放正反向 + 落空 diag 有界归档）、`verify:element-eval-timeout`（元素卸载时取证读取限时返回：30s 默认超时黑洞的正反向自证）
+- 聚合：`npm run verify:lanes` 顺序跑上述 23 条（不含较重的 `verify:runtime:offline`），任一红即停。
 
 ## 架构
 
@@ -144,4 +144,4 @@ online/cases/probe/*.json
 
 ## 文档
 
-`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**v1 实施完成（2026-11-17）——步 0-5 落地，含 --rescue 真实 result.rescue 默认切换**；captcha/credential 二期）、`docs/DECISION_CONTEXT_CONTRACT.md`（决策上下文契约 v1.0 已实施：上文 L0–L4 分层闭集/溯源强制/有界裁剪序/裁决权不变；DC1–DC6 条款落地，契约 v6（question kind 闭集），实施记录见 CHANGELOG 与文件内复核记录）、`docs/SESSION_TAX_REDUCTION_PLAN.md`（会话操作税削减方案：盲测复盘 S1–S5/O1，滚动容器寻址/extract 稳定读/act 导航事实/行锚漂移提示/观察面截断/编排划界）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/P2_READINESS.md`（P2 决策请求包：发布/冻结、INTERVENTION 收尾、BACKLOG #2/#3/#4 顺序、freeze window 参数；含推荐与回执表）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`；**P0/P1/P2 已收口（2026-11-17；P2 出口核对见其 §6.5；§6.5 D 四项条件项 + 桥 TS2375 已由 §6.10 收口；仅余 ctx conformance/handler 内化（BACKLOG #3 已于 2026-11-24 完成））**；取代 2026-11-10 v1）。不要引用已删除的旧报告/基准/应用清单。
+`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**v1 实施完成（2026-11-17）——步 0-5 落地，含 --rescue 真实 result.rescue 默认切换**；captcha/credential 二期）、`docs/DECISION_CONTEXT_CONTRACT.md`（决策上下文契约 v1.0 已实施：上文 L0–L4 分层闭集/溯源强制/有界裁剪序/裁决权不变；DC1–DC6 条款落地，契约 v6（question kind 闭集），实施记录见 CHANGELOG 与文件内复核记录）、`docs/SESSION_TAX_REDUCTION_PLAN.md`（会话操作税削减方案：盲测复盘 S1–S5/O1，滚动容器寻址/extract 稳定读/act 导航事实/行锚漂移提示/观察面截断/编排划界）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/P2_READINESS.md`（P2 决策请求包：发布/冻结、INTERVENTION 收尾、BACKLOG #2/#3/#4 顺序、freeze window 参数；含推荐与回执表）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`；**P0/P1/P2 已收口（2026-11-17；P2 出口核对见其 §6.5；§6.5 D 四项条件项 + 桥 TS2375 已由 §6.10 收口；仅余 ctx conformance/handler 内化（BACKLOG #3 已于 2026-11-24 完成））**；取代 2026-11-10 v1）、`docs/WALKTHROUGH_TAKEOVER_ASSESSMENT.md`（走查画像与「决策模型主驾 / Agent 副驾」可行性研判：流程图 + 闭集清单 + 产品/架构双视角 + 反事实推演；P0-① 元素求值限时已实施）、`docs/DECISION_ENGINE_TREE_DESIGN.md`（决策引擎分层设计 v5：引擎层拥状态机执行器与状态契约 × 应用层挂决策树（状态+转移表）× 应用实例挂参数；节点=状态、结果驱动转移（有限状态机），12 停因即交接终态原因闭集，`AppAdapter` 为既有先例）、`docs/DECISION_ENGINE_ROADMAP.md`（实施计划与预期：F0–F3 排期、每阶段可测预期、三条诚实声明与延后项复活条件）。不要引用已删除的旧报告/基准/应用清单。

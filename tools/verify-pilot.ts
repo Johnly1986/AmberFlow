@@ -25,15 +25,24 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
-import { drivingGoalText, unblockHintsFor, type PilotOptions } from "../src/app/pilot-contract.ts";
-import { weakPicksFrom } from "../src/app/pilot-evidence.ts";
+import {
+  LOW_CONFIDENCE_KINDS, PILOT_STOP_CODES, drivingGoalText, unblockHintsFor,
+  type ObservationFacts, type PilotHandoff, type PilotOptions,
+} from "../src/app/pilot-contract.ts";
+import {
+  handoffWhyEvidence, lowConfidenceKindOf, observationFactsOf, stopFactsOf, topHandoffFacts, topLocatorFacts, topStopFacts,
+  weakPicksFrom, whyStuckSummary, HANDOFF_FACT_TEXT_MAX,
+} from "../src/app/pilot-evidence.ts";
+import { BROWSER_STATE_IDS, BROWSER_TREE, askViewOf, identityLabelOf } from "../src/app/pilot-tree.ts";
+import { TREE_EXIT, validateTree, walkTree, type DecisionTree, type StateOutcome } from "../src/engine/decision-tree.ts";
+import { DEFAULT_CONF_FLOOR } from "../src/support/config-schema.ts";
 import { projectHandoff } from "../src/app/session-driver.ts";
-import type { PilotHandoff } from "../src/app/pilot-contract.ts";
 import {
   bindValueFor, countValueTargetId, findPoolRefBySig, slotKeyFor, valueAliasKeyOf,
   valueKeyOf, valueNeedOf, valueSigOf, valueTargetIdOf,
 } from "../src/app/pilot-value-need.ts";
 import { browserSession } from "../src/engine/executor.ts";
+import { criteriaView } from "../src/engine/extraction.ts";
 import type { Elem } from "../src/engine/elem-model.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -51,6 +60,13 @@ async function startFixtureServer(bindHost = "127.0.0.1"): Promise<{ origin: str
     const rel = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
     const abs = path.resolve(FIXTURES, `.${rel}`);
     const inside = abs === FIXTURES || abs.startsWith(`${FIXTURES}${path.sep}`);
+    // 决策端点 403（凭证/权益类失败的现场复现：这是**服务在回应**，不是不可达）。
+    if (rel.startsWith("/decision-403")) {
+      res.statusCode = 403;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: { code: "AccessDenied.Unpurchased", message: "AccessDenied.Unpurchased: the model is not purchased" } }));
+      return;
+    }
     if (!inside || !fs.existsSync(abs) || !fs.statSync(abs).isFile() || !abs.endsWith(".html")) {
       res.statusCode = 404;
       res.end("not found");
@@ -74,11 +90,11 @@ async function startFixtureServer(bindHost = "127.0.0.1"): Promise<{ origin: str
  * 注意 `resolveProviderSpec` 读的是**进程 env**（CLI 面即 process.env）——lane 在进程内直驱
  * 运行时，所以这里直接改 process.env，`opts.env` 只承载 AMBERFLOW_HOME 落点。
  */
-function laneEnv(): NodeJS.ProcessEnv {
+function laneEnv(decisionBaseUrl: string = UNREACHABLE_PROVIDER): NodeJS.ProcessEnv {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-pilot-home-"));
   Object.assign(process.env, {
     AMBERFLOW_HOME: home,
-    AMBERFLOW_DECISION_BASE_URL: UNREACHABLE_PROVIDER,
+    AMBERFLOW_DECISION_BASE_URL: decisionBaseUrl,
     AMBERFLOW_DECISION_API_KEY: "unused-lane-key",
     AMBERFLOW_DECISION_MODEL: "unused-lane-model",
   });
@@ -90,11 +106,14 @@ interface Booted {
   events: SinkEvent[];
 }
 
-async function boot(opts: Omit<PilotOptions, "env" | "outDir">): Promise<Booted> {
+async function boot(
+  opts: Omit<PilotOptions, "env" | "outDir">,
+  decisionBaseUrl: string = UNREACHABLE_PROVIDER,
+): Promise<Booted> {
   const events: SinkEvent[] = [];
   const sink: PilotSink = { respond: (obj) => { events.push(obj as SinkEvent); } };
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-pilot-out-"));
-  const rt = new PilotRuntime({ ...opts, env: laneEnv(), outDir }, sink);
+  const rt = new PilotRuntime({ ...opts, env: laneEnv(decisionBaseUrl), outDir }, sink);
   await rt.start();
   return { rt, events };
 }
@@ -102,6 +121,31 @@ async function boot(opts: Omit<PilotOptions, "env" | "outDir">): Promise<Booted>
 function drivesOf(events: SinkEvent[]): SinkEvent[] {
   return events.filter((e) => e["type"] === "drive");
 }
+
+/** 最后一次交接块本身（顶层字段断言的入口；交接事件是 `{type:"handoff", handoff:{...}}`）。 */
+function lastHandoff(events: SinkEvent[]): Record<string, unknown> {
+  const handoffs = events.filter((e) => e["type"] === "handoff");
+  assert.ok(handoffs.length > 0, "a handoff event exists");
+  return handoffs[handoffs.length - 1]!["handoff"] as Record<string, unknown>;
+}
+
+/** 停因专属事实的顶层键闭集（顺序 = `topStopFacts` 的展开序；跨停因断言共用）。 */
+const STOP_FACT_KEYS = ["observation", "model_abstain", "nav_error", "off_envelope"] as const;
+
+/** 一个交接块上出现了哪些停因专属事实（空数组 = 旧形状，键一个都没有）。 */
+function stopFactKeysOf(handoff: Record<string, unknown>): string[] {
+  return STOP_FACT_KEYS.filter((k) => k in handoff);
+}
+
+/**
+ * 三档低置信的处置方向标记：摘要进 Agent 上下文，措辞就是行动面——
+ * 改这里等于改契约（`whyStuckSummary` 的人话必须仍然说得出下一步查什么）。
+ */
+const LOW_CONFIDENCE_DIRECTION_MARK: Record<(typeof LOW_CONFIDENCE_KINDS)[number], string> = {
+  "observation-empty": "先查抽取/等渲染",
+  "observation-all-forbidden": "先查为什么都被排除",
+  "model-unsure": "该调题面或换问法",
+};
 
 /** 最后一次交接的 `why_stuck.evidence`（值需求/落空 hint 等现场事实的断言入口）。 */
 function lastHandoffEvidence(events: SinkEvent[]): Record<string, unknown> {
@@ -145,7 +189,8 @@ async function scenarioArrival(origin: string): Promise<void> {
     assert.equal(end!["ok"], true);
     assert.equal(end!["stop_code"], "final_signal_held");
     assert.equal(end!["model_asks"], 0, "no model ask on the rules path");
-    assert.equal(end!["conf_floor"], 0.25, "the terminal summary carries the effective floor scale (default 0.25)");
+    assert.equal(end!["conf_floor"], DEFAULT_CONF_FLOOR,
+      "the terminal summary carries the effective floor scale (single source = DEFAULT_CONF_FLOOR)");
     assert.equal("attached" in end!, false, "the non-attach summary keeps its old shape (attached only in attach mode)");
   } finally {
     await rt.closeBrowser();
@@ -161,6 +206,22 @@ async function scenarioNeedsValue(origin: string): Promise<void> {
   try {
     const stop = await rt.drive();
     assert.equal(stop, "needs_value", "fill without a slot must stop honestly");
+    // 非低置信停因的旧形状逐字节不变：不是 low_confidence 就不出现分类键（原文 + 会话投影两层）。
+    const handoff = lastHandoff(events);
+    assert.equal("low_confidence_kind" in handoff, false, "a non-low-confidence handoff carries no classification key");
+    assert.equal("low_confidence_kind" in projectHandoff(handoff as unknown as PilotHandoff), false,
+      "the session projection invents no key the engine did not give");
+    // 停因专属事实只在对应停因出现：needs_value 的顶层键集与引入它们之前完全相同。
+    assert.deepEqual(stopFactKeysOf(handoff), [], "needs_value owns none of the stop-specific facts");
+    // 现场定位键则相反：值需求是这条停因的判据，必须自己在顶层（桥面丢 evidence）。
+    const need = handoff["needs_value"] as Record<string, unknown>;
+    assert.equal(need["key"], "Search term", "the value need is a top-level fact (not evidence-only)");
+    assert.equal(typeof need["target"], "string", "and it names the target");
+    assert.equal(typeof need["ref"], "string", "and carries the pool ref for evidence");
+    assert.equal("resume_hint" in handoff, false, "no missed hint yet = no resume_hint key");
+    assert.deepEqual(Object.keys(projectHandoff(handoff as unknown as PilotHandoff)), [
+      "stop_code", "needs_value", "step_id", "goal_digest", "why_stuck", "what_would_unblock", "evidence_refs", "url", "final_signal",
+    ], "the needs_value projection carries exactly its own locator key");
     const outcome = await rt.handleLine('{"cmd":"resume","hint":"#q","value":{"Search term":"amber"}}');
     assert.equal(outcome, "drive", "resume with explicit value re-enters driving");
     const stop2 = await rt.drive();
@@ -243,6 +304,7 @@ async function scenarioResumeHintMissed(origin: string): Promise<void> {
   });
   try {
     assert.equal(await rt.drive(), "needs_value");
+    assert.equal("resume_hint" in lastHandoff(events), false, "no miss yet = no resume_hint on the first handoff");
     assert.equal(await rt.handleLine('{"cmd":"resume","hint":"#nope"}'), "drive");
     assert.equal(await rt.drive(), "needs_value", "the missed hint falls back to the same value-needing target");
     const ev = lastHandoffEvidence(events);
@@ -250,6 +312,39 @@ async function scenarioResumeHintMissed(origin: string): Promise<void> {
       "the missed hint is explicit evidence on the next handoff");
     assert.equal((ev["needs_value"] as Record<string, unknown>)["key"], "Search term",
       "the value need is still named alongside the missed hint");
+    // 顶层同源：Agent 看不到 evidence（桥面丢弃），"上次点名落空"必须自己在顶层。
+    const handoff = lastHandoff(events);
+    assert.deepEqual(handoff["resume_hint"], { hint: "#nope", missed: true },
+      "the missed hint is a top-level fact — it is why the Agent is being asked again");
+    assert.deepEqual(projectHandoff(handoff as unknown as PilotHandoff)["resume_hint"],
+      { hint: "#nope", missed: true }, "the session projection keeps the same shape");
+    assert.deepEqual((handoff["needs_value"] as Record<string, unknown>)["key"], "Search term",
+      "the value need rides along on the same handoff");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/**
+ * 期望页可见性：`--expect-url` 声明后，交接块顶层必须给出同一份值——
+ * `off_task_page` 的解锁建议说「偏离 --expect-url」，不给值 Agent 无从判断偏离了多少。
+ * 这里用 `needs_value` 停因（同一个声明在任何停因都可见）造交付。
+ */
+async function scenarioExpectUrlVisible(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/home.html`, goal: "Search term", expectUrl: "/home.html",
+    finalSignal: { css_value_equals: ["#q", "amber"] }, maxSteps: 4,
+  });
+  try {
+    assert.equal(await rt.drive(), "needs_value", "a declared expect_url does not change the stop cause");
+    const handoff = lastHandoff(events);
+    assert.equal(handoff["expect_url"], "/home.html",
+      "the declared task-page substring is a top-level fact, not evidence-only");
+    assert.equal(lastHandoffEvidence(events)["expect_url"], "/home.html",
+      "the evidence block carries the same raw value (single source, two visible faces)");
+    assert.equal(projectHandoff(handoff as unknown as PilotHandoff)["expect_url"], "/home.html",
+      "the session projection keeps it");
+    assert.equal("resume_hint" in handoff, false, "an expect_url fact does not drag the other locator keys in");
   } finally {
     await rt.closeBrowser();
   }
@@ -284,10 +379,12 @@ async function scenarioStuckInert(origin: string): Promise<void> {
   });
   try {
     const stop = await rt.drive();
-    assert.equal(stop, "stuck_inert", "three no-change clicks must stop honestly");
+    // 规则档命中一个"点了没用"的目标：**只试一次**就把它从规则档排除，转由模型档接手
+    // （本 lane 无模型 → 如实 no_model_runtime）。复读三次白烧预算是缺陷，不是安全网。
+    assert.equal(stop, "no_model_runtime", "a dead rule target falls through to the model lane");
     const drives = drivesOf(events);
-    assert.equal(drives.length, 3, "inert threshold is 3");
-    assert.ok(drives.every((d) => d["changed"] === false), "every inert click changed nothing");
+    assert.equal(drives.length, 1, "the dead rule target is tried exactly once");
+    assert.equal(drives[0]!["changed"], false, "that single attempt changed nothing");
     const outcome = await rt.handleLine('{"cmd":"resume","hint":"#detail-link"}');
     assert.equal(outcome, "drive");
     const stop2 = await rt.drive();
@@ -314,7 +411,7 @@ async function scenarioRowUnitFold(origin: string): Promise<void> {
   });
   try {
     const stop = await rt.drive();
-    assert.equal(stop, "low_confidence", "unreachable decision source stops honestly first");
+    assert.notEqual(stop, null, "the run stops before the resume (its code is not this scenario's subject)");
     const outcome = await rt.handleLine('{"cmd":"resume","hint":"提交申请"}');
     assert.equal(outcome, "drive");
     const stop2 = await rt.drive();
@@ -366,7 +463,28 @@ async function scenarioPickRejected(origin: string): Promise<void> {
       ?.["why_stuck"] as Record<string, unknown> | undefined)?.["evidence"] as Record<string, unknown> | undefined;
     const ledger = (ev?.["ledger"] ?? []) as Array<Record<string, unknown>>;
     assert.equal(ledger.length, 1, "the rejection is recorded in the single-source ledger");
+    // 观测体检：低置信交接必须能回答"当时有多少候选、多少被禁"。
+    const obs = ev?.["observation"] as Record<string, unknown> | undefined;
+    assert.ok(obs !== undefined, "the low-confidence handoff carries observation facts");
+    assert.equal(typeof obs?.["pool_size"], "number", "pool_size is a real reading");
+    // 该场景唯一候选被拒后池已耗尽——这**不是**模型判断，分类必须落在观测档。
+    assert.ok(["observation-empty", "observation-all-forbidden"].includes(String(ev?.["low_confidence_kind"])),
+      `an exhausted pool is an observation problem, not a model judgement (got ${String(ev?.["low_confidence_kind"])})`);
     assert.ok(String(ledger[0]!["last_outcome"]).startsWith("unhittable"), "outcome names the cover relation");
+    // 分类是**顶层**字段：桥面只投影交接块白名单字段（evidence 整块被丢弃），档位必须自己能到 Agent。
+    assert.ok(handoff !== undefined, "the low-confidence stop is reported as a handoff");
+    const block = handoff["handoff"] as Record<string, unknown>;
+    const kind = String(block["low_confidence_kind"]);
+    assert.ok((LOW_CONFIDENCE_KINDS as readonly string[]).includes(kind),
+      `the classification is a top-level handoff field (got ${JSON.stringify(block["low_confidence_kind"])})`);
+    assert.ok((PILOT_STOP_CODES as readonly string[]).includes(String(block["stop_code"])),
+      "the stop code stays inside the frozen 12-code closed set");
+    const view = projectHandoff(block as unknown as PilotHandoff);
+    assert.equal(view["low_confidence_kind"], kind, "the session projection keeps the classification (evidence is not a carrier)");
+    const summary = String((view["why_stuck"] as Record<string, unknown>)["summary"]);
+    assert.ok(summary.startsWith("low_confidence @ step "), "the stop-code prefix stays parsable");
+    assert.ok(summary.includes(LOW_CONFIDENCE_DIRECTION_MARK[kind as (typeof LOW_CONFIDENCE_KINDS)[number]]),
+      `the summary points at the direction for ${kind} (got ${summary})`);
   } finally {
     await rt.closeBrowser();
   }
@@ -401,7 +519,7 @@ async function scenarioNestedFold(origin: string): Promise<void> {
   });
   try {
     const stop = await rt.drive();
-    assert.equal(stop, "low_confidence", "unreachable decision source stops honestly first");
+    assert.notEqual(stop, null, "the run stops before the resume (its code is not this scenario's subject)");
     const outcome = await rt.handleLine('{"cmd":"resume","hint":"确认订单"}');
     assert.equal(outcome, "drive");
     const stop2 = await rt.drive();
@@ -444,6 +562,10 @@ async function scenarioBudget(origin: string): Promise<void> {
     const block = handoff!["handoff"] as Record<string, unknown>;
     assert.equal(block["final_signal"], null, "no declared completion signal = an explicit unverified end-state fact");
     assert.equal("weak_picks" in block, false, "no sub-floor model vote = no weak_picks key (old handoff shape)");
+    assert.deepEqual(stopFactKeysOf(block), [], "budget_exceeded owns none of the stop-specific facts");
+    assert.deepEqual(Object.keys(projectHandoff(block as unknown as PilotHandoff)), [
+      "stop_code", "step_id", "goal_digest", "why_stuck", "what_would_unblock", "evidence_refs", "url", "final_signal",
+    ], "the budget_exceeded projection keeps its pre-existing top-level key set");
     // 预算用尽 = 终态：续驾驶指令（resume/redirect）一律结构化拒绝，不再重试。
     const refused = await rt.handleLine('{"cmd":"resume","hint":"#detail-link"}');
     assert.equal(refused, "stay", "budget_exhausted is terminal: resume is refused");
@@ -495,7 +617,8 @@ async function scenarioNoModel(origin: string): Promise<void> {
   });
   try {
     const stop = await rt.drive();
-    assert.equal(stop, "low_confidence", "the unreachable ask degrades into an honest low-confidence handoff");
+    // 决策源降级**当轮**就如实报 no_model_runtime——"模型不在位"不能伪装成"模型没把握"。
+    assert.equal(stop, "no_model_runtime", "an unreachable decision source stops as no_model_runtime at once");
     const outcome = await rt.handleLine('{"cmd":"resume"}');
     assert.equal(outcome, "drive");
     const stop2 = await rt.drive();
@@ -538,8 +661,454 @@ async function scenarioContextText(_origin: string): Promise<void> {
 }
 
 /**
- * 结束态可见性纯函数（evidence-only）：`weakPicksFrom` 只收 **model** 票且 `conf < 0.25`
- * （静态默认刻度），有界 ≤6、无票 = undefined（旧交接形状不变）；`conf_floor` 由终态摘要给出。
+ * 模型**显式弃权**的事实面（evidence-only）：`handoffWhyEvidence.modelAbstain` 只在模型真的
+ * 看了候选说「都不推进」时出现；引擎侧没拿到选择（ref=null 但不是弃权）不出现该键。
+ * 两者同落 `low_confidence` 交 Agent 兜底，但只有前者能回答「模型看着 N 个候选说不行」。
+ */
+/**
+ * `low_confidence` 三义分离（观测体检）：同一个码背后是完全不同的处境，处置方向相反——
+ * 「池里一个候选都没有」要去查抽取/等渲染，「全被禁选」要查为什么都被排除，
+ * 「有可用候选、模型没把握」才该调题面。纯函数钉分类，现场钉证据真的带出来。
+ */
+async function scenarioObservationHealth(_origin: string): Promise<void> {
+  // ① 分类：空池 / 全禁选 / 有可用候选。
+  assert.equal(lowConfidenceKindOf({ pool_size: 0, forbidden: 0, empty_labels: 0 }), "observation-empty",
+    "an empty pool is an observation problem, not a model judgement");
+  assert.equal(lowConfidenceKindOf({ pool_size: 3, forbidden: 3, empty_labels: 0 }), "observation-all-forbidden",
+    "everything forbidden is still not a model judgement");
+  assert.equal(lowConfidenceKindOf({ pool_size: 3, forbidden: 1, empty_labels: 0 }), "model-unsure",
+    "available candidates + low score is the only real model-unsure case");
+  // ② 取数：空标签计数与禁选计数取自当场读数。
+  const pool = {
+    "@e1": { tag: "input", label: "" } as Elem,
+    "@e2": { tag: "button", label: "Go" } as Elem,
+  };
+  assert.deepEqual(observationFactsOf(pool, new Set(["@e2"])), { pool_size: 2, forbidden: 1, empty_labels: 1 },
+    "facts are read from the pool and the forbidden set");
+  assert.deepEqual(observationFactsOf(null, new Set()), { pool_size: 0, forbidden: 0, empty_labels: 0 },
+    "no pool yet is still reported honestly (zero)");
+  // ③ 闭集：停因码仍是冻结的 12 码，分类是三值闭集（新增值 = 改契约）。
+  assert.equal(PILOT_STOP_CODES.length, 12, "the stop-code closed set stays frozen at 12 codes");
+  assert.equal(new Set(PILOT_STOP_CODES).size, PILOT_STOP_CODES.length, "stop codes are unique");
+  assert.deepEqual([...LOW_CONFIDENCE_KINDS], ["observation-empty", "observation-all-forbidden", "model-unsure"],
+    "the classification closed set has exactly three values");
+  // ④ 摘要：停因码恒在行首（结构可解析），三档各自给出人话方向，档位名不再进摘要。
+  const factsOf = {
+    "observation-empty": { pool_size: 0, forbidden: 0, empty_labels: 0 },
+    "observation-all-forbidden": { pool_size: 3, forbidden: 3, empty_labels: 2 },
+    "model-unsure": { pool_size: 4, forbidden: 1, empty_labels: 0 },
+  } as const;
+  for (const kind of LOW_CONFIDENCE_KINDS) {
+    const summary = whyStuckSummary({
+      stop: "low_confidence", step: 3, url: "https://a.test/list", observation: factsOf[kind], loopTrip: null,
+    });
+    assert.ok(summary.startsWith("low_confidence @ step 3 (https://a.test/list)"),
+      "the stop code + step + url prefix stays byte-stable");
+    assert.ok(!summary.includes(kind), "the classification is carried by the top-level key, not by a bracket tag");
+    assert.ok(summary.includes(LOW_CONFIDENCE_DIRECTION_MARK[kind]),
+      `the ${kind} summary says what to look at next (got ${summary})`);
+  }
+  // 桥面摘要上限 300 字符：最长 URL（120）+ 死目标事实 + 方向句的最坏拼装也不越界。
+  const worst = whyStuckSummary({
+    stop: "low_confidence", step: 200, url: `https://a.test/${"x".repeat(400)}`,
+    observation: factsOf["model-unsure"], loopTrip: { desc: "y".repeat(200), tries: 3 },
+  });
+  assert.ok(worst.length <= 300, `the summary fits the bridge cap of 300 chars (got ${worst.length})`);
+  // ⑤ 非低置信停因的摘要逐字节不变（不新增方向句，旧消费者照旧解析）。
+  assert.equal(
+    whyStuckSummary({ stop: "needs_value", step: 2, url: "https://a.test/x", observation: null, loopTrip: null }),
+    "needs_value @ step 2 (https://a.test/x)",
+    "a non-low-confidence summary keeps its old shape",
+  );
+  assert.equal(
+    whyStuckSummary({ stop: "stuck_inert", step: 5, url: "", observation: null, loopTrip: { desc: "Retry", tries: 3 } }),
+    'stuck_inert @ step 5 — dead target: "Retry" driven 3 time(s) without the signal holding',
+    "the dead-target suffix is unchanged",
+  );
+}
+
+/**
+ * 决策源降级一次就停：服务**在回应** 403（不是不可达）时，驾驶面必须当轮就如实停成
+ * `no_model_runtime`，而不是先报一个误导性的 `low_confidence`、等下一轮才翻。
+ * 同一条规则也覆盖不可达端点——"模型不在位"与"模型没把握"必须是两个停因。
+ */
+async function scenarioProviderDownStopsOnce(origin: string): Promise<void> {
+  // 现场：goal 不命中规则 → 必须问模型 → 服务回 403 → 当轮停。
+  const { rt, events } = await boot(
+    { url: `${origin}/home.html`, goal: "zerblonix frobnicate", maxSteps: 6 },
+    `${origin}/decision-403`,
+  );
+  try {
+    const stop = await rt.drive();
+    assert.equal(stop, "no_model_runtime", "an auth failure stops honestly on the same round");
+    const drives = drivesOf(events);
+    assert.equal(drives.length, 0, "no action is executed after an auth failure");
+    const handoff = events.filter((e) => e["type"] === "handoff").pop() as Record<string, unknown> | undefined;
+    assert.ok(handoff !== undefined, "the stop is reported as a handoff");
+    const code = (handoff!["handoff"] as Record<string, unknown>)["stop_code"];
+    assert.equal(code, "no_model_runtime", "the handoff carries the typed stop code");
+  } finally {
+    await rt.closeBrowser();
+  }
+
+  // 同一条规则覆盖**不可达**端点（不是鉴权问题，同样不能伪装成低置信）。
+  const unreachable = await boot({ url: `${origin}/home.html`, goal: "zerblonix frobnicate", maxSteps: 6 });
+  try {
+    const stop = await unreachable.rt.drive();
+    assert.equal(stop, "no_model_runtime", "an unreachable provider also stops as no_model_runtime");
+  } finally {
+    await unreachable.rt.closeBrowser();
+  }
+}
+
+/**
+ * 空标签身份兜底（浏览器树的注入段）：池里有 role/name/input_type 而渲染只给 label 时，
+ * 模型看到的是 `input ""`——等于让它在无法区分的行里投票。钉住三件事：
+ * ① 只补空标签（有标签的行逐字节不变，无身份字段的行也不补）；② 无空标签可补时返回同一对象
+ * （题面逐字节不变）；③ 真实抽取链上空标签候选渲染出身份 token。
+ */
+async function scenarioAskIdentityFallback(origin: string): Promise<void> {
+  // ① 纯函数：只对空标签生效，且不制造无谓分配。
+  const labeled = { "@e3": { tag: "button", label: "Search" } as Elem };
+  assert.equal(askViewOf(labeled), labeled, "no empty label → the same pool object (byte-identical ask)");
+  const anonymous = { "@e1": { tag: "input", label: "" } as Elem };
+  assert.equal(askViewOf(anonymous), anonymous, "empty label without identity fields → not rewritten");
+  assert.equal(identityLabelOf({ tag: "input", label: "" } as Elem), null, "no identity fields → no fallback text");
+  const mixed = {
+    "@e1": { tag: "input", label: "" } as Elem,
+    "@e2": { tag: "input", label: "", role: "combobox", name: "q", input_type: "search" } as Elem,
+    "@e3": { tag: "button", label: "Search" } as Elem,
+  };
+  const view = askViewOf(mixed);
+  assert.notEqual(view, mixed, "a mixed pool produces a rewritten ask view");
+  assert.equal(view["@e1"], mixed["@e1"], "a row without identity is passed through untouched");
+  assert.equal(view["@e3"], mixed["@e3"], "a labeled row is passed through untouched");
+  assert.equal(view["@e2"]!["label"], "combobox [name=q] [type=search]", "identity tokens use the fixed order");
+  // 渲染面：空标签行不再是 `input ""`。
+  const crit = criteriaView(view, new Set(), null, null);
+  assert.ok(crit["@e2"]!.includes("[name=q]"), "the rendered line carries the pool identity");
+  assert.ok(!crit["@e2"]!.includes('""'), "the rendered line is no longer an empty label");
+
+  // ② 真实抽取链：fixture 的 input 只有 name/type，抽取后 label 为空 → 兜底补出身份。
+  const { rt } = await boot({ url: `${origin}/unlabeled-target.html`, goal: "搜索", maxSteps: 2 });
+  try {
+    const page = await rt.page();
+    const { elems } = await rt.mw()._extractPoolSettled(page, "bucketed");
+    const empty = Object.entries(elems).filter(([, e]) => e.label === "");
+    assert.ok(empty.length > 0, "the fixture really produces label-less candidates");
+    const realView = askViewOf(elems);
+    const realCrit = criteriaView(realView, new Set(), null, null);
+    const rendered = Object.entries(realCrit).filter(([, line]) => line.includes("[name=q]"));
+    assert.equal(rendered.length, 1, "the unlabeled input renders its name identity");
+    const rawCrit = criteriaView(elems, new Set(), null, null);
+    assert.ok(
+      Object.values(rawCrit).some((line) => line.includes('""')),
+      "without the fallback the same pool would render an empty label",
+    );
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/**
+ * 决策树契约（纯函数）：树的加载期校验真的会拒绝结构错误，且 walker 按数据路由。
+ * 钉住三件事：① 浏览器树自身合法且状态 id 与实现绑定闭集一致；② 缺出边/kind 越界/悬空终点
+ * 三类结构错误都被拒（不是靠运行时炸）；③ walker 走的是**数据里的边**，不是写死的分支。
+ */
+async function scenarioTreeContract(_origin: string): Promise<void> {
+  assert.deepEqual(validateTree(BROWSER_TREE), [], "the browser tree validates clean");
+  assert.equal(
+    BROWSER_TREE.states.map((s) => s.id).sort().join(","),
+    [...BROWSER_STATE_IDS].sort().join(","),
+    "declared state ids match the implementation-binding closed set",
+  );
+  // 缺出边：删掉一条边后，该结果必须被报为"没有出边"。
+  const missingEdge: DecisionTree = {
+    ...BROWSER_TREE, edges: BROWSER_TREE.edges.filter((e) => e.result !== "abstain"),
+  };
+  assert.ok(
+    validateTree(missingEdge).some((x) => x.includes("abstain") && x.includes("没有出边")),
+    "a declared result without an edge is rejected at load",
+  );
+  // kind 越界：应用不能自铸状态类型。
+  const badKind = {
+    ...BROWSER_TREE,
+    states: BROWSER_TREE.states.map((s) => (s.id === "verify" ? { id: "verify", kind: "magic" as never } : s)),
+  } as DecisionTree;
+  assert.ok(validateTree(badKind).some((x) => x.includes("不在闭集")), "an unknown state kind is rejected");
+  // 悬空终点。
+  const dangling: DecisionTree = {
+    ...BROWSER_TREE,
+    edges: BROWSER_TREE.edges.map((e) => (e.from === "select" && e.result === "picked" ? { ...e, to: "nowhere" } : e)),
+  };
+  assert.ok(validateTree(dangling).some((x) => x.includes("边终点不存在")), "an edge to a missing state is rejected");
+  // walker 按数据路由：同一份 board，改边即改行为（合成树用闭集内的 kind 与结果）。
+  const board = { seen: [] as string[] };
+  const handlers = {
+    a: async (): Promise<StateOutcome> => ({ result: "picked" }),
+    b: async (): Promise<StateOutcome> => ({ result: "bound" }),
+  };
+  const straight: DecisionTree = {
+    name: "t", entry: "a",
+    states: [{ id: "a", kind: "select-tool" }, { id: "b", kind: "resolve-param" }],
+    edges: [
+      { from: "a", result: "picked", to: "b" },
+      { from: "a", result: "below-floor", to: TREE_EXIT },
+      { from: "a", result: "abstain", to: TREE_EXIT },
+      { from: "a", result: "no-model", to: TREE_EXIT },
+      { from: "a", result: "ambiguous", to: TREE_EXIT },
+      { from: "b", result: "bound", to: TREE_EXIT },
+      { from: "b", result: "needs-value", to: TREE_EXIT },
+    ],
+  };
+  assert.equal((await walkTree(straight, handlers, board)).kind, "exit", "walker follows the declared edge to the exit");
+  // 停因出口不经过边：状态直接 stop 即终止（停因闭集归调用方）。
+  const stopAt = {
+    a: async (): Promise<StateOutcome> => ({ stop: "low_confidence" }),
+  };
+  const stopped = await walkTree(straight, { ...handlers, a: stopAt.a }, board);
+  assert.deepEqual(stopped, { kind: "stop", code: "low_confidence" }, "a state can stop without an edge");
+  // 预算边界由调用方兜住：shouldContinue 为假时连入口都不求值。
+  let entered = 0;
+  const counted = { a: async (): Promise<StateOutcome> => { entered += 1; return { result: "picked" }; } };
+  const capped = await walkTree(straight, { ...handlers, ...counted }, board, { shouldContinue: () => false });
+  assert.equal(capped.kind, "exit", "budget boundary exits before evaluating a state");
+  assert.equal(entered, 0, "no state is evaluated once the caller's budget is exhausted");
+}
+
+/**
+ * 停因专属事实的纯函数面：`stopFactsOf` 按停因装配、`topStopFacts` 有界投影、
+ * `handoffWhyEvidence` 的 evidence 形状不变、`projectHandoff` 的顶层键集与取值。
+ *
+ * 钉四件事：① 只在对应停因出现（其它停因的完整 JSON 逐字节不变）；② 四项各自在顶层出现；
+ * ③ 文本项有界；④ 整数项只带固定键（多出的键不进投影，桥不补键）。
+ */
+async function scenarioStopFactsPure(_origin: string): Promise<void> {
+  const pool = {
+    "@e1": { tag: "input", label: "" } as Elem,
+    "@e2": { tag: "button", label: "Go" } as Elem,
+    "@e3": { tag: "a", label: "More" } as Elem,
+  };
+  const forbidden = new Set(["@e2"]);
+  const gate = { stop: "host_not_allowed" as const, offEnvelope: "http://away.test/x", reason: "navigation failed: net::ERR_NAME_NOT_RESOLVED" };
+  const abstain = { pool_size: 3, asks: 1 };
+  // ① 非低置信/信封/导航停因：即使 gate 与弃权事实都在场，也一个键都不出。
+  for (const stop of ["needs_value", "budget_exceeded", "stuck_inert", "target_ambiguous",
+    "off_task_page", "no_model_runtime", "browser_dead", "final_signal_held"] as const) {
+    const facts = stopFactsOf({ stop, gate, modelAbstain: abstain, pool, forbidden });
+    assert.deepEqual(facts, {}, `${stop} owns no stop-specific facts (old handoff shape unchanged)`);
+    assert.deepEqual(topStopFacts(facts), {}, `${stop} projects no top-level facts`);
+  }
+  // ② 四项各自在对应停因出现在顶层。
+  const low = stopFactsOf({ stop: "low_confidence", gate: null, modelAbstain: abstain, pool, forbidden });
+  assert.deepEqual(low.observation, { pool_size: 3, forbidden: 1, empty_labels: 1 },
+    "low_confidence carries the observation counts read from the pool");
+  assert.deepEqual(low.model_abstain, abstain, "an explicit abstain rides with the observation");
+  assert.deepEqual(stopFactKeysOf(topStopFacts(low)), ["observation", "model_abstain"],
+    "both low-confidence facts are top-level");
+  const noVote = stopFactsOf({ stop: "low_confidence", gate: null, modelAbstain: null, pool, forbidden });
+  assert.deepEqual(stopFactKeysOf(topStopFacts(noVote)), ["observation"],
+    "no abstain (the engine never got a choice) = observation counts only");
+  assert.deepEqual(stopFactsOf({ stop: "host_not_allowed", gate, modelAbstain: null, pool, forbidden }),
+    { off_envelope: "http://away.test/x" }, "the envelope stop carries the landing URL");
+  assert.deepEqual(stopFactsOf({ stop: "unreachable", gate, modelAbstain: null, pool, forbidden }),
+    { nav_error: gate.reason }, "the unreachable stop carries the original nav error");
+  assert.deepEqual(stopFactsOf({ stop: "config_error", gate: { ...gate, reason: "navigation failed: net::ERR_UNSAFE_PORT" }, modelAbstain: null, pool, forbidden }),
+    { nav_error: "navigation failed: net::ERR_UNSAFE_PORT" }, "the config-error stop carries it too");
+  // ③ 文本项有界（超长裁到表界，不把一条 4000 字的浏览器原文塞进 Agent 上下文）。
+  const longText = "x".repeat(4000);
+  const bounded = topStopFacts({ nav_error: longText, off_envelope: longText });
+  assert.equal(String(bounded["nav_error"]).length, HANDOFF_FACT_TEXT_MAX, "nav_error is bounded at the cap");
+  assert.equal(String(bounded["off_envelope"]).length, HANDOFF_FACT_TEXT_MAX, "off_envelope is bounded at the cap");
+  // ④ evidence 与顶层同源（同一份事实，两种可见面）。
+  const base = {
+    inertRun: 0, forbidden: new Set<string>(), ledgerEvidence: {}, framesExcluded: [],
+    expectUrl: null, valueNeed: null, missedHint: null,
+  };
+  const evidence = handoffWhyEvidence({ ...base, stopFacts: low });
+  assert.deepEqual(evidence["model_abstain"], abstain, "the abstain fact is in the evidence block");
+  assert.deepEqual(evidence["observation"], low.observation, "the observation counts are in the evidence block");
+  assert.equal(evidence["low_confidence_kind"], "model-unsure",
+    "the classification still travels with the observation in evidence");
+  assert.equal(handoffWhyEvidence({ ...base })["model_abstain"], undefined,
+    "no stop facts = key absent in evidence (old shape unchanged)");
+  // ⑤ 会话投影：顶层透传 + 只重建固定键 + 文本按表界裁剪。
+  const head = { step_id: 2, goal_digest: "g", why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "http://a.test/x" };
+  const projected = projectHandoff({ stop_code: "low_confidence", ...head, ...topStopFacts(low) } as PilotHandoff);
+  assert.deepEqual(projected["observation"], low.observation, "the engine projection keeps the observation counts");
+  assert.deepEqual(projected["model_abstain"], low.model_abstain, "the engine projection keeps the abstain fact");
+  const injected = projectHandoff({
+    stop_code: "low_confidence", ...head,
+    model_abstain: { pool_size: 1, asks: 1, extra: 9 } as unknown as { pool_size: number; asks: number },
+    observation: { pool_size: 1, forbidden: 0, empty_labels: 0, extra: 9 } as unknown as ObservationFacts,
+  } as PilotHandoff);
+  assert.deepEqual(Object.keys(injected["model_abstain"] as object), ["pool_size", "asks"], "only the registered keys are projected");
+  assert.deepEqual(Object.keys(injected["observation"] as object), ["pool_size", "forbidden", "empty_labels"],
+    "the observation shape is rebuilt from its registered keys");
+  const clipped = projectHandoff({ stop_code: "unreachable", ...head, nav_error: longText } as PilotHandoff);
+  assert.equal(String(clipped["nav_error"]).length, HANDOFF_FACT_TEXT_MAX, "the engine projection clips the original text too");
+  // ⑥ 至少两条非相关停因的**完整 JSON** 逐字节不变（顶层键集 + 键序都不引入新键）。
+  const untouched = (stop: "needs_value" | "budget_exceeded"): string =>
+    JSON.stringify(projectHandoff({ stop_code: stop, ...head, ...topStopFacts(stopFactsOf({ stop, gate, modelAbstain: abstain, pool, forbidden })) } as PilotHandoff));
+  for (const stop of ["needs_value", "budget_exceeded"] as const) {
+    assert.equal(untouched(stop), JSON.stringify({
+      stop_code: stop, step_id: 2, goal_digest: "g", why_stuck: { summary: "s", evidence: {} },
+      what_would_unblock: [], evidence_refs: {}, url: "http://a.test/x",
+    }), `${stop} projects byte-identically to the shape without the stop facts`);
+  }
+}
+
+/**
+ * 现场定位键（值需求 / 落空点名 / 期望页）的纯函数面：只在对应情形出现、顶层有界、
+ * 引擎投影只重建固定键。
+ *
+ * 钉四件事：① 缺省 = 三键都不出（两条非对应停因的**完整 JSON** 逐字节不变）；
+ * ② 三项各自出现且形状固定；③ 文本项按表界裁剪；④ 投影只认固定键（多出的键与半截
+ * 对象都不进投影），顶层与 evidence 同源。
+ */
+async function scenarioLocatorFactsPure(_origin: string): Promise<void> {
+  const none = { expectUrl: null, valueNeed: null, missedHint: null };
+  assert.deepEqual(topLocatorFacts(none), {}, "no locator fact = no top-level key");
+  const head = {
+    step_id: 2, goal_digest: "g", why_stuck: { summary: "s", evidence: {} },
+    what_would_unblock: [], evidence_refs: {}, url: "http://a.test/x",
+  };
+  // ① 非对应情形逐字节不变：最宽的预声明（expect_url）也没有，投影键集与键序都不动。
+  for (const stop of ["budget_exceeded", "target_ambiguous"] as const) {
+    assert.equal(JSON.stringify(projectHandoff({ stop_code: stop, ...head, ...topHandoffFacts({}, none) } as PilotHandoff)),
+      JSON.stringify({ stop_code: stop, ...head }),
+      `${stop} projects byte-identically when no locator fact exists`);
+  }
+  // ② 三项各自出现（顶层，互不牵连）。
+  const need = { target: "Search term", key: "Search term", ref: "e4" };
+  assert.deepEqual(topLocatorFacts({ ...none, valueNeed: need }), { needs_value: need },
+    "the value need alone is a top-level fact");
+  assert.deepEqual(topLocatorFacts({ ...none, expectUrl: "/maps" }), { expect_url: "/maps" },
+    "a declared expect_url is top-level on its own");
+  assert.deepEqual(topLocatorFacts({ ...none, missedHint: "#nope" }),
+    { resume_hint: { hint: "#nope", missed: true } }, "a missed hint is top-level with missed:true");
+  // ③ 有界：三处文本都裁到表界（Agent 上下文里不放原始长文本）。
+  const longText = "x".repeat(4000);
+  const bounded = topLocatorFacts({
+    expectUrl: longText, valueNeed: { target: longText, key: longText, ref: longText }, missedHint: longText,
+  });
+  assert.equal(String(bounded["expect_url"]).length, HANDOFF_FACT_TEXT_MAX, "expect_url is bounded at the cap");
+  for (const text of Object.values(bounded["needs_value"] as Record<string, string>)) {
+    assert.equal(text.length, HANDOFF_FACT_TEXT_MAX, "each value-need text is bounded at the cap");
+  }
+  assert.equal(String((bounded["resume_hint"] as Record<string, unknown>)["hint"]).length, HANDOFF_FACT_TEXT_MAX,
+    "the missed hint is bounded too");
+  // ④ 引擎投影只重建固定键。
+  const dirty = projectHandoff({
+    stop_code: "needs_value", ...head, expect_url: longText,
+    needs_value: { ...need, sig: "SECRET", targetId: "s" } as unknown as PilotHandoff["needs_value"],
+    resume_hint: { hint: "#nope", missed: true, extra: 1 } as unknown as PilotHandoff["resume_hint"],
+  } as PilotHandoff);
+  assert.deepEqual(Object.keys(dirty["needs_value"] as object), ["target", "key", "ref"],
+    "only the registered value-need keys are projected");
+  assert.deepEqual(Object.keys(dirty["resume_hint"] as object), ["hint", "missed"],
+    "only the registered missed-hint keys are projected");
+  assert.equal(String(dirty["expect_url"]).length, HANDOFF_FACT_TEXT_MAX,
+    "the engine projection clips the declared URL too");
+  const partial = projectHandoff({
+    stop_code: "needs_value", ...head,
+    needs_value: { target: "t", key: "k" } as unknown as PilotHandoff["needs_value"],
+    resume_hint: { hint: "#nope", missed: false } as unknown as PilotHandoff["resume_hint"],
+  } as PilotHandoff);
+  assert.equal("needs_value" in partial, false, "a partial value need is not padded into a shape");
+  assert.equal("resume_hint" in partial, false, "missed:false is not a missed hint (the bridge invents nothing)");
+  // ⑤ 顶层与 evidence 同源（同一份事实，两种可见面）。
+  const evidence = handoffWhyEvidence({
+    inertRun: 0, forbidden: new Set<string>(), ledgerEvidence: {}, framesExcluded: [],
+    expectUrl: "/maps", valueNeed: need, missedHint: "#nope",
+  });
+  assert.deepEqual(evidence["needs_value"], need, "the evidence block keeps the same value need");
+  assert.deepEqual(evidence["resume_hint"], { hint: "#nope", missed: true }, "and the same missed hint");
+  assert.equal(evidence["expect_url"], "/maps", "and the same declared URL");
+}
+
+/**
+ * 决策桩：按剧本回一条 OpenAI Decisions 形状的答案（`null` = 空答案表）。
+ * 只服务本 lane 的"模型说不行 / 模型没答"两个对照臂——不启模型、不外呼。
+ */
+async function startDecisionStub(answer: Record<string, unknown> | null): Promise<{ origin: string; close(): Promise<void> }> {
+  const server = http.createServer((req, res) => {
+    if (new URL(req.url ?? "/", "http://127.0.0.1").pathname !== "/v1/decisions") {
+      res.statusCode = 404;
+      res.end("not found");
+      return;
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ answers: answer === null ? [] : [answer] }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const port = (server.address() as { port: number }).port;
+  return {
+    origin: `http://127.0.0.1:${port}/v1/decisions`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+/**
+ * `low_confidence` 的两个顶层事实（运行时面，真决策桩）：模型**看了 N 个候选说不行**与
+ * **引擎根本没拿到选择**同落一个码，只有顶层 `model_abstain` 能把它们分开；`observation`
+ * 给出池计数（档位在 `low_confidence_kind`，没有计数就无从核对档位说的是不是真的）。
+ *
+ * 两个臂停因码相同、分类相同——差异只在 `model_abstain` 有没有出现，这正是它存在的理由。
+ */
+async function scenarioLowConfidenceFacts(origin: string): Promise<void> {
+  const base = { url: `${origin}/home.html`, goal: "zerblonix frobnicate", maxSteps: 2 };
+  // ① 模型显式弃权（choice:"none"）：顶层带 observation + model_abstain。
+  const abstainStub = await startDecisionStub({ type: "choice", name: "act", choice: "none", confidence: 0.2 });
+  const voted = await boot(base, abstainStub.origin);
+  try {
+    assert.equal(await voted.rt.drive(), "low_confidence", "an explicit abstain is still a low-confidence stop");
+    const h = lastHandoff(voted.events);
+    assert.deepEqual(stopFactKeysOf(h), ["observation", "model_abstain"], "an abstain carries both low-confidence facts");
+    const counts = h["observation"] as { pool_size: number; forbidden: number; empty_labels: number };
+    const abstained = h["model_abstain"] as { pool_size: number; asks: number };
+    assert.equal(h["low_confidence_kind"], "model-unsure", "candidates were available, so the model is the bottleneck");
+    assert.deepEqual(Object.keys(counts), ["pool_size", "forbidden", "empty_labels"], "the counts are the registered shape");
+    assert.equal(abstained.pool_size, counts.pool_size,
+      "the abstain pool size is the same reading as the observation count (one pool, not two)");
+    assert.ok(abstained.asks >= 1, "an abstain costs at least one model ask");
+    const summary = String((h["why_stuck"] as Record<string, unknown>)["summary"]);
+    assert.ok(summary.includes(`至少 ${counts.pool_size - counts.forbidden} 个可用候选`),
+      `the summary's candidate count agrees with the observation counts (got ${summary})`);
+    const view = projectHandoff(h as unknown as PilotHandoff);
+    assert.deepEqual(view["model_abstain"], abstained, "the session projection passes the abstain fact through");
+    assert.deepEqual(view["observation"], counts, "and the observation counts");
+    await voted.rt.finish(null);
+    const end = voted.events.filter((e) => e["type"] === "pilot_end").pop();
+    assert.ok(end !== undefined, "the terminal summary is emitted");
+    assert.equal(abstained.asks, end!["model_asks"], "the ask count agrees with the run summary");
+  } finally {
+    await voted.rt.closeBrowser();
+    await abstainStub.close();
+  }
+  // ② 引擎没拿到选择（空答案表）：同一个码同一个档位，但**没有** model_abstain。
+  const quietStub = await startDecisionStub(null);
+  const quiet = await boot(base, quietStub.origin);
+  try {
+    assert.equal(await quiet.rt.drive(), "low_confidence", "no answer from the model is the same stop code");
+    const h = lastHandoff(quiet.events);
+    assert.deepEqual(stopFactKeysOf(h), ["observation"], "no choice from the model = counts only, no abstain fact");
+    assert.equal(h["low_confidence_kind"], "model-unsure", "same classification: only the abstain fact separates the two arms");
+    assert.equal("model_abstain" in projectHandoff(h as unknown as PilotHandoff), false,
+      "the session projection invents nothing the engine did not give");
+    await quiet.rt.finish(null);
+  } finally {
+    await quiet.rt.closeBrowser();
+    await quietStub.close();
+  }
+}
+
+/**
+ * 结束态可见性纯函数（evidence-only）：`weakPicksFrom` 只收 **model** 票且 `conf < DEFAULT_CONF_FLOOR`
+ * （全局缺省刻度），有界 ≤6、无票 = undefined（旧交接形状不变）；`conf_floor` 由终态摘要给出。
  * 不判错、不阻断——这里只钉"票面事实怎么筛"，不钉"应不应该回退"（那是调用方的声明信号）。
  */
 async function scenarioWeakPicksPure(_origin: string): Promise<void> {
@@ -553,7 +1122,7 @@ async function scenarioWeakPicksPure(_origin: string): Promise<void> {
   assert.equal(weakPicksFrom([]), undefined, "no driving history = no key (old shape unchanged)");
   assert.equal(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: 0.88 }]), undefined,
     "an empty weak set is undefined, not an empty array");
-  assert.equal(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: 0.25 }]), undefined,
+  assert.equal(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: DEFAULT_CONF_FLOOR }]), undefined,
     "the threshold is strict (< floor): a vote exactly at the floor is not weak");
   const many = Array.from({ length: 9 }, (_, i) => ({
     step: i + 1, target: `t-${String(i)}`, picked_by: "model" as const, conf: 0.1,
@@ -563,7 +1132,7 @@ async function scenarioWeakPicksPure(_origin: string): Promise<void> {
   assert.equal(bounded[0]!.step, 4, "the most recent weak picks are kept");
   assert.deepEqual(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: 0.3 }], { floor: 0.4 }),
     [{ step: 1, target: "x", conf: 0.3, picked_by: "model" }],
-    "an explicit floor overrides the documented default (the default is static 0.25)");
+    "an explicit floor overrides the documented default");
   const long = weakPicksFrom([{ step: 1, target: "x".repeat(200), picked_by: "model", conf: 0.1 }]);
   assert.ok(long !== undefined && long[0]!.target.length <= 40, "the target is bounded like the driving trace");
 }
@@ -860,6 +1429,13 @@ async function scenarioHostEnvelope(origin: string): Promise<void> {
     const ev = (h["why_stuck"] as Record<string, unknown>)["evidence"] as Record<string, unknown>;
     assert.ok(String(ev["off_envelope"] ?? "").startsWith(away.origin), "handoff names the URL that left the envelope");
     assert.ok((h["what_would_unblock"] as string[]).some((w) => w.includes("redirect")), "unblock says redirect back inside");
+    // 顶层同源（桥面丢 evidence，只有顶层到得了 Agent）：真实 URL + 只此一键。
+    assert.ok(String(h["off_envelope"] ?? "").startsWith(away.origin),
+      "the landing URL is a top-level fact (the bridge drops why_stuck.evidence wholesale)");
+    assert.doesNotThrow(() => new URL(String(h["off_envelope"])), "the top-level off_envelope is a real URL");
+    assert.deepEqual(stopFactKeysOf(h), ["off_envelope"], "an envelope stop carries only the envelope fact");
+    const view = projectHandoff(h as unknown as PilotHandoff);
+    assert.equal(view["off_envelope"], h["off_envelope"], "the session projection passes it through unchanged");
     // 同一信封内改道 = 不再拦（守卫只对信封外生效）。
     assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/envelope.html"}`), "drive");
     assert.notEqual(await rt.drive(), "host_not_allowed", "back inside the envelope the gate releases");
@@ -1079,6 +1655,14 @@ async function scenarioNavFailureNotEnvelope(origin: string): Promise<void> {
     const dnsEvidence = lastEvidence();
     assert.ok(String(dnsEvidence["nav_error"] ?? "").includes("net::ERR_NAME_NOT_RESOLVED"),
       "the handoff keeps the browser's original net::ERR_* text");
+    // 顶层同源：经桥的交接块里既没有 reason 也没有 evidence，原文必须自己在顶层。
+    const dnsHandoff = lastHandoff(events);
+    assert.ok(String(dnsHandoff["nav_error"] ?? "").includes("net::ERR_NAME_NOT_RESOLVED"),
+      "the original nav error is a top-level fact, not evidence-only");
+    assert.deepEqual(stopFactKeysOf(dnsHandoff), ["nav_error"], "an unreachable stop carries only the nav error");
+    assert.ok((dnsHandoff["what_would_unblock"] as string[]).some((w) => w.includes("顶层") && w.includes("nav_error")),
+      "the unblock hint points at the field the Agent can actually read");
+    assert.equal("off_envelope" in dnsEvidence, false, "unreachable is never reported as an envelope escape");
     // ② 端口被浏览器拒绝：ERR_UNSAFE_PORT 不是「网络不可达」——改端口，不是重试。
     assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/nav-error.html"}`), "drive");
     assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Unsafe port target"}'), "drive");
@@ -1086,12 +1670,24 @@ async function scenarioNavFailureNotEnvelope(origin: string): Promise<void> {
     const portEvidence = lastEvidence();
     assert.ok(String(portEvidence["nav_error"] ?? "").includes("net::ERR_UNSAFE_PORT"),
       "the handoff keeps the port rejection text");
+    const portHandoff = lastHandoff(events);
+    assert.ok(String(portHandoff["nav_error"] ?? "").includes("net::ERR_UNSAFE_PORT"),
+      "the config-error original text is top-level too");
+    assert.ok((portHandoff["what_would_unblock"] as string[]).some((w) => w.includes("顶层") && w.includes("nav_error")),
+      "the config-error hint also names the top-level field");
+    assert.equal(projectHandoff(portHandoff as unknown as PilotHandoff)["nav_error"], portHandoff["nav_error"],
+      "the session projection passes the original text through");
+    assert.deepEqual(stopFactKeysOf(portHandoff), ["nav_error"], "a config-error stop carries only the nav error");
     // ③ 反证：同一信封下真正跨 host 的跳转仍是 host_not_allowed（正常语义没被放宽）。
     assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${hereOrigin}/nav-error.html"}`), "drive");
     assert.equal(await rt.handleLine('{"cmd":"resume","hint":"Cross host target"}'), "drive");
     assert.equal(await rt.drive(), "host_not_allowed", "a real cross-host navigation stays an envelope stop");
     assert.ok(String(lastEvidence()["off_envelope"] ?? "").startsWith(away.origin),
       "the envelope stop still names the landing URL that left the envelope");
+    const escapeHandoff = lastHandoff(events);
+    assert.deepEqual(stopFactKeysOf(escapeHandoff), ["off_envelope"],
+      "the envelope stop carries the envelope fact and no nav-error fact");
+    assert.equal("nav_error" in escapeHandoff, false, "an out-of-envelope landing has no navigation failure text");
     await rt.finish(null);
   } finally {
     await rt.closeBrowser();
@@ -1152,7 +1748,7 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["值键推导纯函数（空 label/空键/签名）", scenarioValueKeyPure],
   ["值键漂移纯函数（稳定身份/别名/回放/不粘）", scenarioValueDriftPure],
   ["值键漂移：label 丢失后裸字符串值仍落地", scenarioNeedsValueKeyDrift],
-  ["stuck_inert→resume 换目标", scenarioStuckInert],
+  ["规则档死目标不复读→resume 换目标", scenarioStuckInert],
   ["target_ambiguous→resume 收窄", scenarioAmbiguous],
   ["嵌套同目标折叠（容器vs链接）", scenarioNestedFold],
   ["同卡片兄弟同 label 折叠", scenarioRowUnitFold],
@@ -1164,6 +1760,14 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["决策源不可达 no_model_runtime", scenarioNoModel],
   ["驾驶上文：已执行+outcome/当前页/期望页", scenarioContextText],
   ["结束态可见性：weak_picks 筛选 + conf_floor", scenarioWeakPicksPure],
+  ["决策树契约：加载期校验 + walker 按数据路由", scenarioTreeContract],
+  ["空标签身份兜底：只补空标签且不制造新分配", scenarioAskIdentityFallback],
+  ["决策源降级一次就停（403/不可达都不伪装成低置信）", scenarioProviderDownStopsOnce],
+  ["观测体检：low_confidence 三义分离", scenarioObservationHealth],
+  ["停因专属事实纯函数：只在对应停因出现（顶层/证据/投影三层）", scenarioStopFactsPure],
+  ["现场定位键纯函数：只在对应情形出现（顶层/投影/证据三层）", scenarioLocatorFactsPure],
+  ["期望页可见性：声明后交接块顶层带 expect_url", scenarioExpectUrlVisible],
+  ["低置信停因事实：弃权/没拿到选择两臂（顶层 observation+model_abstain）", scenarioLowConfidenceFacts],
   ["交接 evidence 超限保现场（off_envelope 不被切）", scenarioEvidenceKeysPriority],
   ["任务页漂移→off_task_page", scenarioOffTaskPage],
   ["信封只来自声明：未声明/空串=不设防", scenarioHostEnvelopeDefaults],

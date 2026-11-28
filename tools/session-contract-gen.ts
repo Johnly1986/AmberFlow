@@ -60,9 +60,11 @@ import { frameChainValueProblem } from "../src/engine/hint.ts";
 import { OBSERVE_HARD_MAX as ENGINE_OBSERVE_HARD_MAX, OBSERVE_DEFAULT_MAX as ENGINE_OBSERVE_DEFAULT_MAX } from "../src/engine/observe.ts";
 import { EXTRACT_JS, OBSERVE_JS, ROW_CLIMB_JS, STRUCTURE_HELPERS_JS } from "../src/engine/pool-js.ts";
 import { suggestHints } from "../src/engine/rules.ts";
-import { projectHandoff } from "../src/app/session-driver.ts";
-import { WEAK_PICKS_MAX, finalSignalFact, weakPicksFrom } from "../src/app/pilot-evidence.ts";
-import { PILOT_STOP_CODES, unblockHintsFor } from "../src/app/pilot-contract.ts";
+import { projectFrameExclusions, projectHandoff, projectStarted } from "../src/app/session-driver.ts";
+import {
+  FRAME_EXCLUSIONS_MAX, WEAK_PICKS_MAX, finalSignalFact, topLocatorFacts, topStopFacts, weakPicksFrom, HANDOFF_FACT_TEXT_MAX,
+} from "../src/app/pilot-evidence.ts";
+import { PILOT_STOP_CODES, unblockHintsFor, type ObservationFacts } from "../src/app/pilot-contract.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const GENERATED_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "session-contract.generated.ts");
@@ -74,6 +76,8 @@ const OBSERVE_SRC_PATH = path.join(REPO, "src", "engine", "observe.ts");
 const INSPECT_SRC_PATH = path.join(REPO, "src", "cli", "commands", "inspect.ts");
 const POOL_VIEW_SRC_PATH = path.join(REPO, "src", "engine", "pool-view.ts");
 const ELEMENT_VIEW_SRC_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "element-view.ts");
+/** 证据块投影的源码（白名单双向交叉校验的数据源：桥实际发哪些键）。 */
+const SESSION_SRC_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "session.ts");
 const AGENT_INTERFACE_PATH = path.join(REPO, "docs", "AGENT_INTERFACE.md");
 
 type Value = string | number;
@@ -368,7 +372,113 @@ function checkHandoffCaps(): string[] {
   if (rowFinal === undefined || rowFinal.producer !== (finalFact === null ? 0 : finalFact.length)) {
     problems.push("handoff final_signal：producer 列与 finalSignalFact 缺省界不等");
   }
+  // 停因专属事实：文本项按引擎投影实测（超长必须裁到表列），整数项按键数实测，
+  // producer 列按生成侧常量/实测顶层投影（不是只声明一个数字）。
+  const factsView = projectHandoff({
+    stop_code: "low_confidence", step_id: 1, goal_digest: "g",
+    why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "u",
+    nav_error: longText, off_envelope: longText,
+    model_abstain: { pool_size: 3, asks: 2, extra: 1 } as unknown as { pool_size: number; asks: number },
+    observation: { pool_size: 3, forbidden: 1, empty_labels: 0, extra: 1 } as unknown as ObservationFacts,
+  });
+  expectEngineCap(problems, "nav_error", String(factsView["nav_error"]).length);
+  expectEngineCap(problems, "off_envelope", String(factsView["off_envelope"]).length);
+  expectEngineCap(problems, "model_abstain", Object.keys(factsView["model_abstain"] as object).length);
+  expectEngineCap(problems, "observation", Object.keys(factsView["observation"] as object).length);
+  const topFacts = topStopFacts({
+    nav_error: longText, off_envelope: longText,
+    model_abstain: { pool_size: 3, asks: 2 }, observation: { pool_size: 3, forbidden: 1, empty_labels: 0 },
+  });
+  const producerOf = (field: string): number | null => capRow(field)?.producer ?? -1;
+  if (producerOf("nav_error") !== HANDOFF_FACT_TEXT_MAX
+    || (topFacts["nav_error"] as string).length !== HANDOFF_FACT_TEXT_MAX) {
+    problems.push("handoff nav_error：producer 列必须等于顶层投影实测界（HANDOFF_FACT_TEXT_MAX）");
+  }
+  if (producerOf("off_envelope") !== HANDOFF_FACT_TEXT_MAX
+    || (topFacts["off_envelope"] as string).length !== HANDOFF_FACT_TEXT_MAX) {
+    problems.push("handoff off_envelope：producer 列必须等于顶层投影实测界（HANDOFF_FACT_TEXT_MAX）");
+  }
+  if (producerOf("model_abstain") !== Object.keys(topFacts["model_abstain"] as object).length
+    || producerOf("observation") !== Object.keys(topFacts["observation"] as object).length) {
+    problems.push("handoff model_abstain/observation：producer 列必须等于顶层投影实测键数");
+  }
+  // 现场定位键：文本项按引擎投影实测（超长必须裁到表列），对象按键数实测；producer 列按
+  // 生成侧顶层投影实测（`topLocatorFacts`，不是只声明一个数字），缺省时三个键都不出现。
+  const locatorView = projectHandoff({
+    stop_code: "needs_value", step_id: 1, goal_digest: "g",
+    why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "u",
+    expect_url: longText,
+    needs_value: { target: longText, key: longText, ref: longText },
+    resume_hint: { hint: longText, missed: true },
+  });
+  expectEngineCap(problems, "expect_url", String(locatorView["expect_url"]).length);
+  const needView = locatorView["needs_value"] as Record<string, string>;
+  expectEngineCap(problems, "needs_value", Object.keys(needView).length);
+  for (const text of Object.values(needView)) expectEngineCap(problems, "needs_value[]", text.length);
+  const missedView = locatorView["resume_hint"] as Record<string, unknown>;
+  expectEngineCap(problems, "resume_hint", Object.keys(missedView).length);
+  expectEngineCap(problems, "resume_hint[].hint", String(missedView["hint"]).length);
+  const topLocator = topLocatorFacts({
+    expectUrl: longText, valueNeed: { target: longText, key: longText, ref: longText }, missedHint: longText,
+  });
+  const needTop = topLocator["needs_value"] as Record<string, string>;
+  const needTopTexts = Object.values(needTop).map((text) => text.length);
+  if (producerOf("expect_url") !== HANDOFF_FACT_TEXT_MAX
+    || (topLocator["expect_url"] as string).length !== HANDOFF_FACT_TEXT_MAX) {
+    problems.push("handoff expect_url：producer 列必须等于顶层投影实测界（HANDOFF_FACT_TEXT_MAX）");
+  }
+  if (producerOf("needs_value") !== Object.keys(needTop).length
+    || producerOf("needs_value[]") !== Math.max(...needTopTexts)) {
+    problems.push("handoff needs_value：producer 列必须等于顶层投影实测键数/文本界");
+  }
+  if (producerOf("resume_hint") !== Object.keys(topLocator["resume_hint"] as object).length
+    || producerOf("resume_hint[].hint") !== String((topLocator["resume_hint"] as Record<string, unknown>)["hint"]).length) {
+    problems.push("handoff resume_hint：producer 列必须等于顶层投影实测键数/文本界");
+  }
+  const noLocator = topLocatorFacts({ expectUrl: null, valueNeed: null, missedHint: null });
+  if (Object.keys(noLocator).length !== 0 || Object.keys(projectHandoff({
+    stop_code: "budget_exceeded", step_id: 1, goal_digest: "g",
+    why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "u",
+  })).some((key) => ["expect_url", "needs_value", "resume_hint"].includes(key))) {
+    problems.push("handoff 现场定位键：无事实时三个键都不得出现（其它情形的旧形状逐字节不变）");
+  }
   const rowUnblockProducer = capRow("what_would_unblock");
+  // 被排除 frame：`started` 事件与交接块顶层共用 `projectFrameExclusions`，所以表列一处实测
+  // 即钉住两个入口（`projectStarted` 不是导出符号，枚举面由 verify-session-drive 承担）。
+  const longOrigin = `http://origin.test/${"z".repeat(400)}`;
+  const exclusions = Array.from({ length: 12 }, (_, i) => ({ origin: longOrigin, index: i }));
+  const framesView = projectHandoff({
+    stop_code: "low_confidence", step_id: 1, goal_digest: "g",
+    why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "u",
+    frames_excluded: exclusions,
+  });
+  const frames = framesView["frames_excluded"] as Array<{ origin: string; index: number }>;
+  expectEngineCap(problems, "frames_excluded", frames.length);
+  for (const row of frames) expectEngineCap(problems, "frames_excluded[].origin", row.origin.length);
+  if (capRow("frames_excluded")?.producer !== FRAME_EXCLUSIONS_MAX) {
+    problems.push("handoff frames_excluded：producer 列必须等于 FRAME_EXCLUSIONS_MAX");
+  }
+  if ((projectFrameExclusions(exclusions) ?? []).length !== frames.length) {
+    problems.push("frames_excluded：started/handoff 共用的有界投影与交接块实测条数不等");
+  }
+  // 两道白名单各自实测：只投影一处 = 另一半 Agent 仍然看不到事实（本条把两处钉在一起）。
+  const startedFrames = projectStarted({ ok: true, frames_excluded: exclusions })["frames_excluded"];
+  if (!Array.isArray(startedFrames) || startedFrames.length !== frames.length) {
+    problems.push("frames_excluded：started 事件与交接块投影的条数不等（两道白名单必须同界）");
+  }
+  if ("frames_excluded" in projectStarted({ ok: true })) {
+    problems.push("started frames_excluded：无排除帧时必须键不出现（旧形状逐字节不变）");
+  }
+  const noFramesView = projectHandoff({
+    stop_code: "low_confidence", step_id: 1, goal_digest: "g",
+    why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "u",
+  });
+  if ("frames_excluded" in noFramesView) {
+    problems.push("handoff frames_excluded：无排除帧时必须键不出现（旧形状逐字节不变）");
+  }
+  if (projectFrameExclusions([{ origin: "x" }]) !== undefined) {
+    problems.push("frames_excluded：缺 index 的畸形行不得被补齐成形状");
+  }
   // 现场事实（被排除帧 / 值需求）会让建议条数变多，故按最宽上下文取实测上界。
   const widest = {
     framesExcluded: ["http://frame-a.test", "http://frame-b.test"],
@@ -448,6 +558,134 @@ function checkEvidenceCaps(): string[] {
   if (ambiguity.frameOriginMaxChars >= ambiguity.frameOriginEngineMaxChars) problems.push("evidence ambiguity.frameOriginMaxChars 必须窄于引擎界（两层界不同的现状）");
   for (const [name, block] of Object.entries(SESSION_EVIDENCE_CAP_TABLE)) {
     if ((block as { fields: readonly string[] }).fields.length === 0) problems.push(`evidence ${name}.fields 白名单为空`);
+  }
+  return problems;
+}
+
+/**
+ * 证据块白名单 ↔ 桥投影源码的**双向**交叉校验。
+ *
+ * 表的 `fields` 是对 Agent 的承诺（桥发它），桥的投影方法才是"真的发不发"。只做
+ * 「源码 ⊆ 表」会漏掉反向漂移：表里登记了字段而桥根本不再发（Agent 预期一个永不到来的
+ * 键）；只做「表 ⊆ 源码」则漏掉漏登记（事实静默消失）。两个方向任一不等都判红。
+ *
+ * 扫描面是投影方法体里的**顶层** `out[...]` 赋值：直接赋值、`const out = {...}` 初始化器、
+ * 以及 `for (const k of [字面量] as const)` + `out[k]` 的键集写法。方法体或键集扫不到 =
+ * 断言空转，同样判红（源码形状变了必须回来改这里，而不是让门禁静默通过）。
+ */
+const EVIDENCE_PROJECTIONS = [
+  ["scroll", "scrollDiagnostics"],
+  ["range", "rangeDiagnostics"],
+  ["ambiguity", "ambiguityDiagnostics"],
+  ["miss", "missDiagnosticsEvidence"],
+  ["wide", "wideScanEvidence"],
+  ["started", "driveStarted"],
+  ["summary", "driveSummary"],
+] as const;
+
+/** `private <name>(…)` 的方法体（花括号配对；签名里没有对象字面量）。 */
+function projectionBody(text: string, name: string): string | null {
+  const start = text.search(new RegExp(`private (?:async )?${name}\\(`));
+  if (start < 0) return null;
+  const open = text.indexOf("{", start);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === "{") depth += 1;
+    else if (text[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return null;
+}
+
+/** 对象初始化器的顶层键（只认花括号/圆括号/方括号深度为 0 的 `key:`）。 */
+function topLevelObjectKeys(block: string): string[] {
+  const keys: string[] = [];
+  let depth = 0;
+  for (let i = 0; i < block.length; i += 1) {
+    const ch = block[i]!;
+    if (ch === "{" || ch === "(" || ch === "[") { depth += 1; continue; }
+    if (ch === "}" || ch === ")" || ch === "]") { depth -= 1; continue; }
+    if (depth !== 0) continue;
+    const m = /^([a-z][a-z0-9_]*)\s*:/.exec(block.slice(i));
+    if (m === null) continue;
+    if (i > 0 && !/[\s,]/.test(block[i - 1]!)) continue;
+    keys.push(m[1]!);
+    i += m[0].length - 1;
+  }
+  return keys;
+}
+
+/** `const out: Record<string, unknown> = { … }` 初始化器的顶层键（宽扫的 candidates 就在这里）。 */
+function outInitializerKeys(body: string): string[] {
+  const marker = /const out: Record<string, unknown> = \{/.exec(body);
+  if (marker === null) return [];
+  const open = marker.index + marker[0].length - 1;
+  let depth = 0;
+  for (let i = open; i < body.length; i += 1) {
+    if (body[i] === "{") depth += 1;
+    else if (body[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return topLevelObjectKeys(body.slice(open + 1, i));
+    }
+  }
+  return [];
+}
+
+/** `for (const k of [字面量…] as const) { … out[k] … }`：键名写在数组字面量里的字段集。 */
+function loopAssignedOutKeys(body: string): string[] {
+  const keys: string[] = [];
+  for (const m of body.matchAll(/for \(const (\w+) of \[([^\]]*)\] as const\) \{([\s\S]*?)\n    \}/g)) {
+    const varName = m[1]!;
+    const literals = m[2]!;
+    const inner = m[3]!;
+    if (!new RegExp(`out\\[${varName}\\]`).test(inner)) continue;
+    for (const lit of literals.matchAll(/'([a-z][a-z0-9_]*)'/g)) keys.push(lit[1]!);
+  }
+  return keys;
+}
+
+/** 一个投影方法实际会发出的顶层键（三个写法取并集）。 */
+function emittedProjectionKeys(body: string): string[] {
+  const keys = new Set<string>();
+  for (const m of body.matchAll(/out\['([a-z][a-z0-9_]*)'\]/g)) keys.add(m[1]!);
+  for (const key of outInitializerKeys(body)) keys.add(key);
+  for (const key of loopAssignedOutKeys(body)) keys.add(key);
+  return [...keys].sort();
+}
+
+/** 双向：桥发的字段必须都在表里；表里的字段必须真的被桥发。 */
+function checkEvidenceProjections(): string[] {
+  const problems: string[] = [];
+  const text = fs.existsSync(SESSION_SRC_PATH) ? fs.readFileSync(SESSION_SRC_PATH, "utf8") : "";
+  if (text === "") {
+    problems.push("evidence：桥 session.ts 读不到——白名单 ↔ 源码的双向校验空转");
+    return problems;
+  }
+  for (const [block, method] of EVIDENCE_PROJECTIONS) {
+    const body = projectionBody(text, method);
+    if (body === null) {
+      problems.push(`evidence ${block}：桥投影方法 ${method} 扫不到（源码形状变了，断言空转）`);
+      continue;
+    }
+    const emitted = emittedProjectionKeys(body);
+    if (emitted.length === 0) {
+      problems.push(`evidence ${block}：投影方法 ${method} 扫不到任何 out 键（源码形状变了，断言空转）`);
+      continue;
+    }
+    const declared = SESSION_EVIDENCE_CAP_TABLE[block].fields;
+    for (const key of emitted) {
+      if (!(declared as readonly string[]).includes(key)) {
+        problems.push(`evidence ${block}：桥投影发 '${key}'，但 SESSION_EVIDENCE_CAP_TABLE.${block}.fields 未登记（白名单漏登记 = 事实对 Agent 静默消失）`);
+      }
+    }
+    for (const key of declared) {
+      if (!emitted.includes(key)) {
+        problems.push(`evidence ${block}：表登记 '${key}'，但桥投影 ${method} 不产它（表与源码脱钩 = Agent 预期一个永不到来的键）`);
+      }
+    }
   }
   return problems;
 }
@@ -680,7 +918,7 @@ function handoffCapsSource(): string {
   );
 }
 
-/** 证据块白名单与 cap 的桥侧投影（五个投影各自一块）。 */
+/** 证据块白名单与 cap 的桥侧投影（七个投影各自一块）。 */
 function evidenceCapsSource(): string {
   const blocks: string[] = [];
   for (const [name, block] of Object.entries(SESSION_EVIDENCE_CAP_TABLE)) {
@@ -786,7 +1024,8 @@ function main(argv: readonly string[]): number {
   }
   const problems = [
     ...checkSets(), ...checkEngineContract(), ...checkOpMapping(), ...checkBounds(),
-    ...checkHandoffCaps(), ...checkEvidenceCaps(), ...checkElementViewLimits(), ...checkElementViewFields(),
+    ...checkHandoffCaps(), ...checkEvidenceCaps(), ...checkEvidenceProjections(),
+    ...checkElementViewLimits(), ...checkElementViewFields(),
   ];
   // 生成物快照先算齐（契约自检失败时也要能报错，故 render 只在通过后调用）。
   if (problems.length > 0) {

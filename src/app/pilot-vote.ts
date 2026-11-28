@@ -58,7 +58,11 @@ export function carryForbidden(
 /** 模型投票一轮的结果：asked = 本轮真实咨询数（含宽扫重问）；pool = 最终视图（交接快照用）。 */
 export type PilotVote =
   | { kind: "no_model_runtime"; asked: 0; pool: null }
-  | { kind: "low_confidence"; asked: number; pool: ElemPool | null }
+  /**
+   * `abstained` = 模型**显式弃权**（看过候选说都不行），缺省不出现 = 引擎侧没拿到可用选择。
+   * 两者同落 low_confidence 交 Agent 兜底，但前者是可归因的负面证据（调计策树的输入）。
+   */
+  | { kind: "low_confidence"; asked: number; pool: ElemPool | null; abstained?: boolean }
   | {
     kind: "picked"; asked: number; pool: ElemPool; ref: string;
     conf: number; shape: string; via: "ask" | "reobserve";
@@ -141,8 +145,13 @@ export async function modelVote(a: ModelVoteArgs & { ask?: PilotAskAdapter }): P
         conf: outcome.signal.proposal.entropyConf, shape: outcome.signal.proposal.shape.kind, via: outcome.via,
       };
     }
-    case "abstained":
-      return { kind: "low_confidence", asked: outcome.asked, pool: outcome.executionPool };
+    case "abstained": {
+      const detail = outcome.reason.detail ?? "";
+      return {
+        kind: "low_confidence", asked: outcome.asked, pool: outcome.executionPool,
+        ...(detail.startsWith("model-abstained") ? { abstained: true } : {}),
+      };
+    }
     case "limit":
       return { kind: "low_confidence", asked: outcome.asked, pool: null };
   }

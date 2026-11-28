@@ -23,6 +23,9 @@
  * 顶层写 `_rebase` provenance（原因 + 允许差异路径闭集 + 换基场景；不写日期戳）。
  * 该旗标不取代断言：`--record` 仍按设计拒绝（被检实现不得自证）。
  *
+ * **宽化止损场景**（`IDENTITY_CASES`，同 lane 同装配、不录 golden）：断"宽池没引入新元素身份
+ * 就不重问"——ask 数 / 停因 / 归因尾缀逐条写死在场景里，golden 仍只覆盖退役前的事实快照。
+ *
  * **门禁口径**：本 lane 挂在 `npm run check` 末尾（`check:ci` 自然继承），所以跑门禁的机器
  * **必须**有 chromium（`npx playwright install chromium`；CI 的 check job 已装同款）。
  * 浏览器缺失/启动失败是环境错误：入口打印修复提示并 exit 2，**不 self-skip**（门禁不许假绿）。
@@ -44,7 +47,8 @@ import { runDecisionPick, type RunPickCtx, type RunPickHost } from "../src/engin
 import { createRunAccounting } from "../src/engine/run-context.ts";
 import { _hintOpts } from "../src/engine/executor-resolve-a.ts";
 import { stateText, type Elem, type ElemFamily, type ElemPool, orderElemsByFamily } from "../src/engine/extraction.ts";
-import type { WindowChainFact } from "../src/engine/executor-pure.ts";
+import { WIDER_ELEMENTS, WIDER_ELEMENTS_MAX, type WindowChainFact } from "../src/engine/executor-pure.ts";
+import { PILOT_STOP_CODES } from "../src/app/pilot-contract.ts";
 import type { DeclaredTargetsResolver } from "../src/engine/declared-targets.ts";
 import { makeStubProvider, type StubRequestSnapshot, type StubTurn } from "./stub-decision-provider.ts";
 import type { AnyPage } from "../src/engine/executor-types.ts";
@@ -80,6 +84,14 @@ const WIDE_HTML = `<!doctype html><html><body>${Array.from({ length: 100 }, (_, 
 /** 180 个候选：64 池 → 128 档 → 硬顶（256 档预算内实际 180）仍低于 MAX_CHOICES=200，三次问票都发得出去。 */
 const WIDE180_HTML = `<!doctype html><html><body>${Array.from({ length: 180 }, (_, i) =>
   `<button id="w${i + 1}">宽按钮 ${i + 1}</button>`).join("")}</body></html>`;
+
+/** 180 个同文案按钮：宽化抽取只会让同一批元素重编号（身份集合恒为 1，计数却变大）。 */
+const DUP180_HTML = `<!doctype html><html><body>${Array.from({ length: 180 }, () =>
+  "<button>更多</button>").join("")}</body></html>`;
+
+/** 128 个互异 + 52 个同文案重复（重复文案已在前 128 个里出现过）：只有硬顶档才只剩重编号。 */
+const DUP_TAIL_HTML = `<!doctype html><html><body>${Array.from({ length: 128 }, (_, i) =>
+  `<button>按钮 ${i + 1}</button>`).join("")}${Array.from({ length: 52 }, () => "<button>按钮 1</button>").join("")}</body></html>`;
 
 const FAMILY_HTML = `<!doctype html><html><body>
 <button id="go">继续</button>
@@ -536,6 +548,89 @@ const CASES: Case[] = [
   },
 ];
 
+/* ------------------------------------------------------------------ 宽化止损（身份判据） */
+
+/**
+ * 宽化止损场景（**不录 golden**）：钉"宽池有没有引入新的元素身份"如何决定 ask 数。
+ * 不进 golden 的理由：golden 是退役前的事实快照，被检实现不得自录；这三条钉的正是判据
+ * 本身，就地断言（ask 数 / 停因 / 归因尾缀）比快照更直接（每条一次真实页面装配）。
+ */
+const IDENTITY_CASES: Case[] = [
+  {
+    name: "wide-identity-flat",
+    page: "/dup180.html",
+    turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
+    run: async ({ mw, page, origin, drive }) => {
+      await page.goto(`${origin}/dup180.html`, { waitUntil: "load" });
+      const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
+      // 宽池只是同一批元素的 64→128 重编号（身份集合恒为 1）：不重问 = 只有窄问那一次。
+      if (r.asks.length !== 1) throw new Error(`无新身份时不得重问（实际 ${r.asks.length} 问）`);
+      if (r.stopCode !== "low_confidence") throw new Error(`停因应仍为 low_confidence（实际 ${r.stopCode}）`);
+      if (r.windowChainFacts.length !== 0) throw new Error(`窗口链不该开档（实际 ${r.windowChainFacts.length} 档）`);
+      if (!r.stopReason.includes(`wide recovery stopped at window ${WIDER_ELEMENTS}`)) {
+        throw new Error(`停因缺少宽化止损归因：${r.stopReason}`);
+      }
+      return r;
+    },
+  },
+  {
+    name: "wide-identity-flat-hard-cap",
+    page: "/duptail180.html",
+    turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
+    run: async ({ mw, page, origin, drive }) => {
+      await page.goto(`${origin}/duptail180.html`, { waitUntil: "load" });
+      const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
+      // 128 档真引入新身份（重问一次）→ 硬顶档只有前 128 个文案的重编号 → 停在硬顶档。
+      if (r.asks.length !== 2) throw new Error(`硬顶档止损应只问两次（实际 ${r.asks.length} 问）`);
+      if (r.windowChainFacts.length !== 1 || r.windowChainFacts[0]?.window !== WIDER_ELEMENTS) {
+        throw new Error(`只应记宽扫档未命中事实（实际 ${JSON.stringify(r.windowChainFacts)}）`);
+      }
+      if (r.stopCode !== "low_confidence") throw new Error(`停因应仍为 low_confidence（实际 ${r.stopCode}）`);
+      if (!r.stopReason.includes(`wide recovery stopped at window ${WIDER_ELEMENTS_MAX}`)) {
+        throw new Error(`停因缺少硬顶档止损归因：${r.stopReason}`);
+      }
+      return r;
+    },
+  },
+  {
+    name: "wide-identity-grows",
+    page: "/wide180.html",
+    turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
+    run: async ({ mw, page, origin, drive }) => {
+      await page.goto(`${origin}/wide180.html`, { waitUntil: "load" });
+      const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
+      // 每档都真引入新身份（180 个互异候选）：阶梯逐档照走 = 三次询问 + 两档窗口链事实。
+      if (r.asks.length !== 3) throw new Error(`有身份增长时阶梯应照走（实际 ${r.asks.length} 问）`);
+      if (r.windowChainFacts.length !== 2) throw new Error(`窗口链应记两档（实际 ${r.windowChainFacts.length}）`);
+      if (r.stopCode !== "low_confidence") throw new Error(`停因应仍为 low_confidence（实际 ${r.stopCode}）`);
+      if (r.stopReason.includes("wide recovery stopped")) throw new Error("有身份增长时不得写宽化止损归因");
+      return r;
+    },
+  },
+];
+
+/** 宽化止损场景逐条断言（失败计入 lane 失败，不静默跳过）。 */
+async function checkIdentityStop(origin: string): Promise<number> {
+  let failures = 0;
+  for (const c of IDENTITY_CASES) {
+    try {
+      const got = await observeCase(c, origin);
+      const asks = (got["asks"] as unknown[]).length;
+      const code = String((got["stop"] as Record<string, unknown>)["code"]);
+      // 停因闭集：判据只减 ask，不得造出 12 码之外的新停因。
+      if (!(PILOT_STOP_CODES as readonly string[]).includes(code)) throw new Error(`停因 ${code} 不在冻结 12 码内`);
+      console.log(`identity OK  ${c.name.padEnd(24)} asks=${asks} stop=${code}`);
+    } catch (e) {
+      failures += 1;
+      console.error(`identity FAIL ${c.name} — ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return failures;
+}
+
 /** 规则分支的零模型票纪律（场景自检；两臂都断言）。 */
 function assertRuleClean(a: ArmResult): void {
   if (a.asks.length !== 0) throw new Error("规则分支不得向模型问票");
@@ -804,23 +899,27 @@ async function check(origin: string, goldenPath: string): Promise<number> {
       for (const line of d.slice(0, 20)) console.error(`  ${line}`);
     }
   }
+  failures += await checkIdentityStop(origin);
   if (failures > 0) {
-    console.error(`verify-decision-run-parity: FAIL — ${failures}/${CASES.length} 个场景与 golden 不一致`);
+    console.error(`verify-decision-run-parity: FAIL — ${failures} 处失败（golden 差异 + 宽化止损断言）`);
     return 1;
   }
-  console.log(`verify-decision-run-parity: OK — ${CASES.length} 个场景与 golden 逐字段一致（ModelPickPhase + 桩请求 + windowChainFacts + 停因）`);
+  console.log(`verify-decision-run-parity: OK — ${CASES.length} 个场景与 golden 逐字段一致（ModelPickPhase + 桩请求 + windowChainFacts + 停因）`
+    + `；${IDENTITY_CASES.length} 个宽化止损场景按元素身份断言通过（ask 数/停因/归因）`);
   return 0;
 }
 
 async function main(argv: string[]): Promise<number> {
   if (argv.includes("--list")) {
     for (const c of CASES) console.log(c.name);
+    for (const c of IDENTITY_CASES) console.log(`${c.name}  (identity, no golden)`);
     return 0;
   }
   const goldenPath = goldenPathOf(argv);
   const server = await startServer({
     "/cards.html": CARDS_HTML, "/wide.html": WIDE_HTML, "/wide180.html": WIDE180_HTML,
     "/family.html": FAMILY_HTML, "/empty.html": EMPTY_HTML,
+    "/dup180.html": DUP180_HTML, "/duptail180.html": DUP_TAIL_HTML,
   });
   try {
     if (argv.includes("--self-test")) return await selfTest(server.origin, goldenPath);

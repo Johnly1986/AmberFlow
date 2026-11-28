@@ -169,7 +169,7 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
       value: declaredPolicy.max_effective_repeats ?? 3,
       source: declaredPolicy.max_effective_repeats !== undefined ? "app" as const : "default" as const,
     },
-    // 闸门刻度：CLI（本次显式）> meta.policy > provider 自报 > 0.25。
+    // 闸门刻度：CLI（本次显式）> meta.policy > provider 自报 > 全局缺省（`DEFAULT_CONF_FLOOR`）。
     // 换 provider 时缺省刻度不再成立（score_kind 不可比）——这是这条声明面的存在理由。
     conf_floor: opts.confFloor !== undefined
       ? { value: opts.confFloor, source: (opts.confFloorSource ?? "cli") as "cli" | "config" }

@@ -97,7 +97,7 @@
     "verify:app-stop-context": "node --experimental-strip-types tools/verify-app-stop-context.ts",
     "verify:decision-accounting": "node --experimental-strip-types tools/verify-decision-accounting.ts",
     "verify:decision-ask-parity": "node --experimental-strip-types tools/verify-decision-ask-parity.ts",
-    "verify:lanes": "npm run golden-manual && npm run verify:run-execution && npm run verify:offline && npm run verify:decision-accounting && npm run verify:act-lock && npm run verify:session-range && npm run verify:session-drive && npm run verify:poolless-actions && npm run verify:dedup-controls && npm run verify:frame-budget && npm run verify:frame-exempt && npm run verify:walk-r1 && npm run verify:app-stop-context && npm run verify:decision-ask-parity && npm run verify:record-failure && npm run verify:ctx-validate && npm run verify:rehydrate-rescan && npm run verify:decision-endpoint-parity && npm run verify:run-view-parity && npm run verify:rule-vocab && npm run verify:act-failure-evidence && echo \"verify:lanes: OK — 21 non-gated lanes passed\"",
+    "verify:lanes": "npm run golden-manual && npm run verify:run-execution && npm run verify:offline && npm run verify:decision-accounting && npm run verify:decision-headers && npm run verify:act-lock && npm run verify:session-range && npm run verify:session-drive && npm run verify:poolless-actions && npm run verify:dedup-controls && npm run verify:frame-budget && npm run verify:frame-exempt && npm run verify:walk-r1 && npm run verify:app-stop-context && npm run verify:decision-ask-parity && npm run verify:record-failure && npm run verify:ctx-validate && npm run verify:rehydrate-rescan && npm run verify:decision-endpoint-parity && npm run verify:run-view-parity && npm run verify:rule-vocab && npm run verify:act-failure-evidence && npm run verify:element-eval-timeout && echo \"verify:lanes: OK — 23 non-gated lanes passed\"",
     "verify:record-failure": "node --experimental-strip-types tools/verify-record-failure.ts",
     "verify:ctx-validate": "node --experimental-strip-types tools/verify-ctx-validate.ts",
     "verify:rehydrate-rescan": "node --experimental-strip-types tools/verify-rehydrate-rescan.ts",
@@ -106,7 +106,9 @@
     "verify:decision-endpoint-parity": "node --experimental-strip-types tools/verify-decision-endpoint-parity.ts",
     "verify:run-view-parity": "node --experimental-strip-types tools/verify-run-view-parity.ts",
     "verify:rule-vocab": "node --experimental-strip-types tools/verify-rule-vocab.ts",
-    "verify:act-failure-evidence": "node --experimental-strip-types tools/verify-act-failure-evidence.ts"
+    "verify:act-failure-evidence": "node --experimental-strip-types tools/verify-act-failure-evidence.ts",
+    "verify:decision-headers": "node --experimental-strip-types tools/verify-decision-headers.ts",
+    "verify:element-eval-timeout": "node --experimental-strip-types tools/verify-element-eval-timeout.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

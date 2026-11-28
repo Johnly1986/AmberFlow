@@ -10,6 +10,7 @@
 import { FN_HIT_RELATION } from "./eval-snippets.ts";
 import { hintCandidates } from "./rules.ts";
 import { firstLoc, type ActMissDiagnostics } from "./executor-pure.ts";
+import { ELEMENT_EVAL_TIMEOUT_MS } from "../support/tuning.ts";
 import { actionCapabilities, type Elem, type ElemPool, type PageLike, frameAt, urlOf } from "./extraction.ts";
 import { type ActionabilityDetail, type AnyLoc, type AnyPage } from "./executor-types.ts";
 import type { BrowserMiddleware, PageSnapshotEvidence } from "./executor.ts";
@@ -79,7 +80,9 @@ export function describeActionFailure(e: unknown): string {
 /** 中心点命中关系（单源 = FN_HIT_RELATION；evaluate 失败 = unknown）。 */
 export async function hitRelation(mw: BrowserMiddleware, loc: AnyLoc): Promise<HitRelation> {
   try {
-    const raw = await firstLoc(loc).evaluate(FN_HIT_RELATION);
+    // 显式限时：本函数在**探针超时之后**被调用，目标此刻常常已被卸载（点击关面板/重渲染）。
+    // 无 timeout 会让"读不到"等满 Playwright 默认 30s。读不到仍是 unknown（下面 catch）。
+    const raw = await firstLoc(loc).evaluate(FN_HIT_RELATION, undefined, { timeout: ELEMENT_EVAL_TIMEOUT_MS });
     if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
       const r = raw as Record<string, unknown>;
       return {

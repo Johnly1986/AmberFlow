@@ -63,6 +63,26 @@ export function serviceApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return envText(env, "AMBERFLOW_DECISION_API_KEY");
 }
 
+/**
+ * 额外请求头（`AMBERFLOW_DECISION_HEADERS`，JSON 对象；空/坏 JSON = 不带头）。
+ * 只服务"网关要求路由头"这一类真实 provider（如 `{"x-opencode-session":"..."}`）——
+ * 与 Authorization 分开：前者是路由，后者是身份。坏 JSON 静默降级为不带头（不崩整条计划），
+ * 因为头的缺失只会让服务端拒绝，而拒绝会以 provider 失败如实上报。
+ */
+export function serviceHeaders(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const raw = envText(env, "AMBERFLOW_DECISION_HEADERS").trim();
+  if (raw === "") return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "string" && k.trim() !== "") out[k.trim()] = v;
+    }
+    return out;
+  } catch { return {}; }
+}
+
 /** 协议：显式 `AMBERFLOW_DECISION_PROTOCOL` 优先；否则按 URL 形状推断（默认 systemone）。 */
 export function serviceProtocol(env: NodeJS.ProcessEnv = process.env): DecisionServiceProtocol | string {
   const declared = envText(env, "AMBERFLOW_DECISION_PROTOCOL").toLowerCase() || null;
@@ -194,6 +214,7 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
       if (!key) return "";          // 本地自托管可无认证：不发 Authorization 头
       return key;
     },
+    resolveHeaders: () => serviceHeaders(env),
     extraBody: () => (model !== "" ? { model } : {}),
     minOptions: Number.isInteger(minOptions) && minOptions >= 1 ? minOptions : 1,
     validateChoiceInPool: true,

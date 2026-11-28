@@ -107,4 +107,6 @@ export interface GateRecovery {
   widePick: { ref: string; conf: number } | null;
   /** 本分支内被闸门丢掉的 ask conf（提交点见各出口；adjudicate 复用意见时撤回最后一笔）。 */
   gateRejected: number[];
+  /** 因宽化未引入新元素身份而停止加码的窗口预算（缺省/null = 未发生；停因尾缀按此归因）。 */
+  identityFlat?: number | null;
 }

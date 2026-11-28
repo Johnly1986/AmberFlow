@@ -59,7 +59,7 @@ import { ANCHOR_JS, ROW_CLIMB_JS, compile } from "./pool-js.ts";
 import { type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { getLayaRuntime, type DecisionAgent, type ModelState, type NoulAnswer, type RouterLike } from "../model/model.ts";
-import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider, EvidenceTruncation } from "../support/decision-provider-contract.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, ELEMENT_EVAL_TIMEOUT_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider, EvidenceTruncation } from "../support/decision-provider-contract.ts";
 import { sleep } from "../support/sleep.ts";
 import { buildChoiceRequest, effectiveNotes } from "./decision-request.ts";
 import { DESTRUCTIVE_PATTERNS, FILLER_TOKENS, NAV_VERBS, ROLE_TOKENS, STOP_TOKENS, affordanceRule, hintCandidates, hintMatch, navRule, takeHintMatchOthers, type HintMatchOthersDiag } from "./rules.ts";
@@ -1186,6 +1186,7 @@ export class BrowserMiddleware {
       margin: values.length >= 2 ? values[0]! - values[1]! : (values[0] ?? null),
       entropyConf: picked.conf,
       probs: picked.probs,
+      ...(picked.abstained === true ? { abstained: true as const } : {}),
     };
   }
 
@@ -1220,7 +1221,7 @@ export class BrowserMiddleware {
     elems: ElemPool,
     forbidden: Set<string>,
     notes: Record<string, string> | null,
-  ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean; choiceLimit?: string }> {  // choiceLimit=超限原因（A2 即取即清）
+  ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean; abstained?: boolean; choiceLimit?: string }> {  // choiceLimit=超限原因（A2 即取即清）
     // `pickElement`/`pickProposal` 也允许被**单独调用**（测试/外部嵌入方），而 provider 在
     // ready() 里解析——先 ready 才不会把 null 当"没得选"（ready 幂等，run() 路径不重复加载）。
     await this.ready();
@@ -1325,6 +1326,8 @@ export class BrowserMiddleware {
     this.lastPickEvidence = out.evidence_truncated ?? null;
     const result = {
       ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough,
+      // 模型侧显式弃权必须活到 trace/handoff：与"引擎没拿到选择"同落 low_confidence，但可归因。
+      ...(out.abstained === true ? { abstained: true as const } : {}),
     };
     // S5a：只有真问过才更新"上一次 ask"；池结构指纹 → 最近一次真 ask 的答复
     // （key 含 notes 指纹 A7；pickedSig 留元素签名 A6；同页同 goal 不重复敲门）。
@@ -1584,7 +1587,8 @@ export class BrowserMiddleware {
   /** P0-C：一次只读页面取证 = 元素所属面板正文 + 元素子树文本（读不到 = null，不造假）。 */
   async _panelText(loc: AnyLoc): Promise<{ scope: "element" | "document"; panel: string | null; text: string; target: string } | null> {
     try {
-      const raw = await firstLoc(loc).evaluate(PANEL_TEXT_JS);
+      // 显式限时：目标常在读取前把自己卸载，无 timeout 会等满 Playwright 默认 30s（见 tuning 注释）。
+      const raw = await firstLoc(loc).evaluate(PANEL_TEXT_JS, undefined, { timeout: ELEMENT_EVAL_TIMEOUT_MS });
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
       const r = raw as Record<string, unknown>;
       return {
@@ -1675,7 +1679,7 @@ export class BrowserMiddleware {
   async _readActionabilityDetail(loc: AnyLoc, reason: string): Promise<ActionabilityDetail> {
     const unknown: ActionabilityDetail = { reason, bbox: null, blocker: null, requery: "unknown" };
     try {
-      const raw = await firstLoc(loc).evaluate(FN_HIT_DETAIL);
+      const raw = await firstLoc(loc).evaluate(FN_HIT_DETAIL, undefined, { timeout: ELEMENT_EVAL_TIMEOUT_MS });
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return unknown;
       const r = raw as Record<string, unknown>;
       const b = r["bbox"];

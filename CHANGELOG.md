@@ -4,6 +4,513 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 文档承诺与真实投影对齐（`frames_excluded` 可见性 + `handoff_open` 键名）
+
+> 两个缺陷同属「文档承诺了、真实投影里没有」：证据算了也进了交接，但两道白名单各漏一半，
+> 或桥把键名改成了另一个事实。修法一律以文档为准，不把文档改弱。
+
+### 修复
+
+- **`frames_excluded` 的可见性此前是假的**：`what_would_unblock` 已按它生成「把某 origin 加进
+  hosts」的建议，Agent 却看不到结构化事实——引擎 `projectStarted`（`started` 事件）不含它，
+  `projectHandoff`（交接块顶层）没有它，桥面 `driveHandoff`/`driveEvents` 也不读它，唯一间接
+  可见处是建议文本。现按「producer → 引擎投影 → 桥投影」三道补齐：
+  - producer：`PilotHandoff.frames_excluded?: [{origin,index}]`（`pilot-runtime.handoff()` 从当场
+    `excludedFrames` 装配；无排除帧 = 键不出现）；
+  - 引擎：`started` 事件与交接块顶层**共用** `projectFrameExclusions` 有界投影（≤8 条、
+    单条 `origin` ≤120 字符，两道白名单同界）；`why_stuck.evidence.frames_excluded` 的 ≤6 旧形状不变；
+  - 桥：`driveHandoff`（`handoff` 顶层）与 `driveEvents`（`started` 事件）同一份有界投影；
+  - 上限常量进 `SESSION_HANDOFF_CAP_TABLE`（`frames_excluded` 条数 / `frames_excluded[].origin`），
+    桥侧值由 `session-contract:gen` 生成（生成物不手改）。
+- **桥把 `handoff_open` 改名成 `handoff`**：引擎在「交接未决时再次 `drive`」的拒绝回执
+  （`code:"handoff_open"`）与只读 `drive_status` 里发的是 `handoff_open`，桥却统一读成
+  `this.driveHandoff(response['handoff'] ?? response['handoff_open'])` 并写到 `handoff` 键。
+  按文档读桥响应的 Agent 读空。现改为键名跟事实走：`handoff` = 本次停驶**新开**的交接，
+  `handoff_open` = 已开交接**回显**（拒绝回执 + 只读状态），两者不再互换。
+
+### 变更（公开契约对齐文档，不静默改）
+
+- **桥 `drive`/`drive_command`/`drive_status`/`drive_close` 响应里「已开交接回显」的键名
+  `handoff` → `handoff_open`**。这是**对齐 `docs/AGENT_INTERFACE.md`**（§3 的 `handoff_open`
+  拒绝回执与 `drive_status` 描述）而不是新增语义：此前把回显塞进 `handoff` 是投影实现错误。
+  按旧（错误）投影读 `handoff` 的调用方需改读 `handoff_open`；读「新开交接」的 `handoff` 不受影响
+  （形状与键集逐字节不变）。桥工具描述同批改为 `the echoed \`handoff_open\``。
+- 引擎侧无键名变化：拒绝回执与 `drive_status` 一直发 `handoff_open`（本批只把桥对齐过来）。
+
+### 覆盖（离线）
+
+- `npm run verify:session-drive`：真实跨源 iframe 现场——`started` 与交接块顶层**两层**都出现
+  `frames_excluded`（origin/index 与现场一致、无排除时两处都不出现键），投影上界 8 条 / 120 字符
+  由纯函数臂钉住；`handoff` 与 `handoff_open` 两条分支的键名分别断言。
+- `npm run bridge:test`：拒绝回执键名 `handoff_open`（且不再出现 `handoff`）、正常停驶回执键名
+  `handoff`、`drive_status` 回显键名、`frames_excluded` 两处投影（含 8 条 / 120 字符裁剪与缺键）。
+- `npm run session-contract:check`：两张白名单的条数在一个断言里钉成同界（只改一处 = 红）。
+
+## [Unreleased] — 提示词数字单源化 + 桥面七处投影补齐
+
+### 提示词不再手写容量数字
+
+- `planning-playbook.ts` 的六步法③改为从 `support/tuning.ts` 插值
+  `${POOL_CAP_ELEMENTS}` / `${WIDE_SCAN_POOL_ELEMENTS}`——此前写死「每步 40（宽扫 120）」，
+  而常量早已是 **64 / 128**，模型每次都在读一个过期数字。
+- `prompt-hit` agent 组新增断言：playbook ③ 必须含**由常量渲染出的**窗口句，且 playbook 源必须
+  import 这两个常量。回写裸数字会被门禁拦住。
+
+### 桥面补齐七处「引擎发了、桥丢了」
+
+`started` 事件的 `expect_url`/`attached`/`out_dir`、`read` 的 `matched_count`/`matched_zero`、
+`act scroll` 的 `container`、`drive_close` 的 `note`/`already`、`events[]` 的完整交接块、
+`drive` 的首轮 `started` 块、`pilot_end` 摘要的 `failed_asks`/`cache`/`expect_url`/`code`/`reason`/`last_error`。
+
+### 契约表从单向改双向（结构性防漂移）
+
+`SESSION_EVIDENCE_CAP_TABLE` 由 5 块增至 7 块（补 `scroll` 四字段、新增 `started` 与 `summary`），
+`session-contract-gen` 新增 `checkEvidenceProjections()`：扫描桥投影方法体得到的真实键集，与表**双向**比对——
+**源多字段**（白名单漏登记 = 事实对 Agent 静默消失）与**表多字段**（表与源码脱钩 = Agent 预期一个永不到来的键）
+都会红。两个方向均已实测会红。
+
+### 验证
+
+`npm run check` exit 0、`bridge:test` **38/38**、`verify:pilot` **38/38**、`verify:session-drive` 六场景、
+`prompt-hit` 十三组全绿；线上用例 smoke **7P/0F**、core **11P/0F**，与基线**逐例零差异**。
+
+---
+
+## [Unreleased] — 尾部三处证据上浮 + 全量文档审查
+
+> 同一缺陷类的收尾：把最后三个"Agent 读不到"的证据键搬上顶层，然后对整个文档面做一次漂移与冗余清理。
+
+### 代码：三个证据键上浮为交接块顶层可选键
+
+| 键 | 出现条件 | 上限 |
+|---|---|---|
+| `needs_value: {target, key, ref}` | `needs_value` 停因 | 3 键 / 文本 300 |
+| `resume_hint: {hint, missed:true}` | resume 点名落空后的下一次交接 | 2 键 / 文本 300 |
+| `expect_url: string` | 声明了 `--expect-url` 的**任何**停因 | 300 |
+
+全链（producer → 引擎白名单 → 上限表 → 生成物 → 桥白名单）都改；`session-contract-gen` 新增现场交叉校验
+（把上限改小或改大都会红，已自证非空转）。顶层 handoff 至此共 **18 个键**，与 `AGENT_INTERFACE` 的字段表
+**同一张表**维护（该行已改为"只读本表列出的顶层键"，不再手抄一份）。
+
+### 文档：漂移修正 + 冗余精简（12 份，净 −13 行）
+
+- **活契约**：`AGENT_INTERFACE.md`（envelope 键、`drive`/`drive_status` 响应形状、失败两形、`next` 只在
+  `handoff_open` 带、`evidence.needs_value` 真实 5 键、`learn` 的 real CLI）与 `INTERACTIVE_SESSION.md`
+  （drive 四 op 键集、`started`/`events[]`/`pilot_end` 三节、`read` 的 `matched_count`、`act` 的滚动证据）
+  逐键对代码核验后重写。`APP_SCRIPT_AUTHORING.md` 修 3 处池窗口（40/120 → **64/128**）、4 处不存在的
+  `amber start --target` / `amber plan-cli`。
+- **冗余**：门禁链与 lane 清单在 `README` / `ARCHITECTURE` / `MAINLINE` 三处手抄 → 改为指向
+  `package.json` scripts 与 AGENTS「测试」节；`AGENT_INTERFACE` 的 9 条交接字段 bullet 与下方字段表重复
+  → 合并为指针；`APP_SCRIPT_AUTHORING` §11/§13 的重复已知边界与手抄命令表 → 指针。
+- **生成物**：`CONFIG_REFERENCE.md` / `.env.example` / `amberflowrc.example.json` 重新生成（34 keys）。
+
+### 发现但未修（需要单独的提示词批次）
+
+**模型提示词文本与引擎常量已漂移**：`src/engine/planning-playbook.ts` 的六步法③仍写「候选窗口每步 40
+（宽扫 120）」，而 `src/support/tuning.ts` 是 **64 / 128**。因为 `APP_SCRIPT_AUTHORING.md` §0 必须逐字嵌入
+该 playbook（`prompt-hit` doc 组钉住），文档内部现在并存 40/120（§0 引用）与 64/128（§4 权威段）。
+**修它必须走提示词批次 + 快照重录**，不在文档批范围内。
+
+### 验证
+
+`npm run check` exit 0、`verify:pilot` **38/38**、`bridge:test` **31/31**、`verify:session-drive` 5 场景、
+`prompt-hit` 十三组全绿；线上用例 smoke **7P/0F**、core **11P/0F**，与基线**逐例零差异**。
+
+---
+
+## [Unreleased] — 四类停因事实上浮 + 修复弃权证据运行期恒空
+
+> 同一缺陷类的第二批：证据算了、也进了交接，但到不了 Agent。顺带查出两个**运行期从未生效**的缺陷。
+
+### 新增（顶层 handoff 字段，只在对应停因出现）
+
+| 字段 | 停因 | 上限 |
+|---|---|---|
+| `observation: {pool_size, forbidden, empty_labels}` | `low_confidence` | 3 键 |
+| `model_abstain: {pool_size, asks}` | `low_confidence` 且模型显式弃权 | 2 键 |
+| `nav_error: string` | `unreachable` / `config_error` | 300 |
+| `off_envelope: string` | `host_not_allowed` | 300 |
+
+其它停因的形状**逐字节不变**（`needs_value` / `budget_exceeded` 两条完整 JSON 用 `assert.equal` 钉住）。
+证据块 `why_stuck.evidence` 保留原键与键序（session 消费面零变化）。
+`unreachable`/`config_error` 的解锁建议原先指向"核对 reason 里的 `net::ERR_*`"——**Agent 根本读不到 reason**，
+现改指顶层 `nav_error`。
+
+### 修复（运行期缺陷，纯函数测试看不出来）
+
+- **`model_abstain` 恒为 null**：`handoff()` 先清 `this.modelAbstain` 再读它 → 结构上永远拿不到弃权事实。
+  上一批只测了 `handoffWhyEvidence` 纯函数，所以 lane 是绿的、运行期是空的。
+- **弃权 `pool_size` 恒为 0**：弃权臂上 `vote.pool` 为 `null`，算出来是"池里没候选"——与真相相反。
+  现取本轮驾驶池大小，与 `observation.pool_size` 同一份读数。
+
+### 变更
+
+- `decision-pick-unified.r2bReopen` 的增长门也从"数量变大"改为**元素身份归一**（与宽扫/窗口链同一判据），
+  三处计数门至此收敛到单一判据。
+
+### 线上用例对比（五轮，真实决策服务）
+
+| 轮次 | smoke | core | 逐例状态/动作数 |
+|---|---|---|---|
+| 基线 | 7P/0F 6.7s | 11P/0F 83.2s | — |
+| 第 1 件 | 7P/0F 6.1s | 11P/0F 64.6s | 零差异 |
+| 第 2 件 | 7P/0F 6.4s | 11P/0F 62.0s | 零差异 |
+| 第 3 件 | 7P/0F 6.2s | 11P/0F 62.2s | 零差异 |
+| r2b 补丁 | 7P/0F 6.1s | 11P/0F 59.9s | 零差异 |
+
+### 验证
+
+`npm run check` 全链、`verify:pilot` 36/36、`verify:decision-run-parity` 16 + 3 身份场景、
+`bridge:test` 27/27、`verify:session-drive` 四场景、`verify:nav-error` 5/5。
+
+---
+
+## [Unreleased] — 低置信诊断送达 Agent + 宽化止损按身份归一
+
+> 两件同源：一件治"证据到不了消费者"，一件治"再问一次没有意义却仍要付钱"。
+
+### 一等交付：`low_confidence_kind` 上浮到 handoff 顶层
+
+- **交付链有两道白名单，不是一道**：`session-driver.projectHandoff`（引擎）→ 桥 `driveHandoff`。
+  只改后者，字段仍会在引擎侧被削掉——这是本次排查最耗时的一环，已写进注释。
+- `PilotHandoff` 顶层新增 `low_confidence_kind`（仅 `low_confidence` 出现；其它 11 个停因键不出现、
+  summary 逐字节不变）；`SESSION_HANDOFF_CAP_TABLE` 登记 32 字符上限，桥生成物重新生成。
+- **summary 改成方向性人话**（三档各一句，`LOW_CONFIDENCE_DIRECTION` 单源，加档必须给方向）：
+  `observation-empty` → 先查抽取/等渲染，不要调题面；`observation-all-forbidden` → 先查为什么都被排除；
+  `model-unsure` → 池里有 N 个可用候选、给分低于闸门，这才该调题面或换问法。
+  最坏拼装 283 字符 ≤ 桥面 300。
+
+### 二等交付：宽化止损从"计数变大"改为"元素身份单调性"
+
+- 新增 `elem-model.introducesNewIdentity(next, prev)`（按 `esig` 归一，纯比较、不重建池、ref 空间零改动）。
+- `runWideReobserve` 与 `runWindowEscalationRung` 的增长门改用该判据，覆盖 120→256 整条窗口链；
+  无新身份即止损，并把事实写进 `GateRecovery.identityFlat` 与停因 `why` 尾缀（additive，未发生时空串）。
+- A/B 实测（同一夹具，仅还原门判据）：同文案池 **3 ask → 1 ask**；128 互异 + 52 重复文案 **3 → 2**；
+  180 全互异 **3 → 3 逐字节不变**。16 条 golden 场景零差异。
+
+### 线上用例对比（三轮，真实决策服务）
+
+| 轮次 | smoke | core | 逐例状态/动作数 |
+|---|---|---|---|
+| 基线 | 7P/0F 6.7s | 11P/0F 83.2s | — |
+| 一等交付后 | 7P/0F 6.1s | 11P/0F 64.6s | **完全一致** |
+| 二等交付后 | 7P/0F 6.4s | 11P/0F 62.0s | **完全一致** |
+
+### 验证
+
+`npm run check` 全链、`verify:pilot` 35/35、`verify:decision-run-parity` 16 场景 + 3 条身份场景、
+`bridge:test` 25/25、`verify:session-drive` 四场景；`maintain` / `split:check` / `session-contract:check`
+/ `prompt-hit` 全绿。
+
+---
+
+## [Unreleased] — 真站走查挖出的两处精度缺陷（规则档复读 + 降级伪装）
+
+> 决策面接通后第一次真站走查（Google Maps）跑出了两个**只有真站才会暴露**的缺陷。
+
+### 修复
+
+- **规则档不再复读"已证明无变化"的目标**（`PilotLedger.inertNoChange`）：现场是餐厅页上一条
+  广告文案与目标词面重合，规则档连点三次同一广告、每步 `changed=false`，白耗 3 步预算后
+  以 `stuck_inert` 收场。现在规则档试一次即排除，转由模型档接手。
+  **与 `changedLoop`（乒乓）分工明确**：那个排"变过又变回"，这个排"压根没变"。
+- **决策源降级一律 `no_model_runtime`**（不再只针对鉴权）：此前 403 之外的降级（不可达/坏端点）
+  仍会在首轮伪装成 `low_confidence`，把"模型不在位"报成"模型没把握"，Agent 兜底方向会跑偏。
+  规则推广后 `verify:pilot` 两处旧约定同步更新（首轮即 `no_model_runtime`）。
+
+### 真站验证（决策模型 = 在线 System One）
+
+| 段 | 结果 |
+|---|---|
+| 搜索 | **`done`**（`final_signal_held`）：3 步 / 4 次询问，URL 落到 `/maps/search/restaurants` |
+| 筛选 | **跑通**：`All filters`(0.58) → `Open now`(1.0) → `Done`(0.96)，每步 `changed=true` |
+| 进店 | **跑通**：模型点开 `Dabbawalla: Modern Indian Restaurant & Bar`（conf 0.99） |
+| 读评论 | 未完成：上述规则档复读缺陷挡住了（已修，待复测） |
+
+### 验证
+
+`verify:pilot` 35/35、`maintain` 五组、`npm run check` 全链。
+
+---
+
+## [Unreleased] — 决策服务额外请求头（`AMBERFLOW_DECISION_HEADERS`）
+
+> 动机：有些网关要求**路由头**而不只是 Bearer。只发 Authorization 时请求停在鉴权前一步，
+> 而错误串读起来却像"模型没权限"——排查方向完全跑偏（现场：OpenCode Go 的
+> `MissingSessionID`）。
+
+### 新增
+
+- **`AMBERFLOW_DECISION_HEADERS`（配置键，单源在 `config-schema.ts`；secret）**：额外请求头的
+  JSON 对象，如 `{"x-opencode-session":"…"}`。**路由头与 Authorization 是两个东西**——前者路由、
+  后者身份，互不覆盖；只有同名时以配置为准（显式意图优先）。
+- **`SystemOneProfile.resolveHeaders?()`（provider 契约）**：客户端在认证之后合并它。
+  头名保持原样、值只来自配置——客户端不合成、不推断。
+- 坏 JSON / 数组 / 非字符串值一律**降级为不带头**（服务端拒绝会如实上报），不让配置错误把整条计划崩掉。
+
+### 验证
+
+新增 lane `verify:decision-headers`（本地桩服务把"服务端到底收到什么头"钉成事实）：
+① 配置的路由头真的上路；② 与 Authorization 并存、互不覆盖；③ 空配置/坏 JSON 不带头且不崩；
+④ 同名头以配置为准。`verify:lanes` 22 → 23 条。
+
+### 未解决（重要）
+
+**OpenCode Go 仍然不可用**：它是**纯 chat-completions**，而引擎两条协议都要概率/决策 API
+（`systemone` 要 `{instruction,criteria,state}` → 概率；`openai-decisions` 要
+`{model,input,questions}`）。请求头补上了，协议仍不通——真正缺的是一个
+**chat-completions 决策适配器**（把闭集候选编成题面、只接受池内 ref、严格校验拒绝池外答案），
+那是新协议面，不在本批范围。
+
+---
+
+## [Unreleased] — `low_confidence` 三义分离（观测体检）
+
+> 同一个停因码背后是三种处境，处置方向**相反**：池里一个候选都没有要去查抽取/等渲染；
+> 全被禁选要查为什么都被排除；有可用候选、模型仍没把握才该调题面。原来三者只能靠人翻 DOM
+> 猜，`low_confidence` 于是既像"模型不行"又像"页面不行"。
+
+### 新增
+
+- **`pilot-evidence.observationFactsOf` / `lowConfidenceKindOf`（纯函数，单一出处）**：
+  从当场读数取 `pool_size` / `forbidden` / `empty_labels`，分三档
+  `observation-empty` │ `observation-all-forbidden` │ `model-unsure`。
+- **低置信交接恒带观测体检**：`why_stuck.evidence.observation` + `low_confidence_kind`，
+  且 `summary` 行直接标出档位（人不翻证据也看得出是哪一种）。
+- **池空先重抽一次**：一瞬间的空帧不该被当成"没什么可问"——后者会把 Agent 引向错误方向。
+
+### 验证
+
+`verify:pilot` 35/35（新增「观测体检」：三档分类纯函数 + 现场断言"唯一候选被拒后池耗尽"
+必须落在观测档而**不是**模型档）；`maintain` 五组、`npm run check` 全链。
+
+### 未做（诚实登记）
+
+**命令行腿的决策树（原 F3b）已试做并回退**：`runToolStep` 的决策序确实能映射成同一套状态机
+（resolve/invoke/verify + 幂等重试作为纠正回环），但 `verify:run-execution` 的 4 份 golden
+**不含任何工具步**，仓库也没有 datasource 夹具——改动拿不到覆盖验证。按"没覆盖不落行为改动"
+的纪律回退，等有 `verify:tool-tree` lane 时再提。命令行腿目前只有声明腿（`AppAdapter`），
+决策冠未生长。
+
+---
+
+## [Unreleased] — 鉴权类失败一次就停（403 不再伪装成低置信）
+
+> 现场：决策服务回 `403 AccessDenied.Unpurchased`（权益未购买）。原行为是——首次 ask 静默降级、
+> 报一个误导性的 `low_confidence`，下一轮才翻成 `no_model_runtime`。把"权益问题"报成
+> "模型没把握"会让 Agent 兜底方向完全跑偏（去点名元素，而不是去修凭证）。
+
+### 变更
+
+- **`pilot-tree.ts` 的 `isAuthFailure`（应用层判据）**：401/403/权益未购买/坏凭证 → 鉴权类。
+  输入是 middleware 已记录的降级原文——**引擎只负责如实记录，分类属应用层的判断**。
+- **`selectTool` 的 `below-floor` 分支前置一次鉴权判定**：命中即当轮停成 `no_model_runtime`，
+  不再先报低置信。分类边界由场景钉住：不可达（`ECONNREFUSED`）与服务端故障（500）**不落鉴权档**。
+- `verify-pilot` 的 fixture 服务器新增 `/decision-403*` 端点（服务**在回应** 403，与"不可达"
+  是两件事），`boot()` 支持按场景指定决策源地址。
+
+### 验证
+
+`verify:pilot` 34/34（新增「鉴权类失败一次就停」：五条判据边界 + 现场 403 当轮停、
+零动作、交接带 `no_model_runtime`）；`maintain` 五组、`npm run check` 全链。
+`src/engine/executor.ts` 回到基线 2813 行（该判据最终没进引擎）。
+
+---
+
+## [Unreleased] — 空标签候选的身份兜底（模型看到的不再是 `input ""`）
+
+> 走查实测缺陷：池里 32 个候选，模型只看到 5 行；其中搜索框有 `role:combobox / name:q`
+> 而渲染只给 label，于是模型看到 `input ""`——3 次决策 0 次有效推进。这是**渲染面**缺陷，
+> 不是模型能力问题：它在无法区分的行里投票。
+
+### 新增
+
+- **`pilot-tree.ts` 的 `identityLabelOf` / `askViewOf`（应用层注入段）**：空标签候选按固定序
+  补最多三个池内身份 token（`role` → `[name=…]` → `[type=…]`）。三条纪律：
+  ① **只对空标签生效**（有标签的行逐字节不变；有 aria 名的行仍以 aria 名为准）；
+  ② **无空标签可补时返回同一对象**（题面逐字节不变，不制造新分配）；
+  ③ **只改提问视图**——ref、顺序、执行面用的池都不动，回票仍在同一 ref 空间。
+- **`fixtures/engine/pilot/unlabeled-target.html`**：只有 `name`/`type`、无 aria-label 的输入框
+  （真实抽取链上 label 为空的最小复现）。
+
+### 变更
+
+- `PilotAskAdapter.host().pick` 走提问视图（`askViewOf(pool)`）后再问模型。
+  **引擎文件零改动**——渲染在应用层的注入段完成，`criteriaView` / `ChoiceRequest` 未动。
+- `PilotRuntime.mw()` 改为公开：证据/校验面要读同一份 middleware 实例（不改状态）。
+
+### 验证
+
+`verify:pilot` 33/33（新增「空标签身份兜底」：纯函数三态 + **真实抽取链**上同一池
+「无兜底渲染 `""` / 有兜底渲染 `[name=q]`」的正反自证）；`maintain` 五组、`npm run check` 全链。
+
+---
+
+## [Unreleased] — 决策引擎分层：驾驶面升格为显式决策树（状态机）
+
+> 引擎层只定义接口与 walker，应用层用**数据**声明状态与转移表。驾驶面原来的 if 链
+> （`driveOnce` + `executePicked`，约 230 行）成为树的四个状态实现，路由从代码变成可加载期
+> 校验的边。这是"应用层挂自己的行为树"这条分层的第一次落地。
+
+### 新增
+
+- **`src/engine/decision-tree.ts`（引擎层）**：状态类型闭集（`select-tool` / `resolve-param` /
+  `invoke` / `verify-step` / `handoff`）、**逐 kind 结果闭集**（各状态转移事件集不同，不是统一的
+  「成功 | 失败」模板）、`validateTree`（缺出边 / kind 越界 / 悬空终点三类结构错误在加载期拒绝）、
+  `walkTree`（决策面 walker：逐状态求值 → 按结果走边；`{stop}` 不经边直接终止；
+  `shouldContinue` 把预算边界钉在调用方）。
+- **`src/app/pilot-tree.ts`（应用层）**：浏览器决策树 `BROWSER_TREE`（5 状态 / 16 条边）。
+  四条不可继续的选点形态各自成事件（`below-floor` / `abstain` / `no-model` / `ambiguous`）——
+  `abstain` 的落点就是"重述题面"将来的挂载位：改那条边即可，不动 walker。纠正回环
+  `verify --retry→ select` 也已是数据（本批尚未发出该事件）。
+- **`BROWSER_STATE_IDS` 类型约束**：实现绑定写成 `Record<BrowserStateId, TreeHandler>`，
+  少一个状态的实现就是**编译错**，不必等运行时；状态 id 与 `BROWSER_TREE.states` 在模块求值时断言一致。
+
+### 变更
+
+- `pilot-runtime.ts` 的 `driveOnce` 只保留**引擎强制的前置壳**（任务页守卫 → 导航信封）与
+  一次 `walkTree` 调用；`executePicked` 拆成 `selectTool` / `resolveParam` / `invokeAction` /
+  `verifyStep` 四个状态方法（逐字转写，行为不变）。`ruleRefOf` 移入应用层树模块。
+- 一次 walk = 一次动作尝试：`invoke` 才计预算，动作前拒绝（`rejected` / `denied`）不耗步。
+
+### 验证
+
+`verify:pilot` 32/32（新增「决策树契约」场景：加载期校验真的拒绝三类结构错误、walker 走数据里的
+边、停因不经边、预算边界先于状态求值）、`verify:runtime:offline` 8/8、`verify:run-execution`
+四源 golden 平直、`npm run check` 全链（含 `decision run-parity` 16/16）、`maintain` 五组
+（`pilot-runtime.ts` 797 行，帽下）。
+
+---
+
+## [Unreleased] — 决策闸门缺省 0.25 → 0.5（与弃权出口配套）
+
+> 与上一条同批：先让模型能说"都不会推进"，再把闸门调紧。顺序很重要——反过来先调闸门，
+> 只会让 `low_confidence` 激增而分不清"模型弃权"还是"闸门太严"。
+
+### 变更
+
+- **`DEFAULT_CONF_FLOOR` 0.25 → 0.5**（`src/support/config-schema.ts`，单源）。统一值：
+  不按 `score_kind` 分档（`calibrated_prob` 与 `entropy_conf` 共用 0.5），先跑一轮实测再定。
+- **`pilot-runtime` 的硬编码 0.25 改为消费单源**：此前 pilot 面自带一个字面量缺省，
+  与全局常量是两个来源；现在 `this.confFloor = … : DEFAULT_CONF_FLOOR`。
+- **配置派生文档重新生成**（`configs/amberflowrc.example.json` / `.env.example` /
+  `docs/CONFIG_REFERENCE.md`，33 keys）——它们是 `config-schema.ts` 的生成物，不手改。
+- 源码内 5 处 JSDoc 的"缺省 0.25"措辞统一改为"全局缺省 `DEFAULT_CONF_FLOOR`"（不写死数字，
+  下次调值不必再改文案）：`pack-policy`（2 处）、`pilot-contract`（2 处）、`app-runner-types`、
+  `app-runner` 的 `--conf-floor` 帮助行。
+
+### 依据（历史 72 次模型票的实测分布）
+
+| floor | 会拦下 | 其中 `changed=true` |
+|---|---|---|
+| 0.25（旧缺省） | 11% | 3 次 |
+| **0.5（新缺省）** | **50%** | 24 次 |
+| 0.6 | 62% | 29 次 |
+
+`changed=true` **不等于选对**：走查实测里第 3 步选 `Singapore`（conf=0.24，changed=true）
+确实让页面变了，但一跳跳到 `/preferences`，任务彻底毁掉。所以"损失 24 次进展"这个数字
+高估了损失——被拦的多数是"变了但变错方向"。
+
+### 验证
+
+`verify:pilot` 两条断言改为消费 `DEFAULT_CONF_FLOOR` 单源（终态摘要的 `conf_floor`、
+`weakPicksFrom` 的严格 `< floor` 边界），31/31 全过；`verify:lanes` 22 条、
+`verify:decision-run-parity` 16/16、`verify:decision-characterization` 12/12、
+`verify:decision-ask-parity` 5 场景、`verify:decision-context` 87 项、
+`verify:app-stop-context` 29 项、`npm run check` 全链全绿。
+`AppRunOptions` / `USAGE` 因 JSDoc 改写按 split-check 纪律从纯搬移 manifest 删除。
+
+### 落回代码前必看
+
+**本机用户配置仍覆盖全局缺省**：`~/.amberflow/config.json` 里 `AMBERFLOW_DECISION_FLOOR=0.2`。
+优先级是 `--conf-floor / AMBERFLOW_CONF_FLOOR > AMBERFLOW_DECISION_FLOOR > 全局缺省(0.5)`，
+所以**不删这一行，实际生效的仍是 0.2**。要吃到新的 0.5，需 `amber config unset
+AMBERFLOW_DECISION_FLOOR` 或显式改成 0.5。
+
+## [Unreleased] — 决策问答新增「弃权」出口（模型可显式说"都不推进"）
+
+> 走查实测：Maps 筛选段 4 次 low_confidence、约 20 次提问只换来 1/3 个筛选。复盘发现模型面对
+> "都不合适"时只有一个出路——猜一个看起来合理的候选（实测选中 `Singapore` 按钮，一跳毁掉整个
+> 上下文）。模型没有"我拒绝回答"的表达面，引擎也就没有"模型说不行"的负面证据。
+
+### 能力
+
+- **问答提示词新增弃权出口**（`decision.choice` v1→v2）：`choiceInstructions` 增加
+  "If no candidate would make real progress, answer **none** instead of guessing — a wrong pick
+  that looks plausible is worse than an explicit abstain."（177→322 字符，预算 400）。
+  这与既有 `ESCALATOR_INSTRUCTIONS` 的 "answer none" 同一写法，不是新发明。
+- **`ChoiceOutcome.abstained?: boolean`**（provider 契约）：与 `ref: null` **不得归一**——
+  后者是引擎侧"没拿到可用选择"（候选空/池外答复被判无效），前者是模型侧"看了候选说不行"。
+- **三个 provider 适配**：`system-one-client`（含百炼/token-plan/JevK5 四家）、
+  `decision-openai`、`layaProvider` 都识别 `none` 为显式弃权；`tools/stub-decision-provider`
+  的 `StubTurn` 也支持它，供 lane 表达弃权臂。
+
+### 可归因性（这是本批真正的目的）
+
+- `PickProposal.abstained` 透传到 `decision-ask` 的 `abstained()` detail：
+  `model-abstained: 模型看过候选后明确表示都不推进目标`——与"没拿到选择"在 outcome 上可分。
+- pilot 面把弃权事实记进交接块 `why_stuck.evidence.model_abstain: { pool_size, asks }`：
+  每次 Agent 兜底时能直接读「模型在第几步、看着几个候选、说它不行」。交接后即清，不粘。
+- 两者**仍然同落 `low_confidence`**（不新增停因码）——行为不变，变的只是可归因性。
+
+### 验证
+
+- `verify:pilot` 新增场景「模型显式弃权→交接 evidence 带 model_abstain」：断言无弃权时键
+  不出现（旧交接形状不变）、有弃权时带 `{pool_size, asks}`。31/31 场景全过。
+- 端到端探针（mock SystemOne 端点）：`none → ref=null abstained=true`；`e99（池外）→ ref=null
+  abstained=-`；`e0（正常）→ ref=e0 abstained=-`——三者语义正确分离。
+- `verify:decision-ask-parity` 5 场景三臂零差异；`verify:decision-characterization` 12/12 金标；
+  `verify:decision-context` 87 项；`verify:decision-run-parity` 16/16；`npm run check` 全链；
+  `verify:lanes` 22 条全过。
+- `tools/golden/prompts/snapshot.json` 按纪律显式刷新（`decision.choice` version 1→2，
+  `outputContract.mustInclude` 增加弃权关键句）；`PickProposal` 因契约新增可选字段按
+  split-check 纪律从纯搬移 manifest 删除。
+
+### 下一步（未在本批）
+
+闸门刻度 `DEFAULT_CONF_FLOOR` 0.25 → 0.5 **留到下一批**：先让弃权可达，再调闸门，
+这样被拦下的票会是"模型明确说我不会"而不是"模型猜了但没把握"——同样的拦下率，信息量不同。
+
+## [Unreleased] — 元素级只读求值限时（30s 默认超时黑洞 / 走查动作 94% 时间）
+
+> 用决策模型驾驶走查（`amber session` 的 drive 面）跑真实站点时暴露的一条通用缺陷：
+> 动作后的取证读取在**元素已被自己卸载**之后发生，`locator.evaluate` 不传 timeout 就吃
+> Playwright 默认 30s，调用方再 `catch` 成 null——表现为"这一步慢了 30 秒但结果正确"，
+> 事后完全无法与"页面真的慢"区分。与站点无关，任何"点完即关面板"的控件都会命中。
+
+### 修复
+
+- **`ELEMENT_EVAL_TIMEOUT_MS = 1500`**（`src/support/tuning.ts`，进 `TUNING_VALUES` 门禁表）：
+  元素级只读求值的缺省超时；与既有 `innerText({ timeout: 1500 })` 的取证口径一致。
+- **调用点显式限时**（语义不变，读不到仍是 null / unknown）：
+  - `BrowserMiddleware._panelText`（面板正文取证，动作前后各一次）
+  - `BrowserMiddleware._readActionabilityDetail`（失败现场读取）
+  - `hitRelation`（探针超时后的中心命中关系）
+  - `_lockStampIsLive`（决策票执行锁的身份复核）
+- **`AnyLoc.evaluate` 契约新增可选 `opts.timeout`**（`src/engine/executor-types.ts`）：
+  之前类型面无法表达超时，是这条黑洞的类型级成因。`AnyLoc` 因此按 `split-check` 文档纪律
+  从纯搬移 manifest 删除（有意的非纯搬移，原因记在 manifest `note`）。
+
+### 证据
+
+- **新 lane** `npm run verify:element-eval-timeout`（`tools/verify-element-eval-timeout.ts`）：
+  5 组断言——快路径毫秒级 / 卸载后限时返回 / `snapshot_scope` 如实退回 document /
+  动作语义不变 / 稳定目标对照。**反向验证**：把 timeout 去掉后同一 lane 立刻变红
+  （30010ms vs 4000ms 窗口），证明它能拦住回归而不是恒绿摆设。
+- **现场量化**：历史 64 份 pilot 轨迹的 150 次驾驶动作里，15 次耗时恰好 30.6s，
+  合计占动作总时间 94%，且这 15 次 `changed` 全部为 true。
+- **真实站点复测**（Maps 餐厅结果页，历史同一批目标）：`All filters` / `Done` 各点两轮
+  → 3661ms / 2749ms / 3041ms / 2053ms（修复前同一目标稳定 30.6s）。
+- **回归面**：`npm run check` 全绿；`verify:lanes`（含新 lane 共 22 条）、`verify:pilot` 30/30、
+  `verify:runtime:offline` 8/8、`verify:offline` 15 夹具、`verify:parity`、
+  `verify:decision-run-parity` 16/16 全过。
+
+### 设计研判
+
+同批产出 `docs/WALKTHROUGH_TAKEOVER_ASSESSMENT.md`：走查全流程画像（用户提示词 + 指令闭集 +
+参数闭集）+ 产品/架构双视角研判。结论「模型拥有计划，引擎拥有证明」——本修复是其中的 P0-①，
+其余五项（403 硬停 / 观测体检 / 步级 done / 熔断分级 / 结构化池）见该文档 §7。
+
 ## [Unreleased] — 真实站点走查批（act 歧义口径 / 双柄 range 事实 / CSS 属性形状 / 启动失败分类 / 落地丢段 / 程序化滚动）
 
 > 用引擎 session 面走查一个真实站点任务时暴露的六条卡点。全部是通用能力缺口

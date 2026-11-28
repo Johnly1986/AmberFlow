@@ -68,6 +68,76 @@ function projectWeakPicks(picks: PilotHandoff["weak_picks"]): Array<Record<strin
   }));
 }
 
+/** 交接事实（停因专属事实 + 现场定位键）的文本上限（与 `SESSION_HANDOFF_CAP_TABLE` 的 engine 列同一界）。 */
+const MAX_HANDOFF_FACT_TEXT = 300;
+
+/** 被排除 frame 的投影上界（条数 / 单条 origin 字符；与 `SESSION_HANDOFF_CAP_TABLE` 的 engine 列同界）。 */
+const MAX_FRAME_EXCLUSIONS = 8;
+const MAX_FRAME_ORIGIN_CHARS = 120;
+
+/**
+ * 被排除 frame 的有界投影（`started` 事件与交接块**共用**，两个入口同一形状）。
+ *
+ * 只认结构完整的行（`index` 是数字），`origin` 按表界裁剪；空数组/非数组/全是被丢弃的
+ * 畸形行 = `undefined`，调用方据此**不出现该键**（无排除帧时旧形状逐字节不变）。
+ */
+export function projectFrameExclusions(raw: unknown): PilotHandoff["frames_excluded"] {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Array<{ origin: string; index: number }> = [];
+  for (const item of raw) {
+    if (out.length >= MAX_FRAME_EXCLUSIONS) break;
+    if (!isObj(item) || typeof item["index"] !== "number" || !Number.isFinite(item["index"])) continue;
+    out.push({ origin: clip(item["origin"], MAX_FRAME_ORIGIN_CHARS), index: item["index"] });
+  }
+  return out.length === 0 ? undefined : out;
+}
+
+/**
+ * 停因专属事实的顶层投影（无事实 = 键不出现，非对应停因的交接形状逐字节不变）。
+ *
+ * 文本项按表界裁剪；整数项按**固定键**重建（只认 `pool_size`/`asks` 与
+ * `pool_size`/`forbidden`/`empty_labels`，多出的键不进投影），形状因此恒为紧凑形。
+ */
+function projectStopFacts(h: PilotHandoff): Record<string, unknown> {
+  return {
+    ...(typeof h.nav_error === "string" ? { nav_error: clip(h.nav_error, MAX_HANDOFF_FACT_TEXT) } : {}),
+    ...(typeof h.off_envelope === "string" ? { off_envelope: clip(h.off_envelope, MAX_HANDOFF_FACT_TEXT) } : {}),
+    ...(isObj(h.model_abstain)
+      ? { model_abstain: { pool_size: h.model_abstain.pool_size, asks: h.model_abstain.asks } } : {}),
+    ...(isObj(h.observation)
+      ? { observation: { pool_size: h.observation.pool_size, forbidden: h.observation.forbidden, empty_labels: h.observation.empty_labels } }
+      : {}),
+  };
+}
+
+/**
+ * 现场定位键的顶层投影（`expect_url` / `needs_value` / `resume_hint`）：无事实 = 键不出现
+ * （其它情形的交接形状逐字节不变）。
+ *
+ * 文本按表界裁剪；对象按**固定键**重建（`needs_value` 三键全在才投影、`resume_hint` 只认
+ * `missed:true`），多出的键不进投影——引擎不补桥也不补，形状因此恒为紧凑形。
+ */
+function projectLocatorFacts(h: PilotHandoff): Record<string, unknown> {
+  const need = h.needs_value;
+  const missed = h.resume_hint;
+  const needComplete = isObj(need)
+    && typeof need.target === "string" && typeof need.key === "string" && typeof need.ref === "string";
+  const missedComplete = isObj(missed) && missed.missed === true && typeof missed.hint === "string";
+  return {
+    ...(typeof h.expect_url === "string" ? { expect_url: clip(h.expect_url, MAX_HANDOFF_FACT_TEXT) } : {}),
+    ...(needComplete
+      ? { needs_value: {
+        target: clip(need.target, MAX_HANDOFF_FACT_TEXT),
+        key: clip(need.key, MAX_HANDOFF_FACT_TEXT),
+        ref: clip(need.ref, MAX_HANDOFF_FACT_TEXT),
+      } }
+      : {}),
+    ...(missedComplete
+      ? { resume_hint: { hint: clip(missed.hint, MAX_HANDOFF_FACT_TEXT), missed: true } }
+      : {}),
+  };
+}
+
 /**
  * evidence 超限退化后的键名清单（≤8 条）。
  *
@@ -104,8 +174,13 @@ export function projectHandoff(h: PilotHandoff): Record<string, unknown> {
     boundedEvidence = {};
   }
   const refs = h.evidence_refs ?? {};
+  const frames = projectFrameExclusions(h.frames_excluded);
   return {
     stop_code: h.stop_code,
+    ...(h.low_confidence_kind === undefined ? {} : { low_confidence_kind: h.low_confidence_kind }),
+    ...projectStopFacts(h),
+    ...projectLocatorFacts(h),
+    ...(frames === undefined ? {} : { frames_excluded: frames }),
     step_id: h.step_id,
     goal_digest: clip(h.goal_digest),
     why_stuck: { summary: clip(why.summary, MAX_WHY), evidence: boundedEvidence },
@@ -123,8 +198,9 @@ export function projectHandoff(h: PilotHandoff): Record<string, unknown> {
   };
 }
 
-/** `started` 事件的有界投影（开车现场：附着与否、落在哪一页、证据目录）。 */
-function projectStarted(obj: Record<string, unknown>): Record<string, unknown> {
+/** `started` 事件的有界投影（开车现场：附着与否、落在哪一页、证据目录、被排除的 frame）。 */
+export function projectStarted(obj: Record<string, unknown>): Record<string, unknown> {
+  const frames = projectFrameExclusions(obj["frames_excluded"]);
   return {
     type: "started",
     ok: obj["ok"] === true,
@@ -132,6 +208,7 @@ function projectStarted(obj: Record<string, unknown>): Record<string, unknown> {
     ...(nonEmpty(obj["url"]) ? { url: clip(obj["url"]) } : {}),
     ...(nonEmpty(obj["out_dir"]) ? { out_dir: clip(obj["out_dir"], MAX_WHY) } : {}),
     ...(nonEmpty(obj["expect_url"]) ? { expect_url: clip(obj["expect_url"]) } : {}),
+    ...(frames === undefined ? {} : { frames_excluded: frames }),
     ...(obj["code"] === undefined ? {} : { code: clip(obj["code"], 120) }),
     ...(obj["reason"] === undefined ? {} : { reason: clip(obj["reason"], MAX_WHY) }),
   };

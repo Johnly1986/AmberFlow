@@ -422,6 +422,20 @@ export function esig(e: Elem): [string, string, string] {
 }
 
 /**
+ * 宽化抽取是否**引入了新元素身份**（"再问一次有没有意义"的唯一判据）。
+ *
+ * 计数变大不等于看到了新东西：ref 是位置键（每次抽取重排），宽池可能只是同一批元素重编号
+ * 或邻近重复。按 `esig` 归一后身份集合不增长 = 模型重问只会看到同一批候选，答案不会变。
+ * 本函数只**比较**两份池，不重建/不重排任何池（票仍指本步的真实 ref）。
+ */
+export function introducesNewIdentity(next: ElemPool, prev: ElemPool): boolean {
+  const seen = new Set<string>();
+  for (const el of Object.values(prev)) seen.add(esig(el).join("\u0000"));
+  for (const el of Object.values(next)) if (!seen.has(esig(el).join("\u0000"))) return true;
+  return false;
+}
+
+/**
  * Resolve a target_hint hit set: one hit is unambiguous, none is a miss, and
  * several are decidable when they are indistinguishable on (tag, label, href,
  * data_test) — bbc.com ships two identical `/news` links, either satisfies the

@@ -1,5 +1,5 @@
 {
-  "_doc": "把它复制成同目录的 amberflowrc.json 就是无害的：本模板的值就是引擎的内建默认值。空串 = 自动/不覆盖（例如服务地址为空表示用本地模型，闸门刻度为空表示让 provider 自报或全局 0.25），不是“关闭”。线上决策服务只填三件套：AMBERFLOW_DECISION_BASE_URL + AMBERFLOW_DECISION_MODEL + AMBERFLOW_DECISION_API_KEY；没有 BASE_URL 时 AMBERFLOW_DECISION_MODEL 选本地 checkpoint：空 = english，multilingual 需显式填写。凭据只留在本机这个文件里（已被 .gitignore 排除），绝不进计划/包/报告等被审计的产物。旧环境变量（LAYAA_*、HUGGINGFACE_HUB_CACHE、LAYAWEBUSE_REPO、provider 专属变量）仍由各消费点兼容，但不属于配置面；写进这里会以未知键拒绝。优先级：CLI 旗标 > 环境变量 > 项目配置 > 用户配置 > 旧 rc > 内建缺省；本文件的键若已在环境里设过，以环境为准。",
+  "_doc": "把它复制成同目录的 amberflowrc.json 就是无害的：本模板的值就是引擎的内建默认值。空串 = 自动/不覆盖（例如服务地址为空表示用本地模型，闸门刻度为空表示让 provider 自报或全局缺省），不是“关闭”。线上决策服务只填三件套：AMBERFLOW_DECISION_BASE_URL + AMBERFLOW_DECISION_MODEL + AMBERFLOW_DECISION_API_KEY；没有 BASE_URL 时 AMBERFLOW_DECISION_MODEL 选本地 checkpoint：空 = english，multilingual 需显式填写。凭据只留在本机这个文件里（已被 .gitignore 排除），绝不进计划/包/报告等被审计的产物。旧环境变量（LAYAA_*、HUGGINGFACE_HUB_CACHE、LAYAWEBUSE_REPO、provider 专属变量）仍由各消费点兼容，但不属于配置面；写进这里会以未知键拒绝。优先级：CLI 旗标 > 环境变量 > 项目配置 > 用户配置 > 旧 rc > 内建缺省；本文件的键若已在环境里设过，以环境为准。",
   "LAYA_ONNX_MODEL": "",
   "LAYA_TOKENIZER_DIR": "",
   "HF_HOME": "",
@@ -13,6 +13,7 @@
   "AMBERFLOW_DECISION_TIMEOUT_MS": "30000",
   "AMBERFLOW_DECISION_STATE_CONTEXT": "1",
   "AMBERFLOW_DECISION_MIN_OPTIONS": "1",
+  "AMBERFLOW_DECISION_HEADERS": "",
   "OPENAI_BASE_URL": "",
   "OPENAI_API_KEY": "",
   "AUDIT_MODEL": "gpt-4o-mini",

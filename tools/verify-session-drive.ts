@@ -25,7 +25,10 @@ import os from "node:os";
 import path from "node:path";
 import { SessionRuntime } from "../src/app/session-runtime.ts";
 import type { SessionSink } from "../src/app/session-runtime-contract.ts";
-import type { SessionPilotDriver } from "../src/app/session-driver.ts";
+import {
+  projectFrameExclusions, projectHandoff, projectStarted, type SessionPilotDriver,
+} from "../src/app/session-driver.ts";
+import type { PilotHandoff } from "../src/app/pilot-contract.ts";
 import type { PilotRuntime } from "../src/app/pilot-runtime.ts";
 import type { AnyPage, BrowserSession } from "../src/engine/executor.ts";
 
@@ -49,12 +52,19 @@ const PAGES: Record<string, string> = {
 <div id="done">done</div>
 <button id="again" onclick="document.body.dataset.clicked='1'">Again</button>
 </body></html>`,
+  // 整页固定 + 内部面板滚动：文档自身不可滚，`scrollDocument` 回退到面板并回带 `container`。
+  "/fixed.html": `<!doctype html><html><head><meta charset="utf-8"><title>fixed shell</title>
+<style>html,body{height:100%;margin:0;overflow:hidden}#panel{height:120px;overflow:auto}</style></head><body>
+<div id="panel"><div style="height:800px">panel content</div></div>
+</body></html>`,
 };
 
-async function startFixtureServer(): Promise<{ origin: string; close(): Promise<void> }> {
+async function startFixtureServer(
+  bind = "127.0.0.1", extra: Record<string, string> = {},
+): Promise<{ origin: string; close(): Promise<void> }> {
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
-    const html = PAGES[pathname];
+    const html = extra[pathname] ?? PAGES[pathname];
     if (html === undefined) {
       res.statusCode = 404;
       res.end("not found");
@@ -63,10 +73,10 @@ async function startFixtureServer(): Promise<{ origin: string; close(): Promise<
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.end(html);
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, bind, resolve));
   const port = (server.address() as { port: number }).port;
   return {
-    origin: `http://127.0.0.1:${port}`,
+    origin: `http://${bind}:${port}`,
     close: () => new Promise<void>((resolve, reject) => server.close((e) => (e === undefined ? resolve() : reject(e)))),
   };
 }
@@ -210,6 +220,12 @@ async function scenarioAttachDrive(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(idleStatus["status"], "idle");
     assert.equal(idleStatus["steps"], 0);
     assert.equal(idleStatus["session_id"], RUN_ID);
+    // 未起驾驶就收尾：`closed:false` 必须带 `note` 说明为什么没关闭（不是静默 no-op）。
+    const idleClose = await request("driveClose");
+    assert.equal(idleClose["ok"], true);
+    assert.equal(idleClose["closed"], false, "nothing to close before a driver exists");
+    assert.equal(typeof idleClose["note"], "string", "the no-driver close carries its explanatory note");
+    assert.ok(String(idleClose["note"]).length > 0, "the note is human-readable, not an empty string");
 
     // ---- drive：agent 驾驶（零模型）在宿主 page 上起步并停在步间等待 ----
     const drive1 = await request("drive", {
@@ -225,6 +241,8 @@ async function scenarioAttachDrive(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(started["ok"], true);
     assert.equal(started["attached"], true, "pilot attaches to the host session");
     assert.equal(started["url"], homeUrl, "started reports the host page as-is");
+    assert.equal("frames_excluded" in started, false,
+      "a page with no cross-origin sub-frame carries no frames_excluded key (old started shape)");
     const pilotOutDir = String(drive1["out_dir"]);
     assert.ok(fs.existsSync(pilotOutDir), "pilot evidence dir exists");
     assert.notEqual(path.resolve(pilotOutDir), path.resolve(sessionOutDir), "pilot evidence dir is independent");
@@ -271,6 +289,12 @@ async function scenarioAttachDrive(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(filled["executed"], true);
     const readValue = await request("read", { selector: "#note", what: "value" });
     assert.equal(readValue["value"], "人工值", "the form value set by the manual step is kept");
+    assert.equal(readValue["matched_count"], 1, "a unique selector reports its match count");
+    assert.equal("matched_zero" in readValue, false, "a nonzero count never carries matched_zero");
+    const readMissing = await request("read", { selector: "#no-such-element", what: "text" });
+    assert.equal(readMissing["value"], null, "a missing element reads as null");
+    assert.equal(readMissing["matched_count"], 0, "zero hits are reported as a count, not omitted");
+    assert.equal(readMissing["matched_zero"], true, "'element absent' is distinguishable from 'element present but empty'");
     assert.equal(hostPage(), page0);
     const midStatus = await request("driveStatus");
     assert.equal(midStatus["status"], "await_pick");
@@ -425,6 +449,8 @@ async function scenarioHandoffPlay(env: NodeJS.ProcessEnv, origin: string): Prom
     const handoff = drifted["handoff"] as Record<string, unknown>;
     assert.ok(handoff !== null && typeof handoff === "object", "handoff block is projected");
     assert.equal(handoff["stop_code"], "off_task_page", "handoff reuses the pilot-contract stop codes");
+    assert.equal(handoff["expect_url"], "/home.html",
+      "the declared expect_url is a top-level fact — the off_task_page advice says 'deviated from --expect-url'");
     assert.equal(typeof handoff["step_id"], "number", "handoff carries the step id");
     assert.equal(typeof (handoff["why_stuck"] as Record<string, unknown>)["summary"], "string", "why_stuck summary is bounded text");
     const unblock = handoff["what_would_unblock"] as string[];
@@ -434,7 +460,15 @@ async function scenarioHandoffPlay(env: NodeJS.ProcessEnv, origin: string): Prom
       "a declared final signal is echoed as a bounded end-state fact on the handoff");
     assert.equal("weak_picks" in handoff, false,
       "no sub-floor model vote (agent driving asks no model) = no weak_picks key");
-    assertBoundedEvents(drifted["events"], "handoff/drift");
+    assert.equal("frames_excluded" in handoff, false,
+      "no cross-origin sub-frame = no frames_excluded key (old handoff shape)");
+    const driftEvents = assertBoundedEvents(drifted["events"], "handoff/drift");
+    const handoffEvent = driftEvents.find((e) => e["type"] === "handoff") as Record<string, unknown> | undefined;
+    assert.ok(handoffEvent !== undefined, "the handoff event is projected into events[]");
+    const eventHandoff = handoffEvent["handoff"] as Record<string, unknown> | undefined;
+    assert.ok(eventHandoff !== undefined, "the events[] handoff row carries the full handoff block");
+    assert.equal(eventHandoff["stop_code"], "off_task_page", "the event handoff block states the same stop code");
+    assert.equal(eventHandoff["step_id"], handoff["step_id"], "the event and the response block are the same fact");
 
     // 交接打开 = pilot 暂停；session 的 observe/act/read 必须照常可用（同一 page）。
     const observed = await request("observe", { max: 20 });
@@ -450,6 +484,7 @@ async function scenarioHandoffPlay(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(openStatus["active"], true);
     assert.equal((openStatus["handoff_open"] as Record<string, unknown>)["stop_code"], "off_task_page",
       "status exposes the open handoff");
+    assert.equal("handoff" in openStatus, false, "the read-only echo keeps its own key (no new handoff happened)");
 
     // ---- 未决交接时再 drive：不静默复用/再驾驶，新 goal 未被采纳这件事必须可见 ----
     // 静默复用会再 step 一轮 → 同一交接重放（handoffCount+1、steps+0），新 goal 被忽略
@@ -464,6 +499,8 @@ async function scenarioHandoffPlay(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(reusedDrive["status"], "handoff");
     assert.equal(reusedDrive["stop_code"], "off_task_page");
     assert.equal(reusedDrive["steps"], stepsBefore, "no silent extra driving step");
+    assert.equal("handoff" in reusedDrive, false,
+      "the open-handoff echo is NOT renamed to handoff (that key means a newly opened handoff)");
     const echoed = reusedDrive["handoff_open"] as Record<string, unknown>;
     assert.ok(echoed !== null && typeof echoed === "object", "the open handoff is echoed structurally");
     assert.equal(echoed["stop_code"], "off_task_page", "the echo carries the open stop code");
@@ -582,6 +619,161 @@ async function scenarioBudgetTerminal(env: NodeJS.ProcessEnv, origin: string): P
   }
 }
 
+/* ------------------------------------------------------------------ 场景 5：被排除 frame 的两层可见性 */
+
+/**
+ * `frames_excluded` 的**真可见性**（文档承诺）：`started` 事件与交接块顶层各一份有界投影
+ * （两道白名单同一 helper），无排除帧时两处都不出现键；投影侧上界 = 8 条 / origin 120 字符。
+ *
+ * 现场造法：主页面（`127.0.0.1`，hosts 只声明它）内嵌一个 `127.0.0.2` 的跨源 iframe——
+ * IP 只认精确相等，所以该帧被排除出解析面。驾驶用 agent 档（零模型），点名 `#note` 是主
+ * frame 内的输入 → 缺值停 `needs_value`，交接在抽池之后，两层的 frame 事实都齐。
+ */
+async function scenarioFrameExclusions(env: NodeJS.ProcessEnv): Promise<void> {
+  const child = await startFixtureServer("127.0.0.2", {
+    "/inner.html": `<!doctype html><html><head><meta charset="utf-8"><title>inner</title></head><body>
+<button id="inner">Inner only</button></body></html>`,
+  });
+  const outer = await startFixtureServer("127.0.0.1", {
+    "/frame-host.html": `<!doctype html><html><head><meta charset="utf-8"><title>frame host</title></head><body>
+<label for="note">Note</label><input id="note" name="note">
+<iframe src="${child.origin}/inner.html" width="400" height="200"></iframe></body></html>`,
+  });
+  const responses: Array<Record<string, unknown>> = [];
+  const rt = new SessionRuntime({
+    url: `${outer.origin}/frame-host.html`,
+    hosts: [new URL(outer.origin).hostname],
+    outDir: fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-session-drive-frames-")),
+    quiet: true,
+    idleTimeoutMs: 0,
+    env,
+  }, { respond: (o) => { responses.push(o); }, log: () => {} }, "verify-session-drive-frames");
+  let closed = false;
+  try {
+    await rt.start();
+    await new Promise((resolve) => setTimeout(resolve, 800));   // 等跨源 iframe 载入（帧门禁按 frames() 分类）
+    const request = makeClient(rt, responses);
+
+    const drive = await request("drive", { goal: "zerblonix frobnicate", driver: "agent", max_steps: 4 });
+    assert.equal(drive["ok"], true, `drive attaches on the frame page: ${JSON.stringify(drive).slice(0, 300)}`);
+    assert.equal(drive["status"], "await_pick");
+    const started = drive["started"] as Record<string, unknown>;
+    const startedFrames = started["frames_excluded"] as Array<{ origin: string; index: number }> | undefined;
+    assert.ok(Array.isArray(startedFrames) && startedFrames.length > 0,
+      "the started evidence carries the excluded-frame fact (first whitelist)");
+    assert.ok(startedFrames!.some((f) => f.origin === child.origin && f.index >= 1),
+      "the excluded frame keeps its real origin + pool frame index");
+    assert.ok(startedFrames!.every((f) => f.origin.length <= 120), "each origin is projected under the origin cap");
+    const events = assertBoundedEvents(drive["events"], "frames/started");
+    const startedEvent = events.find((e) => e["type"] === "started");
+    assert.ok(startedEvent !== undefined, "the started event is projected into events");
+    assert.deepEqual(startedEvent!["frames_excluded"], started["frames_excluded"],
+      "the event projection and the top-level started block carry the same bounded fact");
+
+    // 交接层：点名主 frame 内的输入 → 缺值停（零模型），交接块顶层同样带该事实。
+    const stepped = await request("driveCommand", { cmd: "resume", hint: "#note" });
+    assert.equal(stepped["ok"], true);
+    assert.equal(stepped["outcome"], "drive");
+    assert.equal(stepped["stop_code"], "needs_value", "the named fill needs a value ⇒ deterministic handoff");
+    assert.equal("handoff_open" in stepped, false, "a newly opened handoff is NOT reported under the open-handoff key");
+    const handoff = stepped["handoff"] as Record<string, unknown>;
+    assert.ok(handoff !== null && typeof handoff === "object", "handoff block is projected");
+    const need = handoff["needs_value"] as Record<string, unknown> | undefined;
+    assert.equal(typeof need?.["key"], "string",
+      "the value need is a top-level fact (evidence is dropped before it reaches the Agent)");
+    const handoffFrames = handoff["frames_excluded"] as Array<{ origin: string; index: number }> | undefined;
+    assert.ok(Array.isArray(handoffFrames) && handoffFrames.some((f) => f.origin === child.origin),
+      "the handoff block carries the same fact at the top level (second whitelist)");
+    const evidence = (handoff["why_stuck"] as Record<string, unknown>)["evidence"] as Record<string, unknown>;
+    assert.deepEqual(evidence["frames_excluded"], handoffFrames,
+      "engine evidence keeps the same rows (the bridge drops evidence; the top-level copy is what reaches the Agent)");
+    const evidenceNeed = evidence["needs_value"] as Record<string, unknown>;
+    assert.deepEqual(need, { target: evidenceNeed["target"], key: evidenceNeed["key"], ref: evidenceNeed["ref"] },
+      "the top-level value need is the same fact the evidence block carries (single source, two faces)");
+    const unblock = handoff["what_would_unblock"] as string[];
+    assert.ok(unblock.some((h) => h.includes("hosts") && h.includes(child.origin)),
+      "the unblock advice names the same origin the structured fact exposes");
+
+    // 只读状态回显的键名：同一交接的回显走 handoff_open（不是「新开交接」的 handoff）。
+    const status = await request("driveStatus");
+    assert.equal(status["status"], "handoff");
+    assert.equal("handoff" in status, false, "a read-only echo is not reported as a newly opened handoff");
+    assert.ok((status["handoff_open"] as Record<string, unknown>) !== undefined, "the open handoff is echoed under its own key");
+
+    const droveClosed = await request("driveClose");
+    assert.equal(droveClosed["ok"], true);
+    closed = true;
+    assert.equal(await rt.handleLine(JSON.stringify({ id: 9300, type: "close" })), true);
+  } finally {
+    if (!closed) { try { await rt.finish("eof"); } catch { /* 收尾失败不掩盖断言 */ } }
+    await outer.close();
+    await child.close();
+  }
+}
+
+/** `frames_excluded` 的投影上界与缺键语义（纯函数：两道白名单都实测，含 started 层）。 */
+async function scenarioFrameExclusionCaps(): Promise<void> {
+  const longOrigin = `http://frame.test/${"y".repeat(400)}`;
+  const many = Array.from({ length: 12 }, (_, i) => ({ origin: longOrigin, index: i + 1 }));
+  const base: PilotHandoff = {
+    stop_code: "low_confidence", step_id: 1, goal_digest: "g",
+    why_stuck: { summary: "s", evidence: {} }, what_would_unblock: [], evidence_refs: {}, url: "u",
+  };
+  const projected = projectHandoff({ ...base, frames_excluded: many })["frames_excluded"] as Array<{ origin: string; index: number }>;
+  assert.equal(projected.length, 8, "handoff projection caps excluded frames at 8 (table engine column)");
+  for (const row of projected) {
+    assert.equal(row.origin.length, 120, "each origin is clipped to 120 chars (table engine column)");
+    assert.equal(typeof row.index, "number", "the real frame index survives projection");
+  }
+  const startedMany = projectStarted({ ok: true, frames_excluded: many })["frames_excluded"] as unknown[];
+  assert.equal(startedMany.length, 8, "started projection shares the same 8-row cap (two whitelists, one bound)");
+  assert.equal((projectFrameExclusions(many) ?? []).length, 8, "both entry points go through the same bounded projection");
+  assert.equal("frames_excluded" in projectHandoff(base), false,
+    "no exclusions = no key on the handoff block (old shape byte-identical)");
+  assert.equal("frames_excluded" in projectStarted({ ok: true }), false,
+    "no exclusions = no key on the started block either");
+  assert.equal(projectFrameExclusions([{ origin: "http://x.test" }]), undefined,
+    "a malformed row (no index) is dropped instead of padded into a shape");
+}
+
+/* ------------------------------------------------------------------ 场景 6：滚动回退的容器身份 */
+
+/**
+ * `act scroll` 的合成目标在「整页固定 + 内部面板滚动」布局上会回退到面板：响应必须同时
+ * 给出 `container`（实际滚的是谁）、`scroll_target`/`scroll_target_source:"fallback"`
+ * （不是按调用方点名滚的）与实测 `moved`——三条事实缺一就会把「引擎替我挑了个容器」
+ * 读成「按我说的滚了」。标准滚动路径不出这些键（既有形状不变）。
+ */
+async function scenarioScrollContainer(env: NodeJS.ProcessEnv, origin: string): Promise<void> {
+  const responses: Array<Record<string, unknown>> = [];
+  const rt = new SessionRuntime({
+    url: `${origin}/fixed.html`,
+    hosts: [new URL(origin).hostname],
+    outDir: fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-session-drive-scroll-")),
+    quiet: true,
+    idleTimeoutMs: 0,
+    env,
+  }, { respond: (o) => { responses.push(o); }, log: () => {} }, "verify-session-drive-scroll");
+  let closed = false;
+  try {
+    await rt.start();
+    const request = makeClient(rt, responses);
+    const scrolled = await request("act", { op: "scroll", target: "page", to: "bottom" });
+    assert.equal(scrolled["ok"], true, `document fallback scroll must succeed: ${JSON.stringify(scrolled).slice(0, 300)}`);
+    assert.equal(scrolled["executed"], true);
+    assert.equal(scrolled["moved"], true, "the measured displacement is reported");
+    assert.equal(scrolled["container"], "div#panel", "the engine names the inner container it actually scrolled");
+    assert.equal(scrolled["scroll_target"], "div#panel", "scroll_target is the container, not the caller's spelling");
+    assert.equal(scrolled["scroll_target_source"], "fallback", "the engine picked the container, not the caller");
+    assert.equal("ambiguous_candidates" in scrolled, false,
+      "a single fallback candidate is not an ambiguity (no key)");
+    closed = true;
+    assert.equal(await rt.handleLine(JSON.stringify({ id: 9400, type: "close" })), true);
+  } finally {
+    if (!closed) { try { await rt.finish("eof"); } catch { /* 收尾失败不掩盖断言 */ } }
+  }
+}
+
 /* ------------------------------------------------------------------ main */
 
 async function main(): Promise<number> {
@@ -592,10 +784,13 @@ async function main(): Promise<number> {
     await scenarioHandoffPlay(env, server.origin);
     await scenarioValidationBeforeBrowser(env);
     await scenarioBudgetTerminal(env, server.origin);
+    await scenarioFrameExclusions(env);
+    await scenarioFrameExclusionCaps();
+    await scenarioScrollContainer(env, server.origin);
   } finally {
     await server.close();
   }
-  console.log("verify-session-drive: OK — 附着驾驶全链 + 交接期间 session 互证 + 校验先于浏览器 + 终态诊断 四场景全过（零模型、同一 page、宿主浏览器不被 pilot 关闭）");
+  console.log("verify-session-drive: OK — 附着驾驶全链 + 交接期间 session 互证 + 校验先于浏览器 + 终态诊断 + 被排除 frame 两层可见性 + 滚动回退容器身份 六场景全过（零模型、同一 page、宿主浏览器不被 pilot 关闭）");
   return 0;
 }
 

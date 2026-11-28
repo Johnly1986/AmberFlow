@@ -14,6 +14,7 @@ import { WIDER_ELEMENTS, lowConfDiscrimination, topTwoMargin, windowChainMissSuf
 import { runWindowEscalationRung } from "./window-escalation.ts";
 
 import { type ElemPool, WIDE_QUOTAS, elemFamily, filterElemsByFamily, lexicalOverlap } from "./extraction.ts";
+import { introducesNewIdentity } from "./elem-model.ts";
 import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
 import { affordanceRule, hintCandidates, navRule } from "./rules.ts";
 import type { BrowserMiddleware, ModelPickPhase } from "./executor.ts";
@@ -237,6 +238,16 @@ export async function floorGate(host: RunPickHost, ctx: RunPickCtx, st: PickAcc,
   }
   return adjudicatePick(host, ctx, st, mm, floor, rec);
 }
+
+/**
+ * 宽化止损的事实尾缀（additive）：本轮低置信恢复因宽池没引入新元素身份而提前停止时，
+ * 把"少掉的 ask 是为什么"写进停因；未发生时返回空串（既有 reason 逐字节不变）。
+ */
+function identityFlatSuffix(window: number | null | undefined): string {
+  if (window === null || window === undefined) return "";
+  return `; wide recovery stopped at window ${window}: the wider pool added no new element identity`;
+}
+
 /**
  * 分支⑤f：裁决票 vs 低置信停。声明了"错了白跑"（adjudicate）时，低置信不再是阻塞理由——
  * 把模型此刻的选择执行，让这一步自己的 DOM 信号事后裁决；否则 low_confidence 结构化停。
@@ -267,7 +278,9 @@ export function adjudicatePick(host: RunPickHost, ctx: RunPickCtx, st: PickAcc, 
       // 规划面停因的行锚证据（无行锚声明 = 空串，reason 逐字节不变）。
       + host.rowAnchorNote(host.declaredTargets())
       // 窗口递增链跑满且全档未命中时的事实尾缀（additive；链没跑/命中过 = 空串）。
-      + windowChainMissSuffix(ctx.windowChainFacts), ctx.stepNo);
+      + windowChainMissSuffix(ctx.windowChainFacts)
+      // 宽化止损事实尾缀（additive；无新身份提前停止才有，未发生 = 空串）。
+      + identityFlatSuffix(rec.identityFlat), ctx.stepNo);
     if (ctx.verbose) console.log(`  step ${ctx.stepNo}: ${host.stopReason()}`);
     return true;
   }
@@ -288,7 +301,9 @@ export async function r2bReopen(host: RunPickHost, ctx: RunPickCtx, st: PickAcc,
   st.reobserved = true;
   await host.settleBeforeExtract(ctx.pg);
   const wideR2b = await host.candidatesExtract({ page: ctx.pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority: ctx.candidatePriority, hosts: host.frameHosts });
-  if (!(Object.keys(wideR2b).length > Object.keys(st.elems).length)) return;
+  // 增长门按**元素身份**判（与宽扫/窗口链同一判据）：池变大但只是同批元素重编号时，
+  // 再问一次只会看到同一批候选，白付一次 ask。
+  if (!introducesNewIdentity(wideR2b, st.elems)) return;
   host.pruneForbids(wideR2b);
   const wideAskR2b = host.orderedPool(wideR2b);
   const [ref2, conf2] = await askPick(host, ctx, st, askGoalOf(ctx), wideAskR2b, forbiddenOf(ctx, wideAskR2b), ctx.noted);

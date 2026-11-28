@@ -125,6 +125,14 @@ export const BRIDGE_SESSION_TIMEOUTS = {
 
 /** 交接块桥面 cap（`bridge` 列；字段×各层全表见 src/support/session-contract.ts 的 SESSION_HANDOFF_CAP_TABLE）。 */
 export const BRIDGE_HANDOFF_CAPS = {
+  lowConfidenceKindMaxChars: 32,
+  navErrorMaxChars: 300,
+  offEnvelopeMaxChars: 300,
+  expectUrlMaxChars: 300,
+  needsValueItemMaxChars: 300,
+  resumeHintMaxChars: 300,
+  framesExcludedMaxItems: 8,
+  frameExcludedOriginMaxChars: 120,
   goalDigestMaxChars: 300,
   summaryMaxChars: 300,
   unblockMaxItems: 3,
@@ -137,7 +145,13 @@ export const BRIDGE_HANDOFF_CAPS = {
 } as const;
 
 /** scroll 证据块白名单（引擎给了才出现）。 */
-export const BRIDGE_EVIDENCE_SCROLL_FIELDS = ["moved", "delta", "scroll", "strategy", "at_bottom"] as const;
+export const BRIDGE_EVIDENCE_SCROLL_FIELDS = ["moved", "delta", "scroll", "strategy", "at_bottom", "scroll_target", "scroll_target_source", "ambiguous_candidates", "container"] as const;
+
+/** scroll 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_SCROLL_FIELDS）。 */
+export const BRIDGE_EVIDENCE_SCROLL_CAPS = {
+  scrollTargetMaxChars: 300,
+  containerMaxChars: 120,
+} as const;
 
 /** range 证据块白名单（引擎给了才出现）。 */
 export const BRIDGE_EVIDENCE_RANGE_FIELDS = ["applied", "accurate", "strategy", "achieved", "requested", "target_value", "clamped_from", "snapped_to", "handles", "handle_index", "peers", "row_index", "valuetext", "probe"] as const;
@@ -180,4 +194,32 @@ export const BRIDGE_EVIDENCE_WIDE_CAPS = {
   tagMaxChars: 16,
   labelMaxChars: 40,
   hintMaxChars: 200,
+} as const;
+
+/** started 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_STARTED_FIELDS = ["ok", "attached", "url", "out_dir", "expect_url", "frames_excluded", "code", "reason"] as const;
+
+/** started 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_STARTED_FIELDS）。 */
+export const BRIDGE_EVIDENCE_STARTED_CAPS = {
+  urlMaxChars: 300,
+  outDirMaxChars: 300,
+  expectUrlMaxChars: 300,
+  codeMaxChars: 120,
+  reasonMaxChars: 300,
+} as const;
+
+/** summary 证据块白名单（引擎给了才出现）。 */
+export const BRIDGE_EVIDENCE_SUMMARY_FIELDS = ["ok", "pilot", "attached", "driver", "stop_code", "aborted", "steps", "max_steps", "conf_floor", "model_asks", "rule_picks", "model_picks", "handoffs", "fallbacks", "failed_asks", "cache", "url", "out_dir", "expect_url", "code", "reason", "last_error"] as const;
+
+/** summary 证据块的字段 cap（白名单见 BRIDGE_EVIDENCE_SUMMARY_FIELDS）。 */
+export const BRIDGE_EVIDENCE_SUMMARY_CAPS = {
+  driverMaxChars: 60,
+  stopCodeMaxChars: 60,
+  urlMaxChars: 300,
+  outDirMaxChars: 300,
+  expectUrlMaxChars: 300,
+  codeMaxChars: 120,
+  reasonMaxChars: 300,
+  lastErrorMaxChars: 300,
+  cacheKeys: 2,
 } as const;

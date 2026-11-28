@@ -13,7 +13,7 @@
 目标：先用引擎按真实步序走通一遍，再写正式应用；禁止先写完整应用再反复修。
 ① inspect 先看：`amber inspect --url <页> --json`。hint_candidates 有候选就照抄；核对目标 op 在 `amber schema ctx --topic commands` 能力面内，且词面真的在池里（probe/DOM 命中 ≠ hint 可命中）。
 ② 全流程走查：四选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（`amber run <id> --walk`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。模型驾驶走查（`amber session` 的 drive 系列 op：决策模型逐步投票驾驶 + 停因交接 Agent 兜底，规则档先行零模型）；走通后 `amber session export --record` 还原 app.mjs 骨架，只出骨架不归纳 done。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
-③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 40（宽扫 120），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
+③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 64（宽扫 128），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy.done_timeout_ms；`amber apps check <id> --slot k=v` 离线验分支，改掉两条信号 lint（裸 not / any 含 not(exists)）再进 ⑤。
 ⑤ 真跑留证：`amber run <id> --trace`。失败先看 stopCode/reason（reason 自带池快照判别与决策源降级原因）；再看 executed/changed、skipped_actions、done_preheld——done=true 但零执行时先查跳过原因，别把「信号本来就成立」当成动作推进；被 kill 时看 run-killed.json 部分证据。
 ⑥ 失败取证：最小探针先区分引擎缺陷/产品事实/任务口径——A/B（单变量重跑）、对照（--provider 换源或 rules-only）、双腿取数（数据腿核产品事实）；判别不了就上报，不靠反复重跑收敛。
@@ -374,7 +374,7 @@ export async function flow(ctx) {
   **③ 信号等待窗口**——浏览器腿 done 轮询 per-click 语义（`done_timeout_ms` 缺省 2000，步级 `timeoutMs` 覆盖，04-F/07-E："7 击各享窗口，非整步挂钟"）；F3：步级 `timeoutMs` 显式声明时同时是整步挂钟帽（reobserve/升级循环的每轮与总时长受它约束，超时 = `step_timeout`；未声明 = 无帽）；进程腿 `stdio.timeout_ms` 是步内挂钟帽（缺省 20s）。
   **同为 `config_error`，抛出层决定计费**（08 实测）：cli 形式声明校验在①扣费**前** throw（免费）；适配器 toolRunner 内拒绝（如 stdio+retries）在扣费**后**返回（贵一步）。按"动作数"估①必翻车——守卫跳过、被拒声明都计费。
 - 脚本拿不到 `page` / locator、模型文本或分数，只能看 `{ok, stopCode, reason?, evidence}`。
-- 退出码与 Agent 视图（`amber run --json`）：`status` = `passed | partial | failed | blocked | needs_human | dry | invalid | infra_error`；`verified` 只在完整运行且所有不变量成立时为 true。
+- 退出码与 Agent 视图（`amber run --json`）：`status` = `passed | partial | failed | blocked | needs_human | dry`（类型里的 `invalid` / `skipped` / `infra_error` 是预留位，当前不产生）；`verified` 只在完整运行且所有不变量成立时为 true。
 
 ### 4.5 决策步的显式值袋（U1：`ctx.step(..., { values })`）
 
@@ -790,7 +790,7 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    帧链过滤后按元素 `anchor_ids` 过滤（与 act hint 的 `within:` 同一 `anchorChainMatch` 语义），
    `frame:`+`within:` 组合两面同时生效，锚外/帧外目标如实报未命中；该 CLI 的匹配器**不是** `hintMatch`
    六形状分档语义（裸词 / `attrSubstr` / `nearToken` 等仍按旧匹配器，可能误报未命中——既有边界，
-   见 §11）。`amber start --target` 则对**帧限定目标结构化拒绝**——该面的演示点击是主帧 `page.click(...)`，
+   见 §11）。`npm start -- --target` 则对**帧限定目标结构化拒绝**——该面的演示点击是主帧 `page.click(...)`，
    帧内目标会点错/超时，退出码沿用该 CLI 既有失败口径（2），请改用 app/run 或 plan 面。
    `apps check` 另对非法 `frame:` 值与不在 `meta.hosts` 的 origin 出 stderr 静态提醒
    （`apps check` 的 lint 通道：不进 problems、不改 VALID/exit；拿不到 `meta.hosts` 时只做值形状检查）。
@@ -801,7 +801,7 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    支持 ` frame:<origin链>` 尾缀——读/抽取的声明帧 miss 口径与 done 的 `frame_not_allowed` 升级
    见 §5 的「读侧帧限定」。
 4. **已知边界**：`framesOf` 只取主 frame + ≤5 子 frame（更深的 frame 不参与池/探测，`inspect` 的
-   `probes[].frames` 也只到第 6 个）；元素池窗口（40/120）跨帧共享、主 frame 优先——frame 多时
+   `probes[].frames` 也只到第 6 个）；元素池窗口（64/128）跨帧共享、主 frame 优先——frame 多时
    目标可能被窗口挤掉，先用 `ctx.observe()`（免费只读、逐帧）确认再收窄 hint；`f<fi>` 下标来自
    当次 `framesOf` 顺序，动态 iframe 增删会让下标漂移——**动作地址始终用 hint，不要用 ref**。
 5. **结构证据（只诊断，不可照抄）**：`inspect --json` 元素行与 `ctx.observe({includeStructure:true})`
@@ -966,7 +966,7 @@ ctx.hint("add to basket row-index:3 in-row:america");
   文本可能入集（网格级 break 只挡"整网格"）；token 命中多行 → 限定后仍多候选 → 解析面
   fail-closed 直接 null → 命令步/决策步结构化 `target_ambiguous` 零动作（**永不静默取第一
   行**）；行文本漂移（价格改版、文案 A/B）的失败形态 = 显式落空或歧义拒绝，**永不错点**。
-- **回捞/回退对等**：声明 hint 被 40/120 窗口挤出时，回捞（ADMIT 宽扫）与 A3 DOM 回退面
+- **回捞/回退对等**：声明 hint 被 64/128 窗口挤出时，回捞（ADMIT 宽扫）与 A3 DOM 回退面
   同口径补 `row_texts` 并按同一 in-row 门收集（惰性 + memoized + 凑满 5 早退 + 总计算封顶
   120，超标 fail-closed）——半链上线会让"观察面说有、run 面落空"，本批一次到位。
 - **已知边界**：观察面的 dup 判定只对"观察集合内可见同文案计数"执行（`max` 截断边界：
@@ -1205,7 +1205,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 
 | 字段 | 缺省 | 说明 |
 |---|---|---|
-| `conf_floor` | 0.25（或 provider 自报） | 置信度闸门；换 provider 时缺省刻度不可比，用它可以声明。**注意它是动态下限**：子目标内每多禁用一个失败元素，有效闸门下调 0.05、下限 0.10（兜底降级：候选耗尽前"宁选次优不空转"，`executor.ts` `floor=max(0.10, confFloor−0.05×forbidden)`）；低置信停因的 reason 会露出当次有效 floor（03-D6/04-G） |
+| `conf_floor` | 全局缺省 0.5（或 provider 自报） | 置信度闸门；换 provider 时缺省刻度不可比，用它可以声明。**注意它是动态下限**：子目标内每多禁用一个失败元素，有效闸门下调 0.05、下限 0.10（兜底降级：候选耗尽前"宁选次优不空转"，`executor.ts` `floor=max(0.10, confFloor−0.05×forbidden)`）；低置信停因的 reason 会露出当次有效 floor（03-D6/04-G） |
 | `tiered_hint` | `false` | hint 档内歧义时问模型更小的问题（P1 实验） |
 | `reobserve` | `true` | 动作后重新观察 |
 | `max_effective_repeats` | `3` | 同一子目标里同一动作的最大有效重复 |
@@ -1289,7 +1289,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
 | `step_timeout` | **F3**：该步显式声明了 `timeoutMs`，整步挂钟（含 reobserve/升级循环的每轮与总时长）超了声明值——循环不再进入下一轮（已在途的决策调用不可抢占，超额 ≤ 一次在途调用）。放宽 `timeoutMs`、收窄该步 done/target，或拆分流程；未声明 `timeoutMs` 的步骤没有这个帽 |
-| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。C 批起 reason 同时带**声明的帧链**（hint 的 `frame:` 尾缀；无尾缀明说未声明）与**命中帧的完整链**（`frameChainOf`，按链去重 ≤4，含该帧 origin/帧下标）+ 只读命中证据；修法二选一明写（加 host / 改目标或链）。**E4 起 done/when 的 CSS selector 也可带 ` frame:<origin链>` 尾缀**：声明帧指向被排除帧且只在那里成立 → 本停因升级（此前该写法是非法 CSS、退化为纯 `done_not_held`）；声明帧在允许帧内 = 正常完成面。CLI 面：`plan check --probe` 支持 `frame:` 目标核对（`findByHint` 旧匹配器：身份形状与 `induceHint` 产物；见多 frame 速查）；`amber start --target` 对帧限定目标结构化拒绝（见多 frame 速查）。导航信封外的 goto 仍报 `host_not_allowed` |
+| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。C 批起 reason 同时带**声明的帧链**（hint 的 `frame:` 尾缀；无尾缀明说未声明）与**命中帧的完整链**（`frameChainOf`，按链去重 ≤4，含该帧 origin/帧下标）+ 只读命中证据；修法二选一明写（加 host / 改目标或链）。**E4 起 done/when 的 CSS selector 也可带 ` frame:<origin链>` 尾缀**：声明帧指向被排除帧且只在那里成立 → 本停因升级（此前该写法是非法 CSS、退化为纯 `done_not_held`）；声明帧在允许帧内 = 正常完成面。CLI 面：`plan check --probe` 支持 `frame:` 目标核对（`findByHint` 旧匹配器：身份形状与 `induceHint` 产物；见多 frame 速查）；`npm start -- --target` 对帧限定目标结构化拒绝（见多 frame 速查）。导航信封外的 goto 仍报 `host_not_allowed` |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
 | `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |
 | `manual_signal_not_held` / `manual_declined` / `needs_human` | 人工步：DOM 信号没验过 / 人放弃 / 非 TTY 需要人 |
@@ -1343,11 +1343,11 @@ hint 落空时，`target_not_found` reason 末尾按现场给出其一（尾缀�
 `no_model_runtime` / `hint_matched_nothing` / `action_space_exhausted`，池在手 + curHint 可达）
 additive 接入同一证据面（`frameHintFailureEvidence` 单点复用）：**stopCode 不变**（规划面语义
 不变），reason 在声明行锚落空时附三案证据；无行锚声明 = reason 逐字节不变。`findByHint`
-（`plan check --probe` / `amber start --target` 的旧匹配器）**已适配四类尾缀**（within/frame/
+（`plan check --probe` / `npm start -- --target` 的旧匹配器）**已适配四类尾缀**（within/frame/
 in-row/row-index；in-row = rowMatch 同口径、row-index = 整数全等；两消费面池都经
 addNearContext 编号/采集）。
 
-**信号形状报错自带合法形态（C3）**：`validateSignalSpec` 的 arity 不匹配（以及 `all_of`/`any_of`/`not` 的形状错）现在把**合法形态**写进 problem —— 叶算子的操作数**按位置放数组** `{op: [arg…]}`（对象形 `{selector, text}` 不是合法形状），组合算子 `all_of`/`any_of` 收非空数组、`not` 收单个对象。提示的唯一出处是 `src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT` / `signalProblemText`：`apps check` / `plan check` / `test --validate` 的加载期 problems 直接继承；`amber plan-cli … --signal` 走 cli 版（`--signal` 示例串与改动前逐字一致），`amber session` 的 `signal`/`waitFor` 失败 reason 走 json 版（`problems` 数组原样）。合法信号的校验结果与产物逐字节不变。
+**信号形状报错自带合法形态（C3）**：`validateSignalSpec` 的 arity 不匹配（以及 `all_of`/`any_of`/`not` 的形状错）现在把**合法形态**写进 problem —— 叶算子的操作数**按位置放数组** `{op: [arg…]}`（对象形 `{selector, text}` 不是合法形状），组合算子 `all_of`/`any_of` 收非空数组、`not` 收单个对象。提示的唯一出处是 `src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT` / `signalProblemText`：`apps check` / `plan check` / `test --validate` 的加载期 problems 直接继承；`npm run plan-cli … --signal` 走 cli 版（`--signal` 示例串与改动前逐字一致），`amber session` 的 `signal`/`waitFor` 失败 reason 走 json 版（`problems` 数组原样）。合法信号的校验结果与产物逐字节不变。
 
 **会话面 `target_ambiguous`（A2，缺省零动作）**：`amber session` 的 `act` 用与命令步**同一个**歧义谓词
 （`hintCandidates` 非空 && `decided === null` && `refs.length > 1`）——歧义即**不执行**，返回
@@ -1356,7 +1356,7 @@ addNearContext 编号/采集）。
 `would_act_ref`/`candidates_total`/`truncated`；`source:"dom_fallback"`
 时不给 near/suggested_hint）。`--on-ambiguous act` 恢复旧的"直接执行可行动优先第一个候选"。**run 面 /
 命令步 / 决策步的行为与产物逐字节不变**（dry/replay 不调 `actOnce`）；证据只陈述事实，**不得据此猜测**
-——收窄 hint 或显式 `act` 重放是人的决定。详见 `docs/INTERACTIVE_SESSION.md` §act 的歧义停因。
+——收窄 hint 或显式 `act` 重放是人的决定。详见 `docs/INTERACTIVE_SESSION.md` 的「act 的歧义停因」节。
 
 **停手规则**（层 3 出口；唯一出处 `src/engine/planning-playbook.ts`，失败即随 `next` 输出）：同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。
 
@@ -1389,7 +1389,7 @@ addNearContext 编号/采集）。
 - **新标签页不自动跟随**（未声明 `newTab` 时）：A5 只提供显式 `ctx.tabs()` / `ctx.switchTab(...)`；
   动作打开的新 tab 不会自动成为引擎当前页。**F2 起声明 `ctx.step(..., { newTab: { urlContains } })`
   的步由引擎自动跟随 + 去重**（见 §4.9）。
-- **`frame:` 帧限定的已知边界**：`framesOf` ≤6（主 frame + ≤5 子 frame）；池窗口 40/120 跨帧共享、
+- **`frame:` 帧限定的已知边界**：`framesOf` ≤6（主 frame + ≤5 子 frame）；池窗口 64/128 跨帧共享、
   主 frame 优先；同签名跨帧仍由 `firstIfSame` 合并（run 命令步 / act hint 直接执行一个，会话 act 停）；
   **读侧帧限定已做（E4；E7 修复 B1 滚动 / N4 引号括号守卫 / N5 空值拒因）**：`ctx.read.*` /
   `ctx.extract`/`ctx.collect` 的 rows / done/when/judge 的 CSS selector 支持 ` frame:<origin链>` 尾缀
@@ -1401,30 +1401,15 @@ addNearContext 编号/采集）。
   `findByHint`（plan check --probe）的 within 作用域校验已做（E3——帧链过滤后按 `anchor_ids` 过滤，
   单层+链与 act hint 同一 `anchorChainMatch` 语义，`frame:`+`within:` 组合两面同时生效）；
   `plan check --probe` 只覆盖 `findByHint`
-  旧形状集（身份形状 + `induceHint` 身份产物），`amber start --target` 拒绝帧限定目标。
+  旧形状集（身份形状 + `induceHint` 身份产物），`npm start -- --target` 拒绝帧限定目标。
   **E5 起**子帧元素的 `induceHint` 记忆产物带 ` frame:<own origin>` 尾缀（主帧不变、未知 origin
   帧不加），记忆回放走 `hintMatch`；同 origin 父子帧仍可能歧义（D2 边界——记忆只带自身 origin 单段）。
-- **`in-row:` 行锚的已知边界（F82）**：`row_texts` 只在同文案重复组元素上采集——非重复组写
-  `in-row:` 恒落空（fail-closed 对称，不是缺陷）；归一仅小写折叠、**不做 NFKC**——全角 token
-  显式落空（从 `hint_candidates` 照抄真实行词元构造上必中）；"爬升路径文本 ≠ 严格几何行"
-  （目标容器路径跨 2 行且只含 1 个重复按钮时继续爬升，邻居行文本可能入集——网格级 break 只挡
-  整网格；错误命中面被歧义门与自证兜住，见 §4.12）；观察面 dup 判定只对"观察集合内可见同文案
-  计数"执行（max 截断边界），虚拟列表 `row_texts` 与池窗口同界（先滚动/分块取证）；回捞 in-row
-  门有总计算封顶 120（超标 fail-closed = 显式落空，不猜）；FW8 身份回捞白名单不含 in-row 底座、
-  `findByHint`（`plan check --probe`）**已适配** in-row（批 2 遗留收编：rowMatch 同口径过滤，
-  两消费面池经 addNearContext 采集）；词边界档位不做（row_texts 是已切分
-  原子行，有实测碰撞证据再议）。
-- **`row-index:` 顺序行锚的已知边界（F83）**：`row_index` 只在同文案重复组元素上编号（帧内
-  (tag+label) 子组 DOM 先序 1..K；非重复组写 row-index 恒落空）；**`row-index:N ≠ 页面第 N
-  个元素`**——多网格同页时命中各网格第 N 个成员 → 歧义谓词兜住；序漂移是序号语义的固有属性
-  （单用形态作者显式承担——组合守卫与 done 断言纪律把静默错点降级为显式落空，见 §4.13）；
-  编号底座 = 本面收集到的成员（池窗口截断/观察 max 让 K 小于页面真实组大小——案①如实报
-  本面 K）；编号是页面前缀（池帽只截尾）；跨面可移植的前提 = 同名组成员在两个收集面都在场
-  （池面 `POOL_SEL`+heuristic vs 回捞/observe 面 `ADMIT_SEL`，照抄 inspect 候选前用
-  `ctx.observe`/run 复核）；跨帧同名网格各自编号、firstIfSame 同签名合并沿 D2 既有口径；
-  FW8/DRF/F64 在声明行锚时不参与恢复（fail-closed）；`findByHint`（plan check --probe）
-  **已适配** row-index（整数全等）；三案证据已覆盖规划面（批 2 遗留收编——stopCode 不变、
-  reason additive）。
+- **`in-row:` / `row-index:` 行锚的已知边界**：语义、采集面（同文案重复组）、fail-closed
+  （多候选零动作、声明行锚后 FW8/DRF/F64 不参与恢复）、序漂移责任与两套编号底座见 §4.12/§4.13。
+  §11 只补两条不重复的事实：① 词边界档位**不做**（`row_texts` 是已切分原子行，有实测碰撞证据再议）；
+  ② 跨面可移植的前提 = 同名组成员在池面（`POOL_SEL`+heuristic）与回捞/observe 面（`ADMIT_SEL`）
+  两个元素宇宙都在场——照抄 `inspect` 候选前用 `ctx.observe`/run 复核；`findByHint`
+  （`plan check --probe`）已适配两类行锚（in-row = `rowMatch` 同口径、row-index = 整数全等）。
 
 ## 12. 扩展配方（改引擎的人看）
 
@@ -1438,15 +1423,11 @@ addNearContext 编号/采集）。
 
 ## 13. 命令速查
 
-```bash
-amber apps list / show <id|路径> [--code] / path <id> / remove <id> [--yes]
-amber apps new <id> [--goal G] [--host H] [--url U] [--dir D] [--print] [--force]
-amber apps check [<id|路径>] / explain <id|路径>
-amber run <id|路径> [--dry-run] [--max-steps N] [--trace] [--headful]
-                    [--slot k=v] [--today YYYY-MM-DD] [--out DIR] [--allow-dangerous]
-                    [--emit-trace F] [--replay F] [--json]
-amber record <页面> [--name ID] [--goal G] [--apps-dir DIR] [--slot k=v] [--slot-file F] [--yes]
-amber inspect --url <URL> [--json]
-npm run test           # 真实站点测试（smoke + core）
-npm run check           # typecheck + 配置示例一致性 + 线上用例离线校验
-```
+命令、旗标与子命令的唯一出处是 `src/cli/registry.ts`（渲染到 `amber --help` / `amber help <cmd>` /
+`amber help <cmd> --json`），本文不手抄。作者回路固定为：
+
+`amber apps new → 编辑 app.mjs → amber apps check → amber inspect --url → amber apps explain →
+amber run --dry-run → amber run --max-steps N --trace → amber run`。
+
+`npm run` 脚本（PR 门禁 / 非门禁证据 lane）的唯一出处是 `package.json` 的 `scripts`；说明见
+`AGENTS.md` 的「命令」「测试」两节。

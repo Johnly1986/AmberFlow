@@ -35,6 +35,9 @@ import {
   BRIDGE_EVIDENCE_AMBIGUITY_CAPS,
   BRIDGE_EVIDENCE_MISS_CAPS,
   BRIDGE_EVIDENCE_WIDE_CAPS,
+  BRIDGE_EVIDENCE_SCROLL_CAPS,
+  BRIDGE_EVIDENCE_STARTED_CAPS,
+  BRIDGE_EVIDENCE_SUMMARY_CAPS,
   BRIDGE_HANDOFF_CAPS,
 } from './session-contract.generated.ts'
 
@@ -1059,12 +1062,19 @@ export class SessionManager {
     // `scroll_target_source:"fallback"` 明示"引擎在候选里替你挑了一个"，于是这件事不会被读成
     // "按我说的滚了"；`ambiguous_candidates` 是那次挑选的候选数（>1 才出现，不阻断）。
     const surface = response['scroll_target']
-    if (typeof surface === 'string' && surface !== '') out['scroll_target'] = surface
+    if (typeof surface === 'string' && surface !== '') {
+      out['scroll_target'] = clip(surface, BRIDGE_EVIDENCE_SCROLL_CAPS.scrollTargetMaxChars)
+    }
     const source = response['scroll_target_source']
     if (source === 'explicit' || source === 'rows' || source === 'fallback') out['scroll_target_source'] = source
     const candidates = response['ambiguous_candidates']
     if (typeof candidates === 'number' && Number.isFinite(candidates)) {
       out['ambiguous_candidates'] = Math.max(0, Math.round(candidates))
+    }
+    // 引擎回退到内部滚动容器时实际滚的是谁（稳定描述 `tag#id` / `tag.class`；标准路径不出现）。
+    const container = response['container']
+    if (typeof container === 'string' && container !== '') {
+      out['container'] = clip(container, BRIDGE_EVIDENCE_SCROLL_CAPS.containerMaxChars)
     }
     const raw = response['scroll']
     if (isObj(raw)) {
@@ -1267,6 +1277,7 @@ export class SessionManager {
     const response = await this.request(state, body)
     if (response['ok'] !== true) return this.engineFailure(response, 'read')
     const value = response['value']
+    const matched = response['matched_count']
     return {
       ok: true,
       op: 'read',
@@ -1275,6 +1286,13 @@ export class SessionManager {
       selector: args.selector,
       value: typeof value === 'string' ? clip(value, READ_MAX_CHARS) : value,
       ...(typeof value === 'string' && value.length > READ_MAX_CHARS ? { value_truncated: true } : {}),
+      // 命中数事实（引擎给才有）：text/value 命中多个时值只取第一个，桥必须把「几个」
+      // 与「零命中」两件事一起交给调用方——它们区分「唯一元素、值如此」与「有多个，这是
+      // 第一个」/「不存在、空值」。count 读不到/不是有限数 = 缺键，桥不补默认值。
+      ...(typeof matched === 'number' && Number.isFinite(matched)
+        ? { matched_count: Math.max(0, Math.round(matched)) }
+        : {}),
+      ...(response['matched_zero'] === true ? { matched_zero: true } : {}),
     }
   }
 
@@ -1648,8 +1666,13 @@ export class SessionManager {
       const v = response[key]
       if (typeof v === 'string' || typeof v === 'number') out[key] = v
     }
-    for (const key of ['pilot', 'attached', 'terminal', 'active', 'closed', 'reused', 'goal_ignored'] as const) {
+    for (const key of ['pilot', 'attached', 'terminal', 'active', 'closed', 'already', 'reused', 'goal_ignored'] as const) {
       if (response[key] === true || response[key] === false) out[key] = response[key]
+    }
+    // `drive_close` 的两种无驾驶面形态：从未驾驶带 `note`（解释为什么没关闭）、重复关闭
+    // 带 `already:true`。两者都是驾驶面生命周期事实，不能因为「没起过驾驶」就丢掉。
+    if (typeof response['note'] === 'string' && response['note'] !== '') {
+      out['note'] = clip(response['note'], BRIDGE_DRIVE_LIMITS.noteMaxChars)
     }
     // 未决交接时的显式 next（≤3 条：继续本 run 的 drive_command / 起新 session）。
     if (Array.isArray(response['next'])) {
@@ -1660,8 +1683,14 @@ export class SessionManager {
       out['url'] = response['url']
       state.url = response['url']   // 驾驶换页后桥侧记账（list/失败回退）保持真实
     }
-    const handoff = this.driveHandoff(response['handoff'] ?? response['handoff_open'])
+    // 两个键名是不同事实，不能互换：`handoff` = 本次停驶**新开**的交接；`handoff_open` =
+    // 已开交接的**回显**（引擎在 `statusBody` 与 `code:"handoff_open"` 拒绝回执里发它）。
+    const handoff = this.driveHandoff(response['handoff'])
     if (handoff !== undefined) out['handoff'] = handoff
+    const openHandoff = this.driveHandoff(response['handoff_open'])
+    if (openHandoff !== undefined) out['handoff_open'] = openHandoff
+    const started = this.driveStarted(response['started'])
+    if (started !== undefined) out['started'] = started
     const command = this.driveCommandSummary(response['command'])
     if (command !== undefined) out['command'] = command
     const summary = this.driveSummary(response['summary'])
@@ -1671,12 +1700,72 @@ export class SessionManager {
     return out
   }
 
-  /** 交接块有界投影（step_id/stop_code/goal_digest/summary/url/≤3 条解锁建议/证据路径 + 结束态可见性）。 */
+  /**
+   * 被排除 frame 的有界投影（`started` 事件与交接块**共用**；`[]`/非数组 = 键不出现）。
+   *
+   * 只认结构完整的行（`index` 是数字），`origin` 按生成物 cap 裁剪——桥不补默认值，
+   * 引擎不给 ⇒ 整键不出现（旧形状不变）。
+   */
+  private frameExclusions(raw: unknown): Array<{ origin: string; index: number }> | undefined {
+    if (!Array.isArray(raw)) return undefined
+    const out: Array<{ origin: string; index: number }> = []
+    for (const item of raw) {
+      if (out.length >= BRIDGE_HANDOFF_CAPS.framesExcludedMaxItems) break
+      if (!isObj(item) || typeof item['index'] !== 'number') continue
+      const origin = typeof item['origin'] === 'string' ? item['origin'] : ''
+      out.push({ origin: clip(origin, BRIDGE_HANDOFF_CAPS.frameExcludedOriginMaxChars), index: item['index'] })
+    }
+    return out.length === 0 ? undefined : out
+  }
+
+  /** 交接块有界投影（step_id/stop_code/低置信分类/停因专属事实/现场定位键/被排除 frame/goal_digest/summary/url/≤3 条解锁建议/证据路径 + 结束态可见性）。 */
   private driveHandoff(raw: unknown): Record<string, unknown> | undefined {
     if (!isObj(raw)) return undefined
     const out: Record<string, unknown> = {}
     if (typeof raw['step_id'] === 'number') out['step_id'] = raw['step_id']
     if (typeof raw['stop_code'] === 'string') out['stop_code'] = raw['stop_code']
+    // 被 hosts 信封排除的 frame（引擎只给事实；`what_would_unblock` 已按它给出加 hosts 的建议）。
+    const frames = this.frameExclusions(raw['frames_excluded'])
+    if (frames !== undefined) out['frames_excluded'] = frames
+    // 低置信三义分类（引擎只在这个档位上给；其它停因键不出现 = 旧形状不变）。
+    if (typeof raw['low_confidence_kind'] === 'string') {
+      out['low_confidence_kind'] = clip(raw['low_confidence_kind'], BRIDGE_HANDOFF_CAPS.lowConfidenceKindMaxChars)
+    }
+    // 停因专属事实（引擎只在对应停因给；其它停因键不出现 = 旧形状不变）。
+    // 文本项按桥界裁剪；整数项**全有才透出**（只认固定键，形状恒为紧凑形，桥不补键）。
+    if (typeof raw['nav_error'] === 'string') out['nav_error'] = clip(raw['nav_error'], BRIDGE_HANDOFF_CAPS.navErrorMaxChars)
+    if (typeof raw['off_envelope'] === 'string') out['off_envelope'] = clip(raw['off_envelope'], BRIDGE_HANDOFF_CAPS.offEnvelopeMaxChars)
+    if (isObj(raw['model_abstain'])) {
+      const ab = raw['model_abstain']
+      if (typeof ab['pool_size'] === 'number' && typeof ab['asks'] === 'number') {
+        out['model_abstain'] = { pool_size: ab['pool_size'], asks: ab['asks'] }
+      }
+    }
+    if (isObj(raw['observation'])) {
+      const ob = raw['observation']
+      if (typeof ob['pool_size'] === 'number' && typeof ob['forbidden'] === 'number' && typeof ob['empty_labels'] === 'number') {
+        out['observation'] = { pool_size: ob['pool_size'], forbidden: ob['forbidden'], empty_labels: ob['empty_labels'] }
+      }
+    }
+    // 现场定位键（期望页 / 值需求 / 落空点名）：引擎只在对应情形给，缺键 = 桥不补。
+    // 文本按桥界裁剪；对象按固定键重建（三键全在 / missed:true 才透出），形状恒为紧凑形。
+    if (typeof raw['expect_url'] === 'string') out['expect_url'] = clip(raw['expect_url'], BRIDGE_HANDOFF_CAPS.expectUrlMaxChars)
+    if (isObj(raw['needs_value'])) {
+      const need = raw['needs_value']
+      if (typeof need['target'] === 'string' && typeof need['key'] === 'string' && typeof need['ref'] === 'string') {
+        out['needs_value'] = {
+          target: clip(need['target'], BRIDGE_HANDOFF_CAPS.needsValueItemMaxChars),
+          key: clip(need['key'], BRIDGE_HANDOFF_CAPS.needsValueItemMaxChars),
+          ref: clip(need['ref'], BRIDGE_HANDOFF_CAPS.needsValueItemMaxChars),
+        }
+      }
+    }
+    if (isObj(raw['resume_hint']) && raw['resume_hint']['missed'] === true && typeof raw['resume_hint']['hint'] === 'string') {
+      out['resume_hint'] = {
+        hint: clip(raw['resume_hint']['hint'], BRIDGE_HANDOFF_CAPS.resumeHintMaxChars),
+        missed: true,
+      }
+    }
     if (typeof raw['goal_digest'] === 'string') out['goal_digest'] = clip(raw['goal_digest'], BRIDGE_HANDOFF_CAPS.goalDigestMaxChars)
     if (typeof raw['url'] === 'string') out['url'] = clip(raw['url'], BRIDGE_HANDOFF_CAPS.urlMaxChars)
     // 结束态可见性（evidence-only）：无完成信号声明 = 显式 null；无低置信票 = 键不出现。
@@ -1724,20 +1813,59 @@ export class SessionManager {
     return Object.keys(out).length > 0 ? out : undefined
   }
 
-  /** driveClose 的 pilot_end 摘要（有界白名单；不回落盘路径以外的敏感键）。 */
+  /**
+   * driveClose 的 pilot_end 摘要（有界白名单；不回落盘路径以外的敏感键）。
+   *
+   * 摘要里的计数（`failed_asks`）、缓存命中（`cache`）、驱动身份（`driver`/`stop_code`）、
+   * 现场键（`expect_url`）与异常路径的 `code`/`reason`/`last_error` 都是「这一轮怎么结束
+   * 的」事实——缺它们时 Agent 只能从 `ok` 反推。`cache` 固定只投影 `hits`/`misses` 两键。
+   */
   private driveSummary(raw: unknown): Record<string, unknown> | undefined {
     if (!isObj(raw)) return undefined
     const out: Record<string, unknown> = {}
-    for (const k of ['ok', 'pilot', 'attached', 'driver', 'stop_code', 'aborted'] as const) {
-      const v = raw[k]
-      if (v === true || v === false || typeof v === 'string') out[k] = typeof v === 'string' ? clip(v, 60) : v
+    for (const k of ['ok', 'pilot', 'attached', 'aborted'] as const) {
+      if (raw[k] === true || raw[k] === false) out[k] = raw[k]
     }
-    for (const k of ['steps', 'max_steps', 'conf_floor', 'model_asks', 'rule_picks', 'model_picks', 'handoffs', 'fallbacks'] as const) {
+    if (typeof raw['driver'] === 'string') out['driver'] = clip(raw['driver'], BRIDGE_EVIDENCE_SUMMARY_CAPS.driverMaxChars)
+    if (typeof raw['stop_code'] === 'string') out['stop_code'] = clip(raw['stop_code'], BRIDGE_EVIDENCE_SUMMARY_CAPS.stopCodeMaxChars)
+    for (const k of ['steps', 'max_steps', 'conf_floor', 'model_asks', 'rule_picks', 'model_picks',
+      'handoffs', 'fallbacks', 'failed_asks'] as const) {
       if (typeof raw[k] === 'number') out[k] = raw[k]
     }
-    for (const k of ['url', 'out_dir'] as const) {
-      if (typeof raw[k] === 'string') out[k] = clip(raw[k], 300)
+    const cache = raw['cache']
+    if (isObj(cache)) {
+      const bounded: Record<string, number> = {}
+      for (const k of ['hits', 'misses'] as const) {
+        if (typeof cache[k] === 'number') bounded[k] = cache[k]
+      }
+      if (Object.keys(bounded).length === BRIDGE_EVIDENCE_SUMMARY_CAPS.cacheKeys) out['cache'] = bounded
     }
+    if (typeof raw['url'] === 'string') out['url'] = clip(raw['url'], BRIDGE_EVIDENCE_SUMMARY_CAPS.urlMaxChars)
+    if (typeof raw['out_dir'] === 'string') out['out_dir'] = clip(raw['out_dir'], BRIDGE_EVIDENCE_SUMMARY_CAPS.outDirMaxChars)
+    if (typeof raw['expect_url'] === 'string') out['expect_url'] = clip(raw['expect_url'], BRIDGE_EVIDENCE_SUMMARY_CAPS.expectUrlMaxChars)
+    if (typeof raw['code'] === 'string') out['code'] = clip(raw['code'], BRIDGE_EVIDENCE_SUMMARY_CAPS.codeMaxChars)
+    if (typeof raw['reason'] === 'string') out['reason'] = clip(raw['reason'], BRIDGE_EVIDENCE_SUMMARY_CAPS.reasonMaxChars)
+    if (typeof raw['last_error'] === 'string') out['last_error'] = clip(raw['last_error'], BRIDGE_EVIDENCE_SUMMARY_CAPS.lastErrorMaxChars)
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  /**
+   * `started` 块/事件的有界投影（`drive` 首轮顶层 `started` 与 `events[]` 的
+   * type:"started" 行共用一份）：附着与否、落在哪一页、证据目录、期望页与被排除 frame。
+   * 引擎给才有、桥不补键；`frames_excluded` 复用交接块同一份有界投影。
+   */
+  private driveStarted(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (raw['ok'] === true || raw['ok'] === false) out['ok'] = raw['ok']
+    if (raw['attached'] === true) out['attached'] = true
+    if (typeof raw['url'] === 'string' && raw['url'] !== '') out['url'] = clip(raw['url'], BRIDGE_EVIDENCE_STARTED_CAPS.urlMaxChars)
+    if (typeof raw['out_dir'] === 'string' && raw['out_dir'] !== '') out['out_dir'] = clip(raw['out_dir'], BRIDGE_EVIDENCE_STARTED_CAPS.outDirMaxChars)
+    if (typeof raw['expect_url'] === 'string' && raw['expect_url'] !== '') out['expect_url'] = clip(raw['expect_url'], BRIDGE_EVIDENCE_STARTED_CAPS.expectUrlMaxChars)
+    const frames = this.frameExclusions(raw['frames_excluded'])
+    if (frames !== undefined) out['frames_excluded'] = frames
+    if (typeof raw['code'] === 'string') out['code'] = clip(raw['code'], BRIDGE_EVIDENCE_STARTED_CAPS.codeMaxChars)
+    if (typeof raw['reason'] === 'string') out['reason'] = clip(raw['reason'], BRIDGE_EVIDENCE_STARTED_CAPS.reasonMaxChars)
     return Object.keys(out).length > 0 ? out : undefined
   }
 
@@ -1756,6 +1884,23 @@ export class SessionManager {
       if (e['changed'] === true || e['changed'] === false) out['changed'] = e['changed']
       if (typeof e['url'] === 'string') out['url'] = clip(e['url'], 300)
       if (typeof e['conf'] === 'number') out['conf'] = e['conf']
+      // `started` 证据的被排除 frame 走同一份有界投影（引擎给才出现）。
+      const frames = this.frameExclusions(e['frames_excluded'])
+      if (frames !== undefined) out['frames_excluded'] = frames
+      // `started` 行的现场三件套（引擎给才出现）：附着模式、证据目录、期望页子串。
+      // 与顶层 `started` 块同一投影、同一组 cap——同一事实在两处不会长出两种界。
+      if (e['type'] === 'started') {
+        const started = this.driveStarted(e)
+        for (const key of ['attached', 'out_dir', 'expect_url'] as const) {
+          if (started?.[key] !== undefined) out[key] = started[key]
+        }
+      }
+      // `handoff` 事件携带**完整交接块**（pilot 自己在停驶时发的 unsolicited 行）；
+      // 只留白名单会把 Agent 最需要的停因事实整块丢掉——与顶层 `handoff` 同一投影。
+      if (e['type'] === 'handoff') {
+        const handoff = this.driveHandoff(e['handoff'])
+        if (handoff !== undefined) out['handoff'] = handoff
+      }
       return out
     })
   }

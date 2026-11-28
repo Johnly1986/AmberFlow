@@ -96,7 +96,7 @@ run 面的**决策语句步**（`ctx.step(goal, { done })`，无 `act`）早已�
 3. 未命中 → `decision.pick`：`ChoiceRequest` 的 `goal` = 总目标 + **有界步史摘要**
    （L2 运行史，≤N 步、逐层有界——即 `docs/DECISION_CONTEXT_CONTRACT.md` Phase 1 执行期
    L2 直通的第三个消费者，溯源标签 `kind:"trace"` 直接可用）；
-4. 置信闸门：floor（`--conf-floor` / provider 自报 / 0.25 既有优先级）+ reobserve
+4. 置信闸门：floor（`--conf-floor` / provider 自报 / 全局缺省优先级）+ reobserve
    一次更宽（`RunOptions.reobserve` 同纪律）；
 5. `actOnce` 执行；inert 记账（`maxEffectiveRepeats` 同参数可用）；
 6. `checkSignal(finalSignal)`——成立即停 `final_signal_held`；缺最终信号声明时以
@@ -131,7 +131,7 @@ run 面的**决策语句步**（`ctx.step(goal, { done })`，无 `act`）早已�
 - 调用方要"结束态可验证"，就在 `drive` 声明 `final_signal`（`checkSignal` 每轮判 + finish 再验）；
   声明了信号却没成立 = 确定性停因/交接，不会被当成"做完了"。
 - 没有声明信号时，handoff 带 `final_signal:null`（结束态**未被验证**的显式 fact）+ 顶层
-  `weak_picks`（只收 model 票且 `conf < 0.25` 的票面事实，≤6）与 `pilot_end.conf_floor`
+  `weak_picks`（只收 model 票且 `conf < DEFAULT_CONF_FLOOR` 的票面事实，≤6）与 `pilot_end.conf_floor`
   （本次有效闸门刻度）——让"为什么回退"可解释，但**不**阻断、不改正、不新增停因。
 - 长任务用 `expect_url` / 分段 `final_signal` 做检查点；任务成功与否仍由调用方裁决。
 
@@ -247,7 +247,7 @@ Agent `resume` 带 hint 点名 → 规则档确定性点击（零模型）→ `f
 - `finish` 指令改必须 `checkSignal` 验证（`signal_not_held` 单行拒绝）——收口红线
   「完成只认信号」（审查实测：无任何信号声明也可 exit 0 / ok:true 的旁路已堵）；
 - 低置信先付一次宽扫重问（WIDER_ELEMENTS/WIDE_QUOTAS + esig 平移禁选，与 run 的 4d
-  阶段同序）；`--conf-floor` 接 provider 自报链（CLI > `ProviderInfo.floor` > 0.25）；
+  阶段同序）；`--conf-floor` 接 provider 自报链（CLI > `ProviderInfo.floor` > 全局缺省）；
 - 交接四件套补齐：DOM 快照（>2MB 截断）与独立池快照文件（此前 pool_snapshot 复用
   observe 文件、无 DOM）；
 - `redirect` 步史与禁选清段重新累计（预算不清零）；`resume` 支持 `value:{k:v}` 多槽与

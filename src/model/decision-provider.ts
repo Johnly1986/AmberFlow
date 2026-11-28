@@ -429,19 +429,25 @@ export function layaProvider(opts: {
         pTop1: values[0] ?? null, pTop2: values[1] ?? null,
         margin: values.length >= 2 ? values[0]! - values[1]! : (values[0] ?? null),
       };
+      // 显式弃权：模型按 instructions 回答 `none`（池外值）。laya 的 choice 头只会返回
+      // 传入 criteria 的键，所以 `none` 必然是模型"跳出选项集"的显式表态。
+      const abstain: Pick<ChoiceOutcome, "abstained"> =
+        typeof a.choice === "string" && a.choice.trim().toLowerCase() === "none" ? { abstained: true } : {};
+      const refOf = (): string | null | undefined =>
+        abstain.abstained === true ? null : (a.choice as string | null | undefined);
       // 证据截断记账只做透传：运行时（laya-onnx）没裁过证据就不出现该键，
       // 其他 provider 不填 ⇒ outcome 形状与既有消费点不变。
       const evidence: Pick<ChoiceOutcome, "evidence_truncated"> =
         res.evidence_truncated === undefined ? {} : { evidence_truncated: res.evidence_truncated };
       if (sl.passthrough) {
-        return { ref: a.choice as string | null | undefined, score: a.confidence ?? 0,
+        return { ref: refOf(), score: a.confidence ?? 0,
           scoreKind: caps.score_kind, signals, options: values.length, passthrough: true, probs,
-          ...evidence };
+          ...evidence, ...abstain };
       }
-      return { ref: a.choice as string | null | undefined,
+      return { ref: refOf(),
         score: values.length ? values[0]! : (a.confidence ?? 0),
         scoreKind: caps.score_kind, signals, options: values.length, passthrough: false, probs,
-        ...evidence };
+        ...evidence, ...abstain };
     },
 
     async askChoice(req: ClosedSetRequest): Promise<ClosedSetChoice | null> {

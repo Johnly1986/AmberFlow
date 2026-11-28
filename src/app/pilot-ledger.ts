@@ -87,6 +87,16 @@ export class PilotLedger {
       || outcome.startsWith("unsupported"));
   }
 
+  /**
+   * 该元素**已证明执行成功但不产生变化**（`no_change`）：规则档跳过它。
+   * 与 `changedLoop` 的分工：后者排"变过又变回"的乒乓；这个排"压根没变"的复读。
+   * 只作用于规则档——模型档仍可重新考虑（页面已变时模型能给出不同理由，规则不能）。
+   * 现场：走查里广告文案与目标词面重合，规则档连点三次同一广告，白耗 3 步预算。
+   */
+  inertNoChange(el: Elem): boolean {
+    return this.entries.get(PilotLedger.esigKey(el))?.lastOutcome === "no_change";
+  }
+
   /** 死目标守停（执行前判定；run 面 `maxEffectiveRepeats` 同口径）：同一 esig 已驱动达上限 =
    *  再执行只会重复烧预算。命中即落 loopTrip 并返回 true（调用方按 stuck_inert 停）。 */
   guardStop(el: Elem, desc: string): boolean {

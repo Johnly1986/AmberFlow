@@ -8,7 +8,7 @@
  *
  * 原则：
  *   - 表从真源 import：SIGNAL_OPS（signal-ops.ts 零 import 叶子）、COMMAND_OPS（actions.ts）、
- *     nextForStop（planning-playbook.ts 零 import 叶子）——引擎改表，契约自动跟；
+ *     nextForStop（planning-playbook.ts；其六步法文本的窗口数字由 tuning.ts 常量渲染）——引擎改表，契约自动跟；
  *   - 语义注记是"源码里查得到、文档里没写死"的行为事实，逐条标出处文件；
  *   - 输出确定性（无时间戳）：`--check` 与快照逐字节比对防漂移。
  */

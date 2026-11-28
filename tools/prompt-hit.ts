@@ -40,7 +40,7 @@
  *   agent    Agent 规划面单源：`plan.rules` 收进 `src/prompts/agent-prompts.ts`，
  *            断言 ①spec 形状/预算/消费点 ②plan.ts 只装配不手抄 ③逐字节冻结
  *            （sha256 基线）④默认/变体 ≤ 预算 ⑤playbook short ≤500 / full ≤2200
- *            ⑥CANDIDATE_WINDOW_TEXT 数字由 tuning/elem-model 常量渲染。
+ *            ⑥CANDIDATE_WINDOW_TEXT 与 playbook ③ 的窗口数字均由 tuning/elem-model 常量渲染。
  *   evidence 决策证据载荷 spec/预算/快照：`src/prompts/evidence-prompts.ts`
  *            闭集 5 条，断言 ①都有 version/budget/consumers ②候选渲染分级预算
  *            （40≤6k / 120≤12k / 200 帽≤20k，合成池实测）③单档预算（state_text 320 /
@@ -757,6 +757,16 @@ const PLAN_RULES_FROZEN_SHA256 =
   }
   if (CANDIDATE_WINDOW_TEXT.length > 500) {
     problems.push(`agent: CANDIDATE_WINDOW_TEXT ${CANDIDATE_WINDOW_TEXT.length} 字符超预算 500`);
+  }
+
+  /* ⑥ playbook ③ 的候选窗口数字与 CANDIDATE_WINDOW_TEXT 同源（tuning 常量渲染） */
+  const playbookWindow = `每步 ${POOL_CAP_ELEMENTS}（宽扫 ${WIDE_SCAN_POOL_ELEMENTS}）`;
+  if (!PLAN_PLAYBOOK_TEXT.includes(playbookWindow)) {
+    problems.push(`agent: PLAN_PLAYBOOK_TEXT ③ 的候选窗口数字未由 POOL_CAP_ELEMENTS/WIDE_SCAN_POOL_ELEMENTS 渲染（缺 ${JSON.stringify(playbookWindow)}）——改常量须同步重录快照与 docs §0 逐字嵌入段`);
+  }
+  const playbookSrc = fs.readFileSync(path.join(REPO, "src/engine/planning-playbook.ts"), "utf-8");
+  if (!playbookSrc.includes("POOL_CAP_ELEMENTS") || !playbookSrc.includes("WIDE_SCAN_POOL_ELEMENTS")) {
+    problems.push("agent: planning-playbook.ts 未 import tuning 的候选窗口常量（六步法③ 数字仍是裸值）");
   }
 }
 

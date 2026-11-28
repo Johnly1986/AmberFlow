@@ -484,7 +484,7 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 | `within` 语义链（E 批） | ✅ **E2 已收口** | 见 `docs/WITHIN_PARITY_PLAN.md`（E 批方案 §4/§13）；嵌套序包含语义（单层兼容） |
 | 跨帧同签名不合并 | 未做（独立立项 + 开关） | D2 边界：`esig`/`firstIfSame` 签名不含新字段，同 tag/label/href/data-test 的跨帧元素仍合并 |
 | `read/extract/collect/judge` 帧限定对称化 | ✅ **E4 已收口** | 见 `docs/WITHIN_PARITY_PLAN.md` §6（选择器尾缀 ` frame:<origin链>`、F71） |
-| >6 帧 / 每帧池配额 | 未做 | `framesOf ≤6`；池窗口 40/120 跨帧共享、主帧优先；`frame:` 落空时 reason 列允许帧 origin（≤6） |
+| >6 帧 / 每帧池配额 | 未做 | `framesOf ≤6`；池窗口 64/128 跨帧共享、主帧优先；`frame:` 落空时 reason 列允许帧 origin（≤6） |
 | `about:blank` / srcdoc 帧寻址 | 不做（本期） | 未知 origin 帧不可被任何 `frame:` 命中（D5）；origin 只用于匹配，不是安全判定（门禁是 hosts） |
 | 帧下标链 / nth-child / XPath / iframe 选择器锚 | 不做 | 漂移/破坏 hint 封闭集（§12.1/§12.6） |
 | `findByHint` 六形状全语义 | 未做（C 批边界） | 见 §13.2-4；`plan check --probe` 仅身份形状 + induceHint 产物 |

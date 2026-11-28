@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>pilot unlabeled target</title>
+</head>
+<body>
+  <!-- 空标签候选：只有 name/type，没有 aria-label / placeholder / 文本。
+       池里有身份（role/name/input_type），渲染若只给 label 就是 `input ""`——
+       模型无法在无法区分的行里投票。注入段必须补身份 token。 -->
+  <p><input id="q" type="search" name="q"></p>
+  <p><button id="go">Go</button></p>
+</body>
+</html>

@@ -6,8 +6,9 @@
 > 两处同步（数据先行）。**
 > 本文来源：2026-11-03 ~ 11-04 四轮真实运行实验（每轮由全新 agent 独立取证），
 > 每条事实都经过 ≥2 轮独立互证或带落盘证据。维护者新增事实时请附证据出处。
-> 注：当前这些事实尚未接入 Agent 可见面（工具描述 / schema ctx）——是否接入、
-> 以何种粒度接入（按站点过滤）属于 B 批决策，见 `~/.amberflow/reports/gmap-hotels-8cities/`。
+> 注：当前这些事实未接入**工具描述 / schema ctx**；模型请求面另有显式 opt-in
+> `AMBERFLOW_SITE_FACTS_INTO_MODEL=1`（缺省关，fenced 块；键的唯一定义见
+> `docs/CONFIG_REFERENCE.md`）。是否按站点过滤进工具描述属于 B 批决策。
 
 ## Google 域通用
 
@@ -32,6 +33,7 @@
 | **酒店面板排序菜单只有 Relevance/Rating（相关性/评分），无价格排序**——5 轮独立互证（en/zh UI 各半） | r14-legacy/r1/r2/r3/r4 | 各轮报告；r4 MENU_SEL 全文取证 |
 | 桌面 Web **无「酒店」图层瓦片**（移动 App 特性未上 Web）——**r8 已直接取证**：图层面板全量 label 落盘（Transit/Traffic/Biking/Terrain/Street View/Wildfires/Air Quality/Travel time/Measure/Default/Satellite/Globe view/Labels），hotelHit=false（r1 仅推断，r8 实证）；「酒店地图」等价路径 = 酒店搜索结果页 `/maps/search/hotels…`（即价格图层视图）。注：图层面板能否打开呈状态依赖（r1 两探针 8 次点击未开、r8 一次成功），引擎无 hover 原语时个别会话需重试 | r1/r8 | round1 报告 §c④（修正版）；round8 报告 §3（layer-probe.json） |
 | 酒店结果 feed 是**虚拟列表**：池/extract 只见已渲染行，需 scrollList 分块；feed 结果上限 ~120-122 卡（未登录 limited view），且**会话间结果组成有波动** | r1/r3/r4 | round4 报告 §1 跨轮对照 |
+| **feed 行数会话间波动大**：同一深链同一会话形态，未登录 limited view 的可滚动行数在 33-51（R2 四臂实测）与 20-122（跨轮次）间波动——「最低价」结果跨会话不可直接比，口径须随会话声明覆盖行数 | R2/R1/r3/r4 | reval/R2 报告；FINAL-8rounds |
 | "Next page" 翻页在未登录 limited view 下 0 新增行（r2 expand grew=false；r3/r4 翻页探测一致） | r2/r3/r4 | summary-8cities.json list_end_evidence |
 | 打开筛选面板会**替换主内容树**（feed 从 DOM 摘除）→ 面板态验收要用面板内锚，回列表态再验 feed | r4 | round4 报告 §c8 |
 | 排序菜单/图层面板内的条目：排序 2 项 + 图层 9 项共用一个 `[role=menu]`——done 锚要写具体文案不要写 role 容器 | r4 | round4 报告 timeline 第 6 条 |
@@ -43,4 +45,3 @@
 - 以上事实随时间会漂移（Google A/B、区域、登录态都会变）；复用前先 inspect 快速复核。
 - 不绕过反爬：/sorry 与 IP 限速只允许冷却/降频/分批，禁止伪造指纹或轮换代理。
 
-| **feed 行数会话间波动大**：同一深链同一会话形态，未登录 limited view 的可滚动行数在 33-51（R2 四臂实测）与 20-122（跨轮次）间波动——「最低价」结果跨会话不可直接比，口径须随会话声明覆盖行数 | R2/R1/r3/r4 | reval/R2 报告；FINAL-8rounds |

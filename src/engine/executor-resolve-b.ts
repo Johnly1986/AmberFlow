@@ -3,6 +3,7 @@
  * `BrowserMiddleware` 的实现片段，显式接收 `mw` 实例（唯一执行循环仍在 executor.ts）。
  */
 import { sleep } from "../support/sleep.ts";
+import { ELEMENT_EVAL_TIMEOUT_MS } from "../support/tuning.ts";
 import { type AmbiguityView, describeAmbiguity, orderCandidatesByDomPreorder } from "./ambiguity.ts";
 import { type ActMissDiagnostics, type ActMissRow, actMissDiagnostics, actMissDiscrimination, nearCandidates, sigEq } from "./executor-pure.ts";
 import { _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
@@ -299,7 +300,12 @@ export async function _resolveOneWithLock(mw: BrowserMiddleware, page: AnyPage, 
 async function _lockStampIsLive(loc: AnyLoc, dshRef: string | undefined): Promise<boolean> {
   if (typeof dshRef !== "string" || dshRef === "") return false;
   try {
-    const live = await loc.evaluate((node: any) => String(node.getAttribute("data-dshref") ?? ""));
+    // 显式限时：锁复核的整个意义就是"元素可能已经换过/卸载"。无 timeout 时这一步会在
+    // 目标已 detach 时等满 30s 才走到 catch——锁失效的判定本身是毫秒级事实。
+    const live = await loc.evaluate(
+      (node: any) => String(node.getAttribute("data-dshref") ?? ""),
+      undefined, { timeout: ELEMENT_EVAL_TIMEOUT_MS },
+    );
     return live === dshRef;
   } catch {
     return false;   // 0 命中（元素已卸载）/ 多命中 / 跨源 frame 读不到 = 锁不可用

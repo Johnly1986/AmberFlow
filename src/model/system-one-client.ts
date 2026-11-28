@@ -51,6 +51,13 @@ export interface SystemOneProfile {
   endpointHint: string;
   /** 认证 token（返回串→`Authorization: Bearer <串>`；抛错=缺凭据自报指路；undefined=不发认证头）。 */
   resolveAuth?(): string;
+  /**
+   * 每个请求都带的**额外请求头**（缺省不发）。
+   * 存在的理由：有些网关要求路由头而非仅仅 Bearer（如 OpenCode Go 的 `x-opencode-session`），
+   * 只给 Authorization 会让请求停在鉴权前一步，且错误串读起来像"模型没权限"。头名保持原样，
+   * 值只来自配置——客户端不合成、不推断。
+   */
+  resolveHeaders?(): Record<string, string>;
   /** 每个请求都带的额外字段（如百炼的 `{model:"decision-model-preview"}`；JevK5 给 `{}`）。 */
   extraBody(): Record<string, unknown>;
   /** choice 的选项下限；候选数不足则**不发请求**、直接"结构上没得选"（JevK5=2，百炼=1）。 */
@@ -191,6 +198,8 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
     const auth = p.resolveAuth?.();
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (auth) headers.authorization = `Bearer ${auth}`;
+    // 额外头在认证之后合并：配置里的同名头会覆盖缺省（配置是显式意图）。
+    for (const [k, v] of Object.entries(p.resolveHeaders?.() ?? {})) headers[k.toLowerCase()] = v;
     let res: Response;
     try {
       res = await doFetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
@@ -234,7 +243,10 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
       };
       const probs = a.probabilities ?? {};
       const sorted = Object.values(probs).sort((x, y) => y - x);
-      const chosen = a.choice
+      // 显式弃权：模型按 instructions 回答 `none`（池外值，永远不会是一个合法 ref）。
+      // 与"答复在池外被判无效"区别开——后者是引擎侧的校验结果，前者是模型侧的判断。
+      const saidNone = typeof a.choice === "string" && a.choice.trim().toLowerCase() === "none";
+      const chosen = !saidNone && a.choice
         && (!p.validateChoiceInPool || built.asked.includes(a.choice)) ? a.choice : null;
       return {
         ref: chosen,
@@ -249,6 +261,7 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
         options: sorted.length || built.asked.length,
         passthrough: true,          // 客户端不问子集；收窄/shortlist 是服务侧的事
         probs,
+        ...(saidNone ? { abstained: true } : {}),
       };
     },
 

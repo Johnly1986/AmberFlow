@@ -68,7 +68,7 @@ export const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v 
 按 apps/<app>/app.mjs 的 flow(ctx) 跑一条应用：数据腿 → 脚本产生的浏览器/工具步 → 结束状态不变量
 应用只有一种格式：flow 脚本（没有 pack.json / 声明式数据脚本 / 语义模板）。
 --ablate       消融臂：stub = 脚本桩，rules-only = 规则档
---conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
+--conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时全局缺省不再成立，
                本旗标 = 本次覆盖；meta.policy.conf_floor 可声明；provider 可自报 floor
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
 --trace        结果 JSON 带每步执行证据（step_traces）

@@ -252,8 +252,8 @@ test('session drive：参数闭集（goal/max_steps/driver/cmd/conf_floor）', a
 
 test('session drive：有界投影（白名单 + handoff/events 裁剪 + 不泄露池/槽值）', async () => {
   const handoff = {
-    stop_code: 'low_confidence', step_id: 3, url: 'http://fixture.local/page',
-    why_stuck: { summary: 'low_confidence @ step 3 — no clickable candidate', evidence: { inert_run: 0 } },
+    stop_code: 'low_confidence', step_id: 3, low_confidence_kind: 'observation-empty', url: 'http://fixture.local/page',
+    why_stuck: { summary: 'low_confidence @ step 3 — 池里一个候选都没有', evidence: { inert_run: 0 } },
     what_would_unblock: ['resume 带 hint 点名', 'redirect 换目标', 'third', 'fourth'],
     evidence_refs: { screenshot: '/tmp/h3.png', dom: '/tmp/h3.dom.html', pool_snapshot: '/tmp/h3.pool.json', observe: '/tmp/h3.observe.json' },
     pool: ['LEAK'], candidates: ['LEAK'],
@@ -288,6 +288,8 @@ test('session drive：有界投影（白名单 + handoff/events 裁剪 + 不泄�
     assert.equal(r.terminal, false)
     const ho = r.handoff as Record<string, unknown>
     assert.equal(ho.step_id, 3)
+    assert.equal(ho.low_confidence_kind, 'observation-empty',
+      'the top-level classification reaches the caller (why_stuck.evidence is dropped wholesale)')
     assert.ok(String(ho.summary).length <= 300)
     assert.equal((ho.what_would_unblock as string[]).length, 3, 'what_would_unblock capped at 3')
     assert.ok(!('pool' in ho) && !('candidates' in ho))
@@ -344,6 +346,192 @@ test('session drive：无 weak_picks/final_signal = 旧形状（键不出现）'
     const ho = r.handoff as Record<string, unknown>
     assert.equal('weak_picks' in ho, false, 'no weak votes = no key (old handoff shape)')
     assert.equal('final_signal' in ho, false, 'no final-signal fact in the response = no key (bridge invents nothing)')
+    assert.equal('low_confidence_kind' in ho, false, 'no classification from the engine = no key (bridge invents nothing)')
+  })
+})
+
+test('session drive：低置信分类有界透传（闭集值原样 + 桥侧只做有界化）', async () => {
+  await withHarness({
+    routes: [
+      {
+        type: 'drive', lineIncludes: 'first goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'low_confidence', steps: 2,
+          handoff: {
+            stop_code: 'low_confidence', step_id: 2, low_confidence_kind: 'observation-all-forbidden',
+            why_stuck: { summary: 'low_confidence @ step 2 — 抽到 3 个候选但全部被排除，先查为什么都被排除' },
+          },
+        },
+      },
+      {
+        type: 'drive', lineIncludes: 'second goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'low_confidence', steps: 3,
+          handoff: {
+            stop_code: 'low_confidence', step_id: 3, low_confidence_kind: 'k'.repeat(100),
+            why_stuck: { summary: 'x' },
+          },
+        },
+      },
+    ],
+  }, async (h) => {
+    const first = await h.call({ op: 'drive', goal: 'first goal' })
+    const firstHandoff = first.handoff as Record<string, unknown>
+    assert.equal(firstHandoff.low_confidence_kind, 'observation-all-forbidden', 'a closed-set value passes through intact')
+    assert.ok(String(firstHandoff.summary).includes('先查为什么都被排除'), 'the human direction travels with it')
+    const second = await h.call({ op: 'drive', goal: 'second goal' })
+    const secondHandoff = second.handoff as Record<string, unknown>
+    assert.equal(String(secondHandoff.low_confidence_kind).length, 32, 'the bridge bounds the classification length')
+  })
+})
+
+test('session drive：停因专属事实顶层透传（observation/model_abstain/nav_error/off_envelope）', async () => {
+  const handoff = {
+    stop_code: 'low_confidence', step_id: 3, low_confidence_kind: 'model-unsure',
+    observation: { pool_size: 7, forbidden: 2, empty_labels: 1 },
+    model_abstain: { pool_size: 7, asks: 2 },
+    nav_error: 'navigation failed: net::ERR_NAME_NOT_RESOLVED (chrome-error://chromewebdata/)',
+    off_envelope: 'http://away.invalid/login',
+    why_stuck: { summary: 'low_confidence @ step 3 — 池里至少 5 个可用候选' },
+  }
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'handoff', stop_code: 'low_confidence', handoff } }],
+  }, async (h) => {
+    const ho = (await h.call({ op: 'drive', goal: 'open the detail page' })).handoff as Record<string, unknown>
+    assert.deepEqual(ho.observation, { pool_size: 7, forbidden: 2, empty_labels: 1 },
+      'the observation counts reach the caller (why_stuck.evidence is dropped wholesale)')
+    assert.deepEqual(ho.model_abstain, { pool_size: 7, asks: 2 },
+      'the abstain fact reaches the caller — the only thing separating "model said no" from "no choice"')
+    assert.equal(String(ho.nav_error).includes('net::ERR_NAME_NOT_RESOLVED'), true,
+      'the original nav error survives the projection')
+    assert.equal(ho.off_envelope, 'http://away.invalid/login', 'the landing URL survives the projection')
+    assert.equal('evidence' in ho, false, 'the bridge still drops why_stuck.evidence')
+  })
+})
+
+test('session drive：停因专属事实缺键 = 旧形状 / 不完整整数对象不进投影 / 文本按桥界裁剪', async () => {
+  const longText = 'x'.repeat(900)
+  await withHarness({
+    routes: [
+      {
+        type: 'drive', lineIncludes: 'old shape goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'needs_value', steps: 1,
+          handoff: { stop_code: 'needs_value', step_id: 1, why_stuck: { summary: 'x' } },
+        },
+      },
+      {
+        type: 'drive', lineIncludes: 'partial goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'low_confidence', steps: 2,
+          handoff: {
+            stop_code: 'low_confidence', step_id: 2,
+            model_abstain: { pool_size: 3 },
+            observation: { pool_size: 3, forbidden: 0 },
+            why_stuck: { summary: 'y' },
+          },
+        },
+      },
+      {
+        type: 'drive', lineIncludes: 'bounded goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'unreachable', steps: 3,
+          handoff: {
+            stop_code: 'unreachable', step_id: 3,
+            nav_error: longText, off_envelope: longText,
+            why_stuck: { summary: 'z' },
+          },
+        },
+      },
+    ],
+  }, async (h) => {
+    const plain = (await h.call({ op: 'drive', goal: 'old shape goal' })).handoff as Record<string, unknown>
+    for (const key of ['observation', 'model_abstain', 'nav_error', 'off_envelope']) {
+      assert.equal(key in plain, false, `no ${key} from the engine = no key (bridge invents nothing)`)
+    }
+    const partial = (await h.call({ op: 'drive', goal: 'partial goal' })).handoff as Record<string, unknown>
+    assert.equal('model_abstain' in partial, false, 'a partial abstain object is not padded into a shape')
+    assert.equal('observation' in partial, false, 'a partial observation object is not padded either')
+    const bounded = (await h.call({ op: 'drive', goal: 'bounded goal' })).handoff as Record<string, unknown>
+    assert.equal(String(bounded.nav_error).length, 300, 'nav_error is bounded at the bridge cap')
+    assert.equal(String(bounded.off_envelope).length, 300, 'off_envelope is bounded at the bridge cap')
+  })
+})
+
+test('session drive：现场定位键顶层透传（expect_url/needs_value/resume_hint）', async () => {
+  const handoff = {
+    stop_code: 'needs_value', step_id: 4,
+    expect_url: '/maps',
+    needs_value: { target: 'Search term', key: 'Search term', ref: 'e4' },
+    resume_hint: { hint: '#nope', missed: true },
+    why_stuck: { summary: 'needs_value @ step 4', evidence: { needs_value: { key: 'Search term' } } },
+  }
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'handoff', stop_code: 'needs_value', handoff } }],
+  }, async (h) => {
+    const ho = (await h.call({ op: 'drive', goal: 'search something' })).handoff as Record<string, unknown>
+    assert.equal(ho.expect_url, '/maps', 'the declared expect_url reaches the caller')
+    assert.deepEqual(ho.needs_value, { target: 'Search term', key: 'Search term', ref: 'e4' },
+      'the value need reaches the caller with target/key/ref (why_stuck.evidence is dropped wholesale)')
+    assert.deepEqual(ho.resume_hint, { hint: '#nope', missed: true },
+      'the missed hint reaches the caller — it is why the Agent is being asked again')
+    assert.equal('evidence' in ho, false, 'the bridge still drops why_stuck.evidence')
+  })
+})
+
+test('session drive：现场定位键缺键不补 / 半截对象不补 / 文本按桥界裁剪', async () => {
+  const longText = 'x'.repeat(900)
+  await withHarness({
+    routes: [
+      {
+        type: 'drive', lineIncludes: 'no locator goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'budget_exceeded', steps: 1,
+          handoff: { stop_code: 'budget_exceeded', step_id: 1, why_stuck: { summary: 'x' } },
+        },
+      },
+      {
+        type: 'drive', lineIncludes: 'partial locator goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'needs_value', steps: 2,
+          handoff: {
+            stop_code: 'needs_value', step_id: 2,
+            needs_value: { target: 't', key: 'k' },
+            resume_hint: { hint: '#x', missed: false },
+            why_stuck: { summary: 'y' },
+          },
+        },
+      },
+      {
+        type: 'drive', lineIncludes: 'bounded locator goal',
+        respond: {
+          ok: true, status: 'handoff', stop_code: 'needs_value', steps: 3,
+          handoff: {
+            stop_code: 'needs_value', step_id: 3,
+            expect_url: longText,
+            needs_value: { target: longText, key: longText, ref: longText },
+            resume_hint: { hint: longText, missed: true },
+            why_stuck: { summary: 'z' },
+          },
+        },
+      },
+    ],
+  }, async (h) => {
+    const plain = (await h.call({ op: 'drive', goal: 'no locator goal' })).handoff as Record<string, unknown>
+    for (const key of ['expect_url', 'needs_value', 'resume_hint']) {
+      assert.equal(key in plain, false, `no ${key} from the engine = no key (bridge invents nothing)`)
+    }
+    const partial = (await h.call({ op: 'drive', goal: 'partial locator goal' })).handoff as Record<string, unknown>
+    assert.equal('needs_value' in partial, false, 'a partial value need is not padded into a shape')
+    assert.equal('resume_hint' in partial, false, 'missed:false is not a missed hint')
+    const bounded = (await h.call({ op: 'drive', goal: 'bounded locator goal' })).handoff as Record<string, unknown>
+    assert.equal(String(bounded.expect_url).length, 300, 'expect_url is bounded at the bridge cap')
+    for (const text of Object.values(bounded.needs_value as Record<string, string>)) {
+      assert.equal(text.length, 300, 'each value-need text is bounded at the bridge cap')
+    }
+    const missed = bounded.resume_hint as Record<string, unknown>
+    assert.equal(String(missed.hint).length, 300, 'the missed hint is bounded at the bridge cap')
+    assert.equal(missed.missed, true, 'the flag stays a boolean fact, not text')
   })
 })
 
@@ -364,12 +552,74 @@ test('session drive：未决交接时 reused 回执带 handoff_open/goal_ignored
     assert.equal(r.goal_ignored, true, 'the ignored goal is explicit')
     assert.equal(r.status, 'handoff')
     assert.equal(r.stop_code, 'off_task_page')
-    const ho = r.handoff as Record<string, unknown>
+    assert.equal('handoff' in r, false, 'an already-open handoff echo is NOT renamed to `handoff` (that key means a new handoff)')
+    const ho = r.handoff_open as Record<string, unknown>
     assert.equal(ho.stop_code, 'off_task_page', 'the open handoff is echoed')
     assert.equal(ho.goal_digest, 'old goal', 'the active goal digest proves the new goal was not adopted')
     const next = r.next as string[]
     assert.ok(Array.isArray(next) && next.length === 3, 'next is bounded to 3 entries')
     assert.ok(next.some((s) => s.includes('driveCommand')) && next.some((s) => s.includes('new session')))
+  })
+})
+
+test('session drive：被排除 frame 在两处投影（交接块顶层 + started 事件）+ 有界', async () => {
+  const longOrigin = `http://frame.test/${'y'.repeat(400)}`
+  const excluded = Array.from({ length: 12 }, (_, i) => ({ origin: longOrigin, index: i + 1 }))
+  await withHarness({
+    routes: [{
+      type: 'drive',
+      respond: {
+        ok: true, status: 'handoff', stop_code: 'low_confidence', steps: 3,
+        handoff: {
+          stop_code: 'low_confidence', step_id: 3, frames_excluded: excluded,
+          why_stuck: { summary: 'low_confidence @ step 3 — 目标可能在未声明的 iframe 内' },
+          what_would_unblock: ['目标可能在未声明的 iframe 内：把 http://frame.test 加入 hosts 后重试'],
+        },
+        events: [
+          { type: 'started', ok: true, url: 'http://fixture.local/page', frames_excluded: excluded },
+          { type: 'log', line: 'attached' },
+        ],
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'frames goal' })
+    assert.equal(r.ok, true)
+    assert.equal('handoff_open' in r, false, 'a newly opened handoff is not echoed under the open-handoff key')
+    const ho = r.handoff as Record<string, unknown>
+    const frames = ho.frames_excluded as Array<Record<string, unknown>>
+    assert.ok(Array.isArray(frames), 'the excluded-frame fact reaches the caller on the handoff block')
+    assert.equal(frames.length, 8, 'the handoff projection caps excluded frames at 8')
+    for (const row of frames) {
+      assert.equal(typeof row.index, 'number', 'each row keeps its real frame index')
+      assert.equal(String(row.origin).length, 120, 'each origin is clipped to the generated cap')
+    }
+    const events = r.events as Array<Record<string, unknown>>
+    const started = events.find((e) => e.type === 'started') as Record<string, unknown>
+    const startedFrames = started.frames_excluded as Array<Record<string, unknown>>
+    assert.ok(Array.isArray(startedFrames), 'the started evidence carries the same fact (events projection)')
+    assert.equal(startedFrames.length, 8, 'the event projection shares the same 8-row cap')
+    assert.equal(String(startedFrames[0].origin).length, 120, 'the event projection shares the same origin cap')
+    const log = events.find((e) => e.type === 'log') as Record<string, unknown>
+    assert.equal('frames_excluded' in log, false, 'no engine key on an event = no bridge key')
+  })
+})
+
+test('session drive：无排除帧 = 两处都不出现该键（旧形状不变）', async () => {
+  await withHarness({
+    routes: [{
+      type: 'drive',
+      respond: {
+        ok: true, status: 'handoff', stop_code: 'needs_value', steps: 1,
+        handoff: { stop_code: 'needs_value', step_id: 1, why_stuck: { summary: 'needs_value @ step 1' } },
+        events: [{ type: 'started', ok: true, url: 'http://fixture.local/page' }],
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'no frames goal' })
+    const ho = r.handoff as Record<string, unknown>
+    assert.equal('frames_excluded' in ho, false, 'no exclusions from the engine = no key on the handoff block')
+    const started = (r.events as Array<Record<string, unknown>>)[0] as Record<string, unknown>
+    assert.equal('frames_excluded' in started, false, 'no exclusions = no key on the started evidence either')
   })
 })
 
@@ -390,7 +640,9 @@ test('session drive_command / drive_status / drive_close：闭集与往返', asy
     assert.equal(st.steps, 4)
     assert.equal(st.active, true)
     assert.equal(st.terminal, false)
-    assert.equal((st.handoff as Record<string, unknown>).stop_code, 'low_confidence')
+    // drive_status 的 `handoff_open` 是同一交接的回显，键名跟事实走（不混进 `handoff`）。
+    assert.equal('handoff' in st, false, 'a read-only echo is not reported as a newly opened handoff')
+    assert.equal((st.handoff_open as Record<string, unknown>).stop_code, 'low_confidence')
     const cl = await h.call({ op: 'drive_close' })
     assert.equal(cl.ok, true)
     assert.equal(cl.op, 'drive_close')
@@ -444,6 +696,215 @@ test('session drive：失败回执 reason 为空时回落嵌套 command.reason',
     assert.equal(r.ok, false)
     assert.equal(r.code, 'config_error')
     assert.equal(r.reason, 'resume without an open handoff', 'the nested single-line reason reaches the caller')
+  })
+})
+
+/* ---- 4.5b 引擎有、桥此前丢的七项事实：逐项到达 / 缺键不补 / 超长裁剪 ---- */
+
+test('started 事件：expect_url/attached/out_dir 到达桥面事件行（超长裁剪）', async () => {
+  const started = {
+    type: 'started', ok: true, attached: true, url: 'http://fixture.local/page',
+    out_dir: `/tmp/${'d'.repeat(400)}`, expect_url: `/${'e'.repeat(400)}`,
+    frames_excluded: undefined, pilot: true,
+  }
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'await_pick', started, events: [started] } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'started evidence' })
+    const events = r.events as Array<Record<string, unknown>>
+    const ev = events.find((e) => e.type === 'started') as Record<string, unknown>
+    assert.equal(ev.attached, true, 'attached reaches the started event row')
+    assert.equal(String(ev.out_dir).length, 300, 'out_dir is clipped to the started cap')
+    assert.equal(String(ev.expect_url).length, 300, 'expect_url is clipped to the started cap')
+    assert.equal(String(ev.url), 'http://fixture.local/page', 'url keeps its existing shape')
+  })
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'await_pick', events: [{ type: 'started', ok: true, url: 'http://fixture.local/page' }] } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'old started shape' })
+    const ev = (r.events as Array<Record<string, unknown>>)[0] as Record<string, unknown>
+    assert.equal('attached' in ev, false, 'no engine key = no bridge key (attached)')
+    assert.equal('out_dir' in ev, false, 'no engine key = no bridge key (out_dir)')
+    assert.equal('expect_url' in ev, false, 'no engine key = no bridge key (expect_url)')
+  })
+})
+
+test('read：matched_count/matched_zero 到达桥面（缺键不补）', async () => {
+  await withHarness({
+    routes: [
+      { type: 'read', lineIncludes: '"selector":"#x"', respond: { ok: true, what: 'text', selector: '#x', value: 'first', matched_count: 3 } },
+      { type: 'read', lineIncludes: '"selector":"#none"', respond: { ok: true, what: 'text', selector: '#none', value: null, matched_count: 0, matched_zero: true } },
+      { type: 'read', lineIncludes: '"selector":"#v"', respond: { ok: true, what: 'value', selector: '#v', value: 'v' } },
+    ],
+  }, async (h) => {
+    const one = await h.call({ op: 'read', what: 'text', selector: '#x' })
+    assert.equal(one.matched_count, 3, 'the match count reaches the caller')
+    assert.equal('matched_zero' in one, false, 'a nonzero count never invents matched_zero')
+    const zero = await h.call({ op: 'read', what: 'text', selector: '#none' })
+    assert.equal(zero.matched_count, 0)
+    assert.equal(zero.matched_zero, true, 'zero hits are distinguishable from an empty value')
+    const none = await h.call({ op: 'read', what: 'value', selector: '#v' })
+    assert.equal('matched_count' in none, false, 'no engine count = no bridge key')
+    assert.equal('matched_zero' in none, false)
+  })
+})
+
+test('act scroll：container + scroll_target/source/ambiguous_candidates 到达桥面（超长裁剪）', async () => {
+  await withHarness({
+    routes: [{
+      type: 'act', targetIncludes: 'scrolling',
+      respond: {
+        ok: true, op: 'scroll', target: 'page', executed: true, ref: null, how: 'scrolled',
+        changed: true, moved: true, delta: 120, url: 'http://fixture.local/page',
+        scroll_target: `div#${'t'.repeat(400)}`, scroll_target_source: 'fallback',
+        ambiguous_candidates: 2, container: `div#${'c'.repeat(400)}`,
+        scroll: { scrollTop: 400, scrollHeight: 1200, clientHeight: 800 },
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'act', act_op: 'scroll', target: 'scrolling-target', to: 'bottom' })
+    assert.equal(r.ok, true)
+    assert.equal(String(r.scroll_target).length, 300, 'scroll_target is clipped to its cap')
+    assert.equal(r.scroll_target_source, 'fallback', 'the source fact survives')
+    assert.equal(r.ambiguous_candidates, 2, 'the fallback candidate count survives')
+    assert.equal(String(r.container).length, 120, 'container is clipped to its cap')
+  })
+  await withHarness({
+    routes: [{ type: 'act', targetIncludes: 'plainscroll', respond: {
+      ok: true, op: 'scroll', target: '#list', executed: true, ref: 'e1', how: 'scrolled',
+      changed: false, moved: false, url: 'http://fixture.local/page',
+    } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'act', act_op: 'scroll', target: 'plainscroll-target' })
+    assert.equal('container' in r, false, 'standard path = no container key')
+    assert.equal('scroll_target' in r, false, 'no engine surface facts = no keys')
+  })
+})
+
+test('drive_close：note（未起驾驶）与 already（重复关闭）到达桥面', async () => {
+  const note = `no pilot driver was started in this session ${'n'.repeat(400)}`
+  await withHarness({
+    routes: [{ type: 'driveClose', respond: { ok: true, closed: false, note } }],
+  }, async (h) => {
+    const first = await h.call({ op: 'drive_close' })
+    assert.equal(first.closed, false)
+    assert.equal(String(first.note).length, 300, 'the no-driver note reaches the caller, bounded')
+  })
+  await withHarness({
+    routes: [{ type: 'driveClose', respond: { ok: true, closed: true, already: true, out_dir: '/tmp/pilot-closed' } }],
+  }, async (h) => {
+    const second = await h.call({ op: 'drive_close' })
+    assert.equal(second.closed, true)
+    assert.equal(second.already, true, 'a repeated close is visible as already:true')
+    assert.equal(second.out_dir, '/tmp/pilot-closed')
+  })
+})
+
+test('events[] handoff：完整交接块到达桥面事件行（有界、缺键不补）', async () => {
+  const handoff = {
+    stop_code: 'off_task_page', step_id: 2, goal_digest: 'g', expect_url: '/page',
+    why_stuck: { summary: 's', evidence: { off_envelope: 'http://away.invalid/x' } },
+    what_would_unblock: ['redirect back'], pool: ['LEAK'], candidates: ['LEAK'],
+  }
+  await withHarness({
+    routes: [{ type: 'drive', respond: {
+      ok: true, status: 'handoff', stop_code: 'off_task_page',
+      events: [{ type: 'handoff', pilot: true, unsolicited: true, handoff }],
+    } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'handoff event' })
+    const ev = (r.events as Array<Record<string, unknown>>).find((e) => e.type === 'handoff') as Record<string, unknown>
+    const ho = ev.handoff as Record<string, unknown>
+    assert.ok(ho !== undefined, 'the handoff block reaches the events row')
+    assert.equal(ho.stop_code, 'off_task_page')
+    assert.equal(ho.step_id, 2)
+    assert.equal(ho.expect_url, '/page')
+    assert.ok(!('pool' in ho) && !('candidates' in ho), 'the events row never carries pool/candidate rows')
+    assert.equal('why_stuck' in ho, false, 'the evidence block stays dropped (top-level facts only)')
+  })
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'await_pick', events: [{ type: 'handoff', pilot: true }] } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'bare handoff event' })
+    const ev = (r.events as Array<Record<string, unknown>>)[0] as Record<string, unknown>
+    assert.equal('handoff' in ev, false, 'a handoff event without a block invents no key')
+  })
+})
+
+test('drive：首轮响应 started 块到达桥面（有界、缺键不补）', async () => {
+  const started = {
+    type: 'started', ok: true, attached: true, url: 'http://fixture.local/page',
+    out_dir: '/tmp/pilot-started', expect_url: '/page', pilot: true,
+    frames_excluded: [{ origin: `http://frame.test/${'z'.repeat(400)}`, index: 2 }],
+    code: `c${'o'.repeat(200)}`, reason: `r${'e'.repeat(400)}`,
+  }
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'await_pick', started } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'started block' })
+    const st = r.started as Record<string, unknown>
+    assert.ok(st !== undefined, 'the started block reaches the first drive response')
+    assert.equal(st.ok, true)
+    assert.equal(st.attached, true)
+    assert.equal(st.url, 'http://fixture.local/page')
+    assert.equal(st.out_dir, '/tmp/pilot-started')
+    assert.equal(st.expect_url, '/page')
+    assert.equal(String(st.code).length, 120, 'code is clipped')
+    assert.equal(String(st.reason).length, 300, 'reason is clipped')
+    const frames = st.frames_excluded as Array<{ origin: string; index: number }>
+    assert.equal(frames.length, 1)
+    assert.equal(frames[0]!.origin.length, 120, 'excluded frame origin shares the handoff cap')
+  })
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'await_pick' } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'no started block' })
+    assert.equal('started' in r, false, 'no engine started block = no bridge key')
+  })
+})
+
+test('drive_close summary：failed_asks/cache/expect_url/code/reason/last_error 到达桥面', async () => {
+  const summary = {
+    type: 'pilot_end', pilot: true, ok: false, stop_code: 'off_task_page', steps: 3, max_steps: 8,
+    conf_floor: 0.5, model_asks: 2, rule_picks: 1, model_picks: 1, handoffs: 1, fallbacks: 0,
+    driver: 'model', failed_asks: 1, aborted: false,
+    cache: { hits: 4, misses: 2, extra: 'LEAK' },
+    url: 'http://fixture.local/detail',
+    out_dir: `/tmp/${'o'.repeat(400)}`,
+    expect_url: `/${'e'.repeat(400)}`,
+    code: `c${'o'.repeat(200)}`,
+    reason: `r${'e'.repeat(400)}`,
+    last_error: `l${'a'.repeat(400)}`,
+    pool: ['LEAK'],
+  }
+  await withHarness({
+    routes: [{ type: 'driveClose', respond: {
+      ok: true, closed: true, pilot: true, attached: true, steps: 3, model_asks: 2,
+      out_dir: '/tmp/pilot-summary', summary, events: [],
+    } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive_close' })
+    const sm = r.summary as Record<string, unknown>
+    assert.equal(sm.failed_asks, 1, 'failed asks reach the caller')
+    assert.deepEqual(sm.cache, { hits: 4, misses: 2 }, 'cache is bounded to the two counts')
+    assert.equal(sm.driver, 'model')
+    assert.equal(String(sm.out_dir).length, 300, 'out_dir is clipped by the summary cap')
+    assert.equal(String(sm.expect_url).length, 300, 'expect_url is clipped by the summary cap')
+    assert.equal(String(sm.code).length, 120, 'code is clipped by the summary cap')
+    assert.equal(String(sm.reason).length, 300, 'reason is clipped by the summary cap')
+    assert.equal(String(sm.last_error).length, 300, 'last_error is clipped by the summary cap')
+    assert.ok(!('pool' in sm), 'engine extras never leak through the summary')
+  })
+  await withHarness({
+    routes: [{ type: 'driveClose', respond: {
+      ok: true, closed: true, summary: { type: 'pilot_end', pilot: true, stop_code: 'final_signal_held', steps: 1 },
+    } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive_close' })
+    const sm = r.summary as Record<string, unknown>
+    for (const key of ['failed_asks', 'cache', 'expect_url', 'code', 'reason', 'last_error']) {
+      assert.equal(key in sm, false, `no engine ${key} = no bridge key`)
+    }
   })
 })
 

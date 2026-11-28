@@ -11,7 +11,7 @@
 - **空串语义**：`""` = 自动/不覆盖（不是「关闭」）。
 - **作用点**是人工维护的导航提示（解析结果以代码为准）；它不属于 schema 字段。
 
-本表覆盖 **33 个配置键 / 8 组**；另有 11 个 provider-only 键见文末例外段（**不属于配置面**）。
+本表覆盖 **34 个配置键 / 8 组**；另有 11 个 provider-only 键见文末例外段（**不属于配置面**）。
 
 ## 决策模型产物（4 键）
 
@@ -22,7 +22,7 @@
 | `HF_HOME` | `""`（自动/不覆盖） | HuggingFace 根目录；空 = 默认缓存位置 | `src/model/laya-onnx.ts`（HF 缓存根） |
 | `HF_HUB_CACHE` | `""`（自动/不覆盖） | HuggingFace hub 缓存；空 = 默认位置 | `src/model/laya-onnx.ts`（HF hub 缓存） |
 
-## 决策服务（统一配置）（9 键）
+## 决策服务（统一配置）（10 键）
 
 | 键 | 内建默认 | 说明 | 作用点 |
 | --- | --- | --- | --- |
@@ -30,11 +30,12 @@
 | `AMBERFLOW_DECISION_MODEL` | `""`（自动/不覆盖） | 线上模型名；无服务地址时是本地 checkpoint（空 = english；可填 multilingual） | `src/model/decision-service.ts` / `src/model/checkpoint.ts`（无地址时选本地 checkpoint） |
 | `AMBERFLOW_DECISION_API_KEY` | `""`（自动/不覆盖） | 线上服务密钥；本地自托管可空 | `src/model/decision-service.ts`（鉴权；掩码展示） |
 | `AMBERFLOW_DECISION_PROTOCOL` | `""`（自动/不覆盖） | systemone 或 openai-decisions；空 = 按 URL 自动推断 | `src/model/decision-service.ts`（协议推断覆盖） |
-| `AMBERFLOW_DECISION_FLOOR` | `""`（自动/不覆盖） | 闸门刻度；空 = 不覆盖 provider 自报/全局 0.25；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖 | `src/model/decision-service.ts`（闸门刻度） |
+| `AMBERFLOW_DECISION_FLOOR` | `""`（自动/不覆盖） | 闸门刻度；空 = 不覆盖 provider 自报/全局缺省（0.5）；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖 | `src/model/decision-service.ts`（闸门刻度） |
 | `AMBERFLOW_DECISION_SCORE_KIND` | `calibrated_prob` | score 语义：calibrated_prob/entropy_conf/rank_only | `src/model/decision-service.ts`（score 语义） |
 | `AMBERFLOW_DECISION_TIMEOUT_MS` | `30000` | 单次请求超时（毫秒） | `src/model/decision-service.ts`（单请求超时） |
 | `AMBERFLOW_DECISION_STATE_CONTEXT` | `1` | 1 = choice 题带 url/title/正文；0 = 只带 goal | `src/model/decision-service.ts`（choice 题上下文） |
 | `AMBERFLOW_DECISION_MIN_OPTIONS` | `1` | choice 选项下限；自托管 JevK5 用 2 | `src/model/decision-service.ts`（choice 选项下限） |
+| `AMBERFLOW_DECISION_HEADERS` | `""`（自动/不覆盖） | 额外请求头（JSON 对象，如 {"x-opencode-session":"…"}）；空/坏 JSON = 不带头。路由头与 Authorization 分开：前者路由，后者身份 | `src/model/decision-service.ts`（额外请求头） |
 
 ## 外层 LLM（事后审计）（3 键）
 
@@ -65,7 +66,7 @@
 | 键 | 内建默认 | 说明 | 作用点 |
 | --- | --- | --- | --- |
 | `AMBERFLOW_HEADFUL` | `0` | 1 = 显示浏览器窗口 | `src/cli/start.ts` / `src/cli/test.ts`（CLI 旗标默认值） |
-| `AMBERFLOW_CONF_FLOOR` | `""`（自动/不覆盖） | 闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局 0.25 | `src/support/run-defaults.ts` → `src/app/app-runner.ts`（闸门刻度覆盖） |
+| `AMBERFLOW_CONF_FLOOR` | `""`（自动/不覆盖） | 闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局缺省（0.5） | `src/support/run-defaults.ts` → `src/app/app-runner.ts`（闸门刻度覆盖） |
 | `AMBERFLOW_TIERED_HINT` | `0` | 1 = 打开 tiered hint 实验 | `src/support/run-defaults.ts` → `src/app/app-runner.ts`（P1 实验） |
 | `AMBERFLOW_CONFIRM_SAFE` | `1` | 1 = 危险动作仍逐次确认（默认，安全）；0 = 放行（旧行为，需显式） | `src/support/run-defaults.ts` → `src/app/app-runner.ts`（干跑证据确认） |
 | `AMBERFLOW_NO_SOURCES` | `0` | 1 = 跳过应用数据腿 | `src/support/run-defaults.ts` → `src/app/app-runner-cli.ts`（跳过数据腿） |
@@ -77,7 +78,7 @@
 | --- | --- | --- | --- |
 | `AMBERFLOW_AMBIGUOUS_ORDERING` | `dom-preorder` | on_ambiguous:act 的歧义命中顺序：dom-preorder（缺省，命中 act 时刻 DOM 序首个 actionable 候选）\| pool-order（旧池序，回退开关） | `src/engine/executor.ts`（act 歧义命中顺序） |
 | `AMBERFLOW_ID_FALLBACK` | `1` | act 的 #id hint 池内未命中时是否做 live-DOM getElementById 单点直查兜底：1（缺省）= 兜底；0 = 维持旧 target_not_found（回退开关） | `src/engine/executor.ts`（#id 直查兜底） |
-| `AMBERFLOW_ACT_POOL_CAP` | `""`（自动/不覆盖） | act 池上限（decision.act_pool_cap；空 = 引擎默认 40）。仅观测面可配；默认值调整需另行变更 | `src/engine/executor.ts`（act 落空归因的池帽回显） |
+| `AMBERFLOW_ACT_POOL_CAP` | `""`（自动/不覆盖） | act 池上限（decision.act_pool_cap；空 = 引擎默认 64）。仅观测面可配；默认值调整需另行变更 | `src/engine/executor.ts`（act 落空归因的池帽回显） |
 | `AMBERFLOW_POOL_QUOTA_MODE` | `legacy` | 池构建配额模型：legacy（缺省，优先级逐出）\| quota（双配额：viewport 保底 + id-backed 保留 + 壳元素限额；灰度站点显式开启） | `src/engine/extraction.ts`（池配额模型） |
 
 ## 实验开关（opt-in）（1 键）

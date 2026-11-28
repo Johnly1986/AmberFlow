@@ -3,9 +3,9 @@
   "sample_goal": "TEST_GOAL_123",
   "prompts": {
     "decision.choice": {
-      "version": 1,
-      "chars": 177,
-      "sha256": "dba652ff3b762de704aacbaed8977697873b62195163b1273f1762c04213376c"
+      "version": 2,
+      "chars": 322,
+      "sha256": "6b27b002ef7ff7ebe4b85d55820abd17a88907ea67347f4db6a575136dbc719a"
     },
     "picker.choice": {
       "version": 1,

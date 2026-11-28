@@ -103,7 +103,9 @@ function outcomeFromChoice(
   const probs = probRecord(answer);
   const sorted = Object.values(probs).sort((a, b) => b - a);
   const rawChoice = answer?.choice;
-  const ref = typeof rawChoice === "string" && asked.includes(rawChoice) ? rawChoice : null;
+  // 显式弃权：`none` 是池外值，被判为 null 之前先记下模型"确实说不行"这个判断。
+  const saidNone = typeof rawChoice === "string" && rawChoice.trim().toLowerCase() === "none";
+  const ref = !saidNone && typeof rawChoice === "string" && asked.includes(rawChoice) ? rawChoice : null;
   return {
     ref,
     score: answer?.confidence ?? sorted[0] ?? 0,
@@ -116,6 +118,7 @@ function outcomeFromChoice(
     options: sorted.length || asked.length,
     passthrough: true,
     probs,
+    ...(saidNone ? { abstained: true } : {}),
   };
 }
 

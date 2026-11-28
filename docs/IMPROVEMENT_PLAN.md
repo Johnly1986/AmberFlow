@@ -127,7 +127,7 @@
 
 ### 2.3 常量配置写死、出处不统一：键单源了，读取点/调参数/文档没单源
 
-**已单源的部分**：`config-schema.ts` 33 键/8 组（16 静态默认、17 动态空、4 legacy 别名、3 secret）；`RC_GROUPS`/`CONFIG_KEYS`/`DECISION_SERVICE_KEYS`/`RUN_DEFAULT_KEYS` 均由它派生；配置示例 JSON 由 `tools/config-example.ts` 生成 + `--check`；`DEFAULT_CONF_FLOOR=0.25`、`DEFAULT_DECISION_TIMEOUT_MS=30_000` 已分别被 3/4 个消费点共用；`applyEnvNoOverwrite` 统一层叠语义。
+**已单源的部分**：`config-schema.ts` 33 键/8 组（16 静态默认、17 动态空、4 legacy 别名、3 secret）；`RC_GROUPS`/`CONFIG_KEYS`/`DECISION_SERVICE_KEYS`/`RUN_DEFAULT_KEYS` 均由它派生；配置示例 JSON 由 `tools/config-example.ts` 生成 + `--check`；`DEFAULT_CONF_FLOOR`（基线时 0.25，后调至 0.5）、`DEFAULT_DECISION_TIMEOUT_MS=30_000` 已分别被 3/4 个消费点共用；`applyEnvNoOverwrite` 统一层叠语义。
 
 **出处漂移 9 例，其中 4 例已实测不一致**：
 

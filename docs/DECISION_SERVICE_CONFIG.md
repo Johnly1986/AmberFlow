@@ -17,16 +17,17 @@
 | 键 | 默认 | 含义 |
 |---|---|---|
 | `AMBERFLOW_DECISION_PROTOCOL` | 按 URL 推断 | `systemone`（TypeSafe/Jev/Kev/百炼/自托管）或 `openai-decisions`（OpenAI `POST /v1/decisions` 及兼容网关） |
-| `AMBERFLOW_DECISION_FLOOR` | 全局面板 0.25 | 该服务的置信闸门刻度（0–1）；跨服务刻度不可比，见 `score_kind` |
+| `AMBERFLOW_DECISION_FLOOR` | 全局面板 0.5 | 该服务的置信闸门刻度（0–1）；跨服务刻度不可比，见 `score_kind` |
 | `AMBERFLOW_DECISION_SCORE_KIND` | `calibrated_prob` | `calibrated_prob` / `entropy_conf` / `rank_only`（服务自报语义） |
 | `AMBERFLOW_DECISION_TIMEOUT_MS` | `30000` | 单次请求超时 |
 | `AMBERFLOW_DECISION_STATE_CONTEXT` | 开 | `0` = choice 题不再带 url/title/main_text 上下文（消融口径） |
 | `AMBERFLOW_DECISION_MIN_OPTIONS` | `1` | choice 选项下限；自托管 JevK5 需要 `2`（不足时结构上没得选，不发请求） |
+| `AMBERFLOW_DECISION_HEADERS` | 空（不带头） | 额外请求头（JSON 对象，如 `{"x-opencode-session":"…"}`）。**与 Authorization 分开**：前者是路由，后者是身份——网关要求路由头时只给 Bearer 会让请求停在鉴权前一步，而错误串读起来像"模型没权限"。空/坏 JSON = 不带头（降级为服务端拒绝，不崩计划） |
 
 配置优先级与原有层叠一致：**CLI 旗标 > 环境变量 > 项目配置 > 用户配置 > 旧 rc > 内建缺省**
 （`amber config set` / `--project` / 环境变量三种渠道都行）。`amber config show` 对 API key 做掩码。
-闸门刻度的生效顺序是：**`--conf-floor`（或配置 `AMBERFLOW_CONF_FLOOR`）> `AMBERFLOW_DECISION_FLOOR` > 全局面板 0.25**——
-前者是"本次/本项目的运行参数覆盖"，后者是"这个决策服务自报的刻度"，报告里 `conf_floor.source`（cli/config/provider）会写明本次用了哪一层。
+闸门刻度的生效顺序是：**`--conf-floor`（或配置 `AMBERFLOW_CONF_FLOOR`）> `meta.policy.conf_floor`（应用声明）> `AMBERFLOW_DECISION_FLOOR` / provider 自报 > 全局面板 0.5**——
+最前是"本次/本项目的运行参数覆盖"，中间是应用作者声明的刻度，最后是"这个决策服务自报的刻度"；报告里 `conf_floor.source`（cli/config/app/provider/default）会写明本次用了哪一层。应用侧声明面见 APP_SCRIPT_AUTHORING §8。
 配置键与默认值的唯一出处是 [src/support/config-schema.ts](../src/support/config-schema.ts)；
 示例由 `npm run config:example` 生成，`npm run check` 会校验示例没有漂移。
 
