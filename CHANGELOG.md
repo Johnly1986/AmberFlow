@@ -4,6 +4,21 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — `apps new` 骨架生成物语法修复（块注释终止序列）
+
+### 修复
+
+- **`amber apps new <id>` 生成的 `app.mjs` 此前是坏的，一加载就 `SyntaxError`。**
+  根因：`PLAN_PLAYBOOK_TEXT` 第 ③ 条含字面量 `正向锚（url_*/css_*）`，其中注释终止序列
+  在 `flowScriptTemplate` 逐行前缀 ` * ` 拼进骨架头部块注释时**提前闭合了注释**，其后
+  模板正文随之变成裸代码；出错位置为生成物 `app.mjs` 第 13 行。用户在第一条命令
+  （`apps new` → `apps check`）上即撞到失败。
+  该缺陷此前**穿过了整条 `npm run check`**：`prompt-hit` 的 doc 组拿该常量当**校验基准**
+  比对 `docs/APP_SCRIPT_AUTHORING.md`，源码与文档同步即恒绿，故对该缺陷免疫；而「这段文本
+  能否安全嵌进 JS 块注释」是第二个维度，没有任何组在校验。
+  修法：嵌入前对**要嵌入的副本**打散终止序列。常量本身与其在文档中的逐字投影均不变，
+  故 doc 组单源关系保持成立。
+
 ## [Unreleased] — 文档承诺与真实投影对齐（`frames_excluded` 可见性 + `handoff_open` 键名）
 
 > 两个缺陷同属「文档承诺了、真实投影里没有」：证据算了也进了交接，但两道白名单各漏一半，

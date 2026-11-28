@@ -99,7 +99,7 @@ function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl:
   const host = hosts[0] ?? "example.com";
   // 规划引导（唯一出处 planning-playbook.ts）：骨架注释是 Agent 建应用的第一眼——
   // 工具结果直接带源码，这里的六步法（v2.1，走查先行）在"要写应用的那个瞬间"被读到。
-  const playbook = PLAN_PLAYBOOK_TEXT.split("\n").map((l) => (l ? ` * ${l}` : " *")).join("\n");
+  const playbook = PLAN_PLAYBOOK_TEXT.split("*/").join("* /").split("\n").map((l) => (l ? ` * ${l}` : " *")).join("\n");
   return `/**
  * ${id} —— flow 应用：流程优先由决策语句组成（ctx.step(goal, { done })）。
  *
